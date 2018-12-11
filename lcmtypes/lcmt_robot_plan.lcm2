@@ -1,0 +1,25 @@
+package kuka;
+
+// Define a single set of joint states for the robot.
+struct lcmt_robot_plan {
+ // The start timestamp and dt in microseconds
+ int64_t t0;
+ int64_t dt;
+
+ // The size of the robot configuration (q) and control (u)
+ int32_t q_size;
+ int32_t u_size;
+
+ // The number of time steps in the plan
+ int32_t num_time_steps;
+
+ // The reference joint positions and velocities
+ float joint_position_desired[q_size*num_time_steps];
+ float joint_velocity_desired[q_size*num_time_steps];
+
+ // The reference feedback matricies
+ float joint_accel_desired[2*q_size*u_size*num_time_steps];
+ 
+ // The nominal controller reference.
+ float u_nominal[u_size*num_time_steps];
+}

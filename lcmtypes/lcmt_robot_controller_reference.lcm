@@ -1,0 +1,23 @@
+package kuka;
+
+// Define a single set of joint states for the robot.
+struct lcmt_robot_controller_reference {
+ // The timestamp in microseconds.
+ int64_t utime;
+
+ // The number of joints.
+ int32_t num_joints;
+
+ // The reference joint positions.
+ double joint_position_desired[num_joints];
+
+ // The reference joint positions.
+ double joint_velocity_desired[num_joints];
+
+ // The reference joint positions.
+ double joint_accel_desired[num_joints];
+ 
+ // The nominal controller reference.
+ double u_nominal[num_joints];
+ 
+}

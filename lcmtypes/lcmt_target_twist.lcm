@@ -1,0 +1,12 @@
+package kuka;
+struct lcmt_target_twist
+{
+ // The timestamp in microseconds.
+ int64_t  utime;
+ 
+ // The pose (position and orientation)
+ float    position[3];
+ float    velocity[3];
+ float    orientation[4];
+ float    angular_velocity[3];
+}
