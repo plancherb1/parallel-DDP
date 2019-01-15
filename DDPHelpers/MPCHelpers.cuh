@@ -32,9 +32,13 @@
 #include <lcm/lcm-cpp.hpp>
 #include "../lcmtypes/drake/lcmt_iiwa_status.hpp"
 #include "../lcmtypes/drake/lcmt_iiwa_command.hpp"
+#include "../lcmtypes/drake/lcmt_trajectory_f.hpp"
+#include "../lcmtypes/drake/lcmt_trajectory_d.hpp"
 #include "../lcmtypes/kuka/lcmt_target_twist.hpp"
+#include <type_traits>
 
-const char *GOAL_CHANNEL        = "GOAL_CHANNEL";
+const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
+const char *ARM_TRAJ_CHANNEL    = "TRAJ_CHANNEL";
 const char *ARM_STATUS_CHANNEL  = "IIWA_STATUS";//"ARM_STATUS_CHANNEL";
 const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
 #define GOAL_PUBLISHER_RATE_MS 30
@@ -481,35 +485,25 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
         int start, delta; singleLoopVals(&start,&delta);
         for (int ind = start; ind < STATE_SIZE; ind += delta){x0[ind] = xActual[ind];}
         T *xk = &x0[0];    T *xkp1 = &x0[ld_x];    T *xpk = &xprev[0];     T *uk = &u0[0];     T *KTk = &KT0[0];   T *dk = &d0[0];
-        // T *xk = &x0[0];                     T *xkp1 = &xk[ld_x];            T *dk = &d0[0];
-        // T *xpk = &xprev[ld_x*shiftAmount];  T *uk = &u0[ld_u*shiftAmount];  T *KTk = &KT0[ld_KT*DIM_KT_c*shiftAmount];      
         #pragma unroll
         // simulate forward the first block
         for(int k = 0; k < N_ROLLOUT-1; k++){
             // load in the x and u and compute controls
             // computeControlSimple<T>(uk,xk,xpk,KTk,s_dx,ld_KT);
-            // hd__syncthreads();
-            // clipVals<T,CONTROL_SIZE>(uk,-10,10);
-            // hd__syncthreads();
-            // finiteCheck<T,CONTROL_SIZE>(uk,0.01);
-            // hd__syncthreads();
+            hd__syncthreads();
             // then use this control to compute the new state
             T *s_xkp1 = s_dx; // re-use this shared mem as we are done with it for this loop
             _integrator<T>(s_xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,nullptr);
             hd__syncthreads();
-            // finiteCheck<T,STATE_SIZE>(s_xkp1,xk);
-            // hd__syncthreads();
             // then write to global memory unless "final" state where we just use for defect on boundary
             #pragma unroll
             for (int ind = start; ind < STATE_SIZE; ind += delta){
-                //if(abs((s_xkp1[ind] - xk[ind])/xk[ind]) > 0.5){s_xkp1[ind] = xk[ind];}
                 if (k < N_ROLLOUT-1 || k == NUM_TIME_STEPS - 2){xkp1[ind] = s_xkp1[ind];}
                 else {dk[ind] = s_xkp1[ind] - xkp1[ind];}
             }
             // update the offsets for the next pass or break to zoh
             xk = xkp1;      xkp1 += ld_x;   dk += ld_d;     
             uk += ld_u;     xpk += ld_x;    KTk += ld_KT*DIM_KT_c;
-            // if (k + shiftAmount < NUM_TIME_STEPS-2){uk += ld_u; xpk += ld_x; KTk += ld_KT*DIM_KT_c;}
             hd__syncthreads();
         }
     }
@@ -739,10 +733,10 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
         for (int ind = start; ind < STATE_SIZE; ind += delta){
             T val = (static_cast<T>(1.0-fraction)*xk_d[ind] + static_cast<T>(fraction)*xk_u[ind]);
             dx[ind] = (ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]) - val;
-            // printf("dx[%f] for val[%f] vs prev[%f]\n",dx[ind],(ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]),val);
+            //printf("dx[%f] for val[%f] vs prev[%f]\n",dx[ind],(ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]),val);
             if(ind < NUM_POS){q_out[ind] = val; if(!isfinite(q_out[ind])){q_out[ind] = 0;}}    //else{qd_out[ind-NUM_POS] = val;}
         }
-        hd__syncthreads();
+        // printf("dx[%f %f %f %f %f %f %f][%f %f %f %f %f %f %f]\n",dx[0],dx[1],dx[2],dx[3],dx[4],dx[5],dx[6],dx[7],dx[8],dx[9],dx[10],dx[11],dx[12],dx[13]);
         // and formulate the control from that delta (and save out KT -> K)
         #pragma unroll
         for (int r = start; r < CONTROL_SIZE; r += delta){
@@ -750,8 +744,8 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
             #pragma unroll
             for (int c = 0; c < STATE_SIZE; c++){val -= KTk[c + r*ld_KT]*dx[c];}
             u_out[r] = static_cast<double>(val);
-            if(!isfinite(u_out[r])){u_out[r] = 0;}
-            // printf("u_out[%f] vs. u_in[%f] for ind[%d]\n",u_out[r],uk[r],r);
+            //if(!isfinite(u_out[r])){u_out[r] = 0;}
+            //printf("u_out[%f] vs. u_in[%f] for ind[%d]\n",u_out[r],uk[r],r);
         }
         return 0;
     }
@@ -1002,159 +996,235 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
     }
 // 3: MPC Main Algorithm Wrappers //
 
-// 4: LCM helpers// TODO: currently unstable need to update
-    // template <typename T>
-    // class LCM_TrajRunner_Handler {
-    //     public:
-    //         trajVars<T> *vars; // local pointer to the global traj variables
-    //         lcm::LCM *lcm_ptr; // ptr to LCM object for publish ability
-    //         int first_pass;
+// 4: LCM helpers // 
+    // trajRunner takes messages of new trajectories to execute and current status's and returns torque commands
+    template <typename T>
+    class LCM_TrajRunner {
+        public:
+            T *x, *u, *KT; // current trajectories
+            int ld_x, ld_u, ld_KT; // dimms
+            int64_t t0; // t0 for the current traj
+            lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
+            int ready;
 
-    //         // init and store the global location and lock and lcm ptr
-    //         LCM_TrajRunner_Handler(trajVars<T> *vars_in, lcm::LCM *lcm_in, int fp_in) : vars(vars_in), lcm_ptr(lcm_in), first_pass(fp_in) {} 
-    //         ~LCM_TrajRunner_Handler(){} // do nothing in the destructor
+            // init local vars to match size of passed in vars and get LCM
+            LCM_TrajRunner(int _ld_x, int _ld_u, int _ld_KT) : ld_x(_ld_x), ld_u(_ld_u), ld_KT(_ld_KT) {
+                x = (T *)malloc(ld_u*NUM_TIME_STEPS*sizeof(T));                 u = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));
+                KT = (T *)malloc(ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));      ready = 0;
+                /*lcm_ptr = new lcm::LCM;*/  if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
+            } 
+            // free and delete
+            ~LCM_TrajRunner(){free(x); free(u); free(KT); /*delete lcm_ptr;*/}
+            
+            // lcm new traj callback function
+            void newTrajCallback_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){
+                memcpy(x, &(msg->x[0]), ld_x*NUM_TIME_STEPS*sizeof(float));
+                memcpy(u, &(msg->u[0]), ld_u*NUM_TIME_STEPS*sizeof(float));
+                memcpy(KT,&(msg->KT[0]),ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(float));
+                t0 = msg->utime;
+                ready = 1;
+            }
+            void newTrajCallback_d(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_d *msg){
+                memcpy(x, &(msg->x[0]), ld_x*NUM_TIME_STEPS*sizeof(double));
+                memcpy(u, &(msg->u[0]), ld_u*NUM_TIME_STEPS*sizeof(double));
+                memcpy(KT,&(msg->KT[0]),ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(double));
+                t0 = msg->utime;
+                ready = 1;
+            }
+
+            // lcm STATUS callback function
+            void statusCallback(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){ 
+                if(!ready){return;}
+                //construct output msg container and begin to load it with data
+                drake::lcmt_iiwa_command dataOut;   
+                dataOut.num_joints = static_cast<int32_t>(NUM_POS);   dataOut.num_torques = static_cast<int32_t>(CONTROL_SIZE);
+                dataOut.utime = static_cast<int64_t>(msg->utime);
+                dataOut.joint_position.resize(dataOut.num_joints);    dataOut.joint_torque.resize(dataOut.num_torques);
+                // get the correct controls for this time
+                int err = getHardwareControls<T>(&(dataOut.joint_position[0]), &(dataOut.joint_torque[0]), 
+                                                 x, u, KT, static_cast<double>(t0), 
+                                                 &(msg->joint_position_measured[0]), &(msg->joint_velocity_estimated[0]),  
+                                                 static_cast<double>(msg->utime), ld_x, ld_u, ld_KT);
+                // then publish
+                if (!err){lcm_ptr.publish(ARM_COMMAND_CHANNEL,&dataOut);}
+                else{printf("[!]CRITICAL ERROR: Asked to execute beyond bounds of current traj.\n");}
+            }
+    };
+
+    template <typename T>
+    __host__
+    void runTrajRunner(matDimms *dimms){
+        // init LCM and allocate a traj runner
+        lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner main loop\n");}
+        LCM_TrajRunner<T> tr = LCM_TrajRunner<T>(dimms->ld_x, dimms->ld_u, dimms->ld_KT);
+        // subscribe to everything
+        lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_CHANNEL, &LCM_TrajRunner<T>::statusCallback, &tr);
+        lcm::Subscription *trajSub;
+        if (std::is_same<T, float>::value){
+            trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_f, &tr);
+        }
+        else{
+            trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_d, &tr);   
+        }
+        // only execute latest message (no lag)
+        statusSub->setQueueCapacity(1); trajSub->setQueueCapacity(1);
+        // handle forever
+        while(0 == lcm_ptr.handle());
+    }
+
+    template <typename T>
+    class LCM_MPCLoop_Handler {
+        public:
+            GPUVars<T> *gvars; // local pointer to the global algorithm variables
+            CPUVars<T> *cvars; // local pointer to the global algorithm variables
+            matDimms *dimms; // pointer to mat dimms
+            trajVars<T> *tvars; // local pointer to the global traj variables
+            algTrace<T> *data; // local pointer to the global algorithm trace data stuff
+            int iterLimit; int timeLimit; bool mode; // limits for solves and cpu/gpu mode
+            lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
+
+            // init and store the global location
+            LCM_MPCLoop_Handler(GPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, int iL, int tL) : 
+                                gvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), iterLimit(iL), timeLimit(tL) {
+                                /*lcm_ptr = new lcm::LCM;*/  if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
+                                cvars = nullptr; mode = 1;}
+            LCM_MPCLoop_Handler(CPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, int iL, int tL) : 
+                                cvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), iterLimit(iL), timeLimit(tL) {
+                                /*lcm_ptr = new lcm::LCM;*/  if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
+                                gvars = nullptr; mode = 0;}
+            ~LCM_MPCLoop_Handler(){/*delete lcm_ptr;*/} // do nothing in the destructor
+
+            // lcm callback function for new arm goal
+            void handleGoal(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_target_twist *msg){
+                memcpy(gvars->xGoal,msg->position,3*sizeof(T));     memcpy(&(gvars->xGoal[3]),msg->velocity,3*sizeof(T));
+            }
         
-    //         // lcm callback function
-    //         void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
-    //             (vars->lock)->lock(); // wait for any updates to current desired traj to finish being written
-    //             //construct output msg container and begin to load it with data
-    //             //printf("Current x is %f, %f, %f, %f, %f, %f, %f\n",msg->joint_position_measured[0],msg->joint_position_measured[1],msg->joint_position_measured[2],msg->joint_position_measured[3],msg->joint_position_measured[4],msg->joint_position_measured[5],msg->joint_position_measured[6]);
-    //             drake::lcmt_iiwa_command dataOut;   
-    //             dataOut.num_joints = static_cast<int32_t>(NUM_POS);   dataOut.num_torques = static_cast<int32_t>(CONTROL_SIZE);
-    //             dataOut.utime = static_cast<int64_t>(msg->utime);     
-    //             if(first_pass){vars->t0_plant = msg->utime;    first_pass = 0;}// printf("first pass traj runner\n");}
-    //             dataOut.joint_position.resize(dataOut.num_joints);      dataOut.joint_torque.resize(dataOut.num_torques);
-    //             // get the correct controls for this time
-    //             // printf("getting controls for time %ld vs. t0 %ld\n",dataOut.utime,vars->t0_plant);
-    //             int err = getHardwareControls<T>(&(dataOut.joint_position[0]), &(dataOut.joint_torque[0]), 
-    //                                              vars->x, vars->u, vars->KT, static_cast<double>(vars->t0_plant), 
-    //                                              &(msg->joint_position_measured[0]), &(msg->joint_velocity_estimated[0]),  
-    //                                              static_cast<double>(msg->utime), vars->ld_x, vars->ld_u, vars->ld_KT);
-    //             //printf("controls comped\n");
-    //             (vars->lock)->unlock(); // release the lock after computations are done and then publish the output
-    //             if (!err){lcm_ptr->publish(ARM_COMMAND_CHANNEL,&dataOut);}// printf("data sent\n");}
-    //             else{printf("[!]CRITICAL ERROR: Asked to execute beyond bounds of current traj.\n");}
-    //         }
-    // };
-
-    // template <typename T>
-    // __host__
-    // void runTrajRunner(lcm::LCM *lcm_ptr, trajVars<T> *tvars, lcm::Subscription *sub){
-    //     // launch the thread running the trajRunner
-    //     LCM_TrajRunner_Handler<T> handler = LCM_TrajRunner_Handler<T>(tvars, lcm_ptr, 1);
-    //     sub = lcm_ptr->subscribe(ARM_STATUS_CHANNEL, &LCM_TrajRunner_Handler<T>::handleMessage, &handler);
-    //     sub->setQueueCapacity(1);
-    //     // poll the fd for updates
-    //     //int lcm_fd = lcm_ptr->getFileno();    fd_set fds;     FD_ZERO(&fds);  FD_SET(lcm_fd, &fds);   struct timeval timeout = {1,0};
-    //     while(0 == lcm_ptr->handle());
-    //     // while(1){    
-    //     //      if (select(lcm_fd + 1, &fds, 0, 0, &timeout)) {if (FD_ISSET(lcm_fd, &fds)){lcm_ptr->handle();}}
-    //     //      //struct timeval start, end;    gettimeofday(&start,NULL);  while(1){gettimeofday(&end,NULL);   if (time_delta_ms(start,end) >= 50){break;}}
-    //     // }
-    // }
-
-    // template <typename T>
-    // class LCM_MPCLoop_Handler {
-    //     public:
-    //         GPUVars<T> *gvars; // local pointer to the global algorithm variables
-    //         CPUVars<T> *cvars; // local pointer to the global algorithm variables
-    //         matDimms *dimms; // pointer to mat dimms
-    //         trajVars<T> *tvars; // local pointer to the global traj variables
-    //         algTrace<T> *data; // local pointer to the global algorithm trace data stuff
-    //         int iterLimit; int timeLimit; bool mode; // limits for solves and cpu/gpu mode
-
-    //         // init and store the global location
-    //         LCM_MPCLoop_Handler(GPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, int iL, int tL) : 
-    //                                                 gvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), iterLimit(iL), timeLimit(tL) {cvars = nullptr; mode = 1;}
-    //         LCM_MPCLoop_Handler(CPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, int iL, int tL) : 
-    //                                                 cvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), iterLimit(iL), timeLimit(tL) {gvars = nullptr; mode = 0;}
-    //         ~LCM_MPCLoop_Handler(){} // do nothing in the destructor
-        
-    //         // lcm callback function
-    //         void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
-    //             // determine if GPU or CPU mode and save down time and state pointers and try to get the 
-    //             //    global lock and compute a new MPC iter if ready else return
-    //             if(mode){if (!((gvars->lock)->try_lock())){return;}}             
-    //                else {if (!((cvars->lock)->try_lock())){return;}}       
-    //             int64_t tActual_plant = msg->utime;           
-    //             struct timeval sys_t; gettimeofday(&sys_t,NULL);        int64_t tActual_sys = get_time_us_i64(sys_t);
+            // lcm callback function for new arm status
+            void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
+                // determine if GPU or CPU mode and save down time and state pointers and try to get the 
+                //    global lock and compute a new MPC iter if ready else return
+                if(mode){if (!((gvars->lock)->try_lock())){return;}}             
+                   else {if (!((cvars->lock)->try_lock())){return;}}       
+                int64_t tActual_plant = msg->utime;           
+                struct timeval sys_t; gettimeofday(&sys_t,NULL);        int64_t tActual_sys = get_time_us_i64(sys_t);
                 
-    //             // if first load initialize timers and keep inital traj (so set xActual to x)
-    //             T *xActual_load = mode == 1 ? gvars->xActual : cvars->xActual;
-    //             if (tvars->first_pass){
-    //                 //printf("fist pass MPC loop\n");
-    //                 tvars->t0_plant = tActual_plant;    tvars->t0_sys = tActual_sys;     tvars->first_pass = false;
-    //                 #pragma unroll
-    //                 for (int i=0; i<STATE_SIZE; i++){xActual_load[i] = (T)(tvars->x)[i];}
-    //             }
-    //             // else update xActual
-    //             else{
-    //                 #pragma unroll
-    //                 for (int i=0; i<NUM_POS; i++){xActual_load[i]         = (T)(msg->joint_position_measured)[i]; 
-    //                                               xActual_load[i+NUM_POS] = (T)(msg->joint_velocity_estimated)[i];}
-    //                 if(mode){gpuErrchk(cudaMemcpy(gvars->d_xActual, gvars->xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice));}
-    //             }
+                // if first load initialize timers and keep inital traj (so set xActual to x)
+                T *xActual_load = mode == 1 ? gvars->xActual : cvars->xActual;
+                if (tvars->first_pass){
+                    //printf("fist pass MPC loop\n");
+                    tvars->t0_plant = tActual_plant;    tvars->t0_sys = tActual_sys;     tvars->first_pass = false;
+                    #pragma unroll
+                    for (int i=0; i<STATE_SIZE; i++){xActual_load[i] = (T)(tvars->x)[i];}
+                }
+                // else update xActual
+                else{
+                    #pragma unroll
+                    for (int i=0; i<NUM_POS; i++){xActual_load[i]         = (T)(msg->joint_position_measured)[i]; 
+                                                  xActual_load[i+NUM_POS] = (T)(msg->joint_velocity_estimated)[i];}
+                    if(mode){gpuErrchk(cudaMemcpy(gvars->d_xActual, gvars->xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice));}
+                }
                 
-    //             // run iLQR
-    //             if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (gvars->lock)->unlock();}
-    //             else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (cvars->lock)->unlock();}
-    //         }      
-    // };
+                // run iLQR
+                if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (gvars->lock)->unlock();}
+                else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (cvars->lock)->unlock();}
 
-    // template <typename T>
-    // __host__
-    // void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler, lcm::Subscription *sub){
-    //     sub = lcm_ptr->subscribe(ARM_STATUS_CHANNEL, &LCM_MPCLoop_Handler<T>::handleMessage, handler);
-    //     sub->setQueueCapacity(1);
-    //     while(0 == lcm_ptr->handle());
-    // }
+                // publish to trajRunner
+                if (std::is_same<T, float>::value){
+                    drake::lcmt_trajectory_f dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(float);
+                    int xSize = (dimms->ld_x)*stepsSize;            int uSize = (dimms->ld_u)*stepsSize;            int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;
+                    dataOut.x_size = xSize;                         dataOut.u_size = uSize;                         dataOut.KT_size = KTSize;
+                    dataOut.x.resize(dataOut.x_size);               dataOut.u.resize(dataOut.u_size);               dataOut.KT.resize(dataOut.KT_size);
+                    memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);   memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);   memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
+                    lcm_ptr.publish(ARM_TRAJ_CHANNEL,&dataOut);
+                }
+                else{
+                    drake::lcmt_trajectory_d dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(double);   
+                    int xSize = (dimms->ld_x)*stepsSize;            int uSize = (dimms->ld_u)*stepsSize;            int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;
+                    dataOut.x_size = xSize;                         dataOut.u_size = uSize;                         dataOut.KT_size = KTSize;
+                    dataOut.x.resize(dataOut.x_size);               dataOut.u.resize(dataOut.u_size);               dataOut.KT.resize(dataOut.KT_size);
+                    memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);   memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);   memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
+                    lcm_ptr.publish(ARM_TRAJ_CHANNEL,&dataOut);
+                }
+            }      
+    };
 
-    // template <typename T>
-    // class LCM_IIWA_STATUS_printer {
-    //     public:
-    //         // T *xGoal; 
-    //         // LCM_IIWA_STATUS_printer(GPUVars<T> *avIn){xGoal = gvars->xGoal;}
-    //         // LCM_IIWA_STATUS_printer(CPUVars<T> *avIn){xGoal = cvars->xGoal;}
-    //         LCM_IIWA_STATUS_printer(){}
-    //         ~LCM_IIWA_STATUS_printer(){}
+    template <typename T>
+    __host__
+    void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler){
+        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_CHANNEL, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
+        lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoal, handler);
+        sub->setQueueCapacity(1);   sub2->setQueueCapacity(1);
+        while(0 == lcm_ptr->handle());
+    }
 
-    //         void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){                
-    //             double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position_measured[0]), &eePos[0]);
-    //             printf("[%ld] eePos: [%f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2]);
-    //             // T eNorm = static_cast<T>(sqrt(pow(eePos[0]-xGoal[0],2) + pow(eePos[1]-xGoal[1],2) + pow(eePos[2]-xGoal[2],2)));
-    //             // printf("[%ld] eePos: [%f %f %f] w/ error:[%f]\n",msg->utime,eePos[0],eePos[1],eePos[2],eNorm);
-    //         }
-    // };
+    template <typename T>
+    class LCM_IIWA_STATUS_printer {
+        public:
+            LCM_IIWA_STATUS_printer(){}
+            ~LCM_IIWA_STATUS_printer(){}
 
-    // template <typename T>
-    // __host__
-    // void run_IIWA_STATUS_printer(lcm::LCM *lcm_ptr, LCM_IIWA_STATUS_printer<T> *handler, lcm::Subscription *sub){
-    //     sub = lcm_ptr->subscribe(ARM_STATUS_CHANNEL, &LCM_IIWA_STATUS_printer<T>::handleMessage, handler);
-    //     // sub->setQueueCapacity(1);
-    //     while(0 == lcm_ptr->handle());
-    // }
+            void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){                
+                double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position_measured[0]), &eePos[0]);
+                printf("[%ld] eePos: [%f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2]);
+            }
+    };
 
-    // template <typename T>
-    // class LCM_IIWA_COMMAND_printer {
-    //     public:
-    //         LCM_IIWA_COMMAND_printer(){}
-    //         ~LCM_IIWA_COMMAND_printer(){}
+    template <typename T>
+    __host__
+    void run_IIWA_STATUS_printer(lcm::LCM *lcm_ptr, LCM_IIWA_STATUS_printer<T> *handler){
+        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_CHANNEL, &LCM_IIWA_STATUS_printer<T>::handleMessage, handler);
+        // sub->setQueueCapacity(1);
+        while(0 == lcm_ptr->handle());
+    }
 
-    //         void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command *msg){                
-    //             double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position[0]), &eePos[0]);
-    //             printf("[%ld] eePosDes: [%f %f %f] control: [%f %f %f %f %f %f %f ]\n",msg->utime,eePos[0],eePos[1],eePos[2],
-    //                                         msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],msg->joint_torque[3],
-    //                                         msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
-    //         }
-    // };
+    template <typename T>
+    class LCM_IIWA_COMMAND_printer {
+        public:
+            LCM_IIWA_COMMAND_printer(){}
+            ~LCM_IIWA_COMMAND_printer(){}
 
-    // template <typename T>
-    // __host__
-    // void run_IIWA_COMMAND_printer(lcm::LCM *lcm_ptr, LCM_IIWA_COMMAND_printer<T> *handler, lcm::Subscription *sub){
-    //     sub = lcm_ptr->subscribe(ARM_COMMAND_CHANNEL, &LCM_IIWA_COMMAND_printer<T>::handleMessage, handler);
-    //     // sub->setQueueCapacity(1);
-    //     while(0 == lcm_ptr->handle());
-    // }
+            void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command *msg){                
+                double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position[0]), &eePos[0]);
+                printf("[%ld] eePosDes: [%f %f %f] control: [%f %f %f %f %f %f %f ]\n",msg->utime,eePos[0],eePos[1],eePos[2],
+                                            msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],msg->joint_torque[3],
+                                            msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
+            }
+    };
+
+    template <typename T>
+    __host__
+    void run_IIWA_COMMAND_printer(lcm::LCM *lcm_ptr, LCM_IIWA_COMMAND_printer<T> *handler){
+        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_COMMAND_CHANNEL, &LCM_IIWA_COMMAND_printer<T>::handleMessage, handler);
+        // sub->setQueueCapacity(1);
+        while(0 == lcm_ptr->handle());
+    }
+
+    template <typename T>
+    class LCM_traj_printer {
+        public:
+            LCM_traj_printer(){}
+            ~LCM_traj_printer(){}
+
+            void handleMessage_d(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_d *msg){                
+                printf("[%ld] new traj computed\n",msg->utime);
+            }
+            void handleMessage_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){                
+                printf("[%ld] new traj computed\n",msg->utime);
+            }
+    };
+
+    template <typename T>
+    __host__
+    void run_traj_printer(lcm::LCM *lcm_ptr, LCM_traj_printer<T> *handler){
+        if (std::is_same<T, float>::value){
+            lcm::Subscription *sub = lcm_ptr->subscribe(ARM_TRAJ_CHANNEL, &LCM_traj_printer<T>::handleMessage_f, handler);
+        }
+        else{
+            lcm::Subscription *sub = lcm_ptr->subscribe(ARM_TRAJ_CHANNEL, &LCM_traj_printer<T>::handleMessage_d, handler);
+        }
+        // sub->setQueueCapacity(1);
+        while(0 == lcm_ptr->handle());
+    }
 
     // struct SimVars{
     //     double uCom[CONTROL_SIZE];  
