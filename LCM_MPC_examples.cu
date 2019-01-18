@@ -3,8 +3,8 @@ nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadU
 ***/
 #define EE_COST 1
 #define MPC_MODE 1
-#define IGNORE_MAX_ROX_EXIT 0
-#define TOL_COST 0.00001
+#define IGNORE_MAX_ROX_EXIT 1//0
+#define TOL_COST 0//0.00001
 #define PLANT 4
 #include "DDPHelpers.cuh"
 #include <random>
@@ -12,15 +12,10 @@ nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadU
 #include <algorithm>
 #include <iostream>
 
-#define TEST_ITERS 1 // 100
 #define ROLLOUT_FLAG 0
-#define RANDOM_MEAN 0.0
-#define RANDOM_STDEV 0.001
 char errMsg[]  = "Error: Unkown code - usage is [C]PU or [G]PU with flag 1/0 for doFig8\n";
 char tot[]  = "  TOT";		char init[] = " INIT";	char fsim[]   = "  SIM";	
 char fsweep[]   = "SWEEP";	char bp[]   = "   BP";	char nis[]  = "  NIS";
-std::default_random_engine randEng(time(0)); //seed
-std::normal_distribution<double> randDist(RANDOM_MEAN, RANDOM_STDEV); //mean followed by stdiv
 
 #if PLANT == 1 // pend
 	#error "MPC example defined for KukaArm[4].\n"
@@ -331,21 +326,57 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 		// freeMemory_CPU_MPC<T>(algvars);	delete algvars;
 	}
 }
+template <typename T>
+class LCM_Fig8Goal_Handler {
+    public:
+    	double totalTime;	double zeroTime;	int inFig8;
+    	double eNormLim;	double vNormLim;
+    	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
 
-// runFig8GoalLCM
-// // take in the status
+    	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim) : totalTime(tTime), eNormLim(eLim), vNormLim(vLim) {
+    		zeroTime = 0;	inFig8 = 0;		if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
+    	}
+    	~LCM_Fig8Goal_Handler(){}
 
-// // figure out if we are in the goal moving time
-
-// // if so update goal
-
-// drake::lcmt_target_twist dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(float);
-//                     int xSize = (dimms->ld_x)*stepsSize;            int uSize = (dimms->ld_u)*stepsSize;            int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;
-//                     dataOut.x_size = xSize;                         dataOut.u_size = uSize;                         dataOut.KT_size = KTSize;
-//                     dataOut.x.resize(dataOut.x_size);               dataOut.u.resize(dataOut.u_size);               dataOut.KT.resize(dataOut.KT_size);
-//                     memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);   memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);   memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
-//                     lcm_ptr.publish(ARM_TRAJ_CHANNEL,&dataOut);
-
+		// // update goal based on status
+		void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
+			// get current goal
+			T goal[3];	double time = inFig8 ? msg->utime - zeroTime : 0;	loadFig8Goal(goal,time,totalTime);
+			// figure out if we are in the goal moving time
+			if(inFig8){
+				// then load in goal pos and zero out vel, orientation, angularVelocity (for now) -- note orientation is size 4 (quat)
+				kuka::lcmt_target_twist dataOut;               dataOut.utime = msg->utime;
+				for (int i = 0; i < 3; i++){dataOut.position[i] = goal[i];	dataOut.velocity[i] = 0;	
+											dataOut.orientation[i] = 0;		dataOut.angular_velocity[i] = 0;}
+				dataOut.orientation[3] = 0;
+				// and publish it to goal channel
+			    lcm_ptr.publish(ARM_GOAL_CHANNEL,&dataOut);
+			    printf("[%f] Goal is at [%f %f %f]\n",static_cast<double>(msg->utime),goal[0],goal[1],goal[2]);
+			}
+			// else check to see if we should update goal next time
+			else{
+				// compute the position error norm and velocity norm
+				T eNorm; T vNorm; T currX[STATE_SIZE];
+				for(int i=0; i < STATE_SIZE; i++){
+					if(i < NUM_POS){currX[i] = static_cast<T>(msg->joint_position_measured[i]);}
+					else{			currX[i] = static_cast<T>(msg->joint_velocity_estimated[i]);}
+				}
+				evNorm(currX, goal, &eNorm, &vNorm);
+				// if in limits then set up for the moving goal
+				if (eNorm < eNormLim /*&& vNorm < vNormLim*/){zeroTime = msg->utime; inFig8 = 1;}
+				else{printf("[%f] eNorm[%f] vNorm[%f]\n",static_cast<double>(msg->utime),eNorm,vNorm);}
+			}
+			
+		}
+};
+template <typename T>
+void runFig8GoalLCM(double tTime, double eLim, double vLim){
+	lcm::LCM lcm_ptr;
+	LCM_Fig8Goal_Handler<T> handler = LCM_Fig8Goal_Handler<T>(tTime, eLim, vLim);
+	lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_CHANNEL, &LCM_Fig8Goal_Handler<T>::handleStatus, &handler);
+    sub->setQueueCapacity(1);
+    while(0 == lcm_ptr.handle());
+}
 
 template <typename T>
 __host__
@@ -392,19 +423,24 @@ void testMPC_LCM_singleGoal(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *
      	mpcThread = std::thread(&runMPCHandler<T>, lcm_ptr, &chandler);    
      	// setCPUForThread(&mpcThread, 1);
     }
-    // finally launch the trajRunner
+    // launch the trajRunner
     std::thread trajThread = std::thread(&runTrajRunner<T>, dimms);
     // setCPUForThread(&trajThread, 2);
-    // std::thread goalThread = std::thread(&runFig8GoalLCM<T>);
+    // launch the goal monitor
+    std::thread goalThread = std::thread(&runFig8GoalLCM<T>, totalTime_us, 0.05, 0.05);
     // setCPUForThread(&trajThread, 3);
+    // launch the status manager
+    std::thread statusThread = std::thread(&run_IIWA_STATUS_manager<T>);
+    // setCPUForThread(&trajThread, 4);
     printf("All threads launched -- check simulator output!\n");
     // clear it all 10 seconds later
     // struct timeval start, end;       gettimeofday(&start,NULL);          while(1){gettimeofday(&end,NULL);       if (time_delta_ms(start,end) >= 10000){break;}}
     // printf("Time up unsubscribing and joining\n");
     // lcm_ptr->unsubscribe(mpcSub);    lcm_ptr->unsubscribe(trajSub);      // need to unsubscribe before freeing or will segfault
     mpcThread.join();
-    // goalThread.join();               
     trajThread.join();
+    goalThread.join();
+    statusThread.join();
     // printf("Threads Joined\n");
     // if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars);}  else{freeMemory_CPU_MPC<T>(cvars);}     delete gvars;   delete cvars;
     // printf("memory freed\n");

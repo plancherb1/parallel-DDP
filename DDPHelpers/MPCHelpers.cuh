@@ -39,29 +39,30 @@
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
 const char *ARM_TRAJ_CHANNEL    = "TRAJ_CHANNEL";
-const char *ARM_STATUS_CHANNEL  = "IIWA_STATUS";//"ARM_STATUS_CHANNEL";
-const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
-#define GOAL_PUBLISHER_RATE_MS 30
-#define TEST_DELTA 0 // random small delta to keep things interesting (in ms) for tests
+const char *ARM_STATUS_RAW      = "IIWA_STATUS"; // NEED TO INTERCEPT AND COMPUTE VELOCITY
+const char *ARM_STATUS_CHANNEL  = "ARM_STATUS_CHANNEL"; //"IIWA_STATUS" for no intercept
+const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
+// #define GOAL_PUBLISHER_RATE_MS 30
+// #define TEST_DELTA 0 // random small delta to keep things interesting (in ms) for tests
 
 #define TIME_STEP_LENGTH_IN_ms (TIME_STEP*1000.0)
 #define TIME_STEP_LENGTH_IN_us (TIME_STEP_LENGTH_IN_ms*1000.0)
 #define get_time_us_i64(time) (static_cast<int64_t>(std::ceil(get_time_us(time))))
-#define get_time_ms_i64(time) (static_cast<int64_t>(std::ceil(get_time_ms(time))))
-#define us_to_ms_i64(time) (static_cast<int64_t>(std::ceil(static_cast<double>(time)/1000.0))
-#define ms_to_us_i64(time) (time*1000)
+// #define get_time_ms_i64(time) (static_cast<int64_t>(std::ceil(get_time_ms(time))))
+// #define us_to_ms_i64(time) (static_cast<int64_t>(std::ceil(static_cast<double>(time)/1000.0))
+// #define ms_to_us_i64(time) (time*1000)
 #define get_time_steps_us_d(start,end) (static_cast<double>(end - start)/TIME_STEP_LENGTH_IN_us)
-#define get_time_steps_ms_d(start,end) (static_cast<double>(end - start)/TIME_STEP_LENGTH_IN_ms)
+// #define get_time_steps_ms_d(start,end) (static_cast<double>(end - start)/TIME_STEP_LENGTH_IN_ms)
 #define get_time_steps_us_f(start,end) (static_cast<int>(std::floor(get_time_steps_us_d(start,end))))
-#define get_time_steps_ms_f(start,end) (static_cast<int>(std::floor(get_time_steps_ms_d(start,end))))
-#define get_time_steps_us_c(start,end) (static_cast<int>(std::ceil(get_time_steps_us_d(start,end))))
-#define get_time_steps_ms_c(start,end) (static_cast<int>(std::ceil(get_time_steps_ms_d(start,end))))
-#define get_steps_us_d(delta) (delta/TIME_STEP_LENGTH_IN_us)
-#define get_steps_ms_d(delta) (delta/TIME_STEP_LENGTH_IN_ms)
-#define get_steps_us_f(delta) (static_cast<int>(std::floor(get_steps_us_d(delta))))
-#define get_steps_ms_f(delta) (static_cast<int>(std::floor(get_steps_ms_d(delta))))
-#define get_steps_us_c(delta) (static_cast<int>(std::ceil(get_steps_us_d(delta))))
-#define get_steps_ms_c(delta) (static_cast<int>(std::ceil(get_steps_ms_d(delta))))
+// #define get_time_steps_ms_f(start,end) (static_cast<int>(std::floor(get_time_steps_ms_d(start,end))))
+// #define get_time_steps_us_c(start,end) (static_cast<int>(std::ceil(get_time_steps_us_d(start,end))))
+// #define get_time_steps_ms_c(start,end) (static_cast<int>(std::ceil(get_time_steps_ms_d(start,end))))
+// #define get_steps_us_d(delta) (delta/TIME_STEP_LENGTH_IN_us)
+// #define get_steps_ms_d(delta) (delta/TIME_STEP_LENGTH_IN_ms)
+// #define get_steps_us_f(delta) (static_cast<int>(std::floor(get_steps_us_d(delta))))
+// #define get_steps_ms_f(delta) (static_cast<int>(std::floor(get_steps_ms_d(delta))))
+// #define get_steps_us_c(delta) (static_cast<int>(std::ceil(get_steps_us_d(delta))))
+// #define get_steps_ms_c(delta) (static_cast<int>(std::ceil(get_steps_ms_d(delta))))
 
 #include <mutex>
 #include <vector>
@@ -997,6 +998,62 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
 // 3: MPC Main Algorithm Wrappers //
 
 // 4: LCM helpers // 
+    // intercept IIWA STATUS and compute velocity
+    template <typename T>
+    class LCM_IIWA_STATUS_manager {
+        public:
+            bool first_pass;    lcm::LCM lcm_ptr;
+            int64_t prevTime;   double prevPos[NUM_POS];
+
+            LCM_IIWA_STATUS_manager(){first_pass = 1;   if(!lcm_ptr.good()){printf("LCM Failed to Init in STATUS manager\n");}}
+            ~LCM_IIWA_STATUS_manager(){}
+
+            void run(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){                
+                // first pass just publish the old msg
+                if (first_pass || 1){
+                    lcm_ptr.publish(ARM_STATUS_CHANNEL,msg); 
+                    // and set up for later passes
+                    first_pass = 0;     prevTime = msg->utime;
+                    for (int i = 0; i < NUM_POS; i++){prevPos[i] = msg->joint_position_measured[i];}
+                    return;
+                }
+                // otherwise build up a new message
+                drake::lcmt_iiwa_status dataOut;                                
+                dataOut.num_joints = msg->num_joints;                           dataOut.joint_position_measured.resize(dataOut.num_joints);     
+                dataOut.joint_velocity_estimated.resize(dataOut.num_joints);    dataOut.joint_position_commanded.resize(dataOut.num_joints);    
+                dataOut.joint_position_ipo.resize(dataOut.num_joints);          dataOut.joint_torque_measured.resize(dataOut.num_joints);
+                dataOut.joint_torque_commanded.resize(dataOut.num_joints);      dataOut.joint_torque_external.resize(dataOut.num_joints);
+                // copy out time, compute dt, and save time for next pass
+                dataOut.utime = msg->utime;     double dt = static_cast<double>(msg->utime - prevTime)*1000000;     prevTime = msg->utime;
+                for (int i = 0; i < NUM_POS; i++){
+                    // copy over pos and compute vel
+                    double pos = msg->joint_position_measured[i];
+                    dataOut.joint_position_measured[i] = pos;
+                    dataOut.joint_velocity_estimated[i] = (pos - prevPos[i])/dt;
+                    // save down pos for next time
+                    prevPos[i] = pos;
+                    // copy everything else
+                    dataOut.joint_position_commanded[i] = msg->joint_position_commanded[i];
+                    dataOut.joint_position_ipo[i] = msg->joint_position_ipo[i];
+                    dataOut.joint_torque_measured[i] = msg->joint_torque_measured[i];
+                    dataOut.joint_torque_commanded[i] = msg->joint_torque_commanded[i];
+                    dataOut.joint_torque_external[i] = msg->joint_torque_external[i];
+                }    
+                // publish out
+                lcm_ptr.publish(ARM_STATUS_CHANNEL,&dataOut);
+            }
+    };
+
+    template <typename T>
+    __host__
+    void run_IIWA_STATUS_manager(){
+        lcm::LCM lcm_ptr;
+        LCM_IIWA_STATUS_manager<T> *manager = new LCM_IIWA_STATUS_manager<T>;
+        lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_RAW, &LCM_IIWA_STATUS_manager<T>::run, manager);
+        sub->setQueueCapacity(1);
+        while(0 == lcm_ptr.handle());
+    }
+
     // trajRunner takes messages of new trajectories to execute and current status's and returns torque commands
     template <typename T>
     class LCM_TrajRunner {
@@ -1306,20 +1363,5 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";//ARM_COMMAND_CHANNEL";
     //         while(1){gettimeofday(&end,NULL);   if (time_delta_ms(start,end) >= dt_us){break;}}
     //     }
     // }
-
-    // template <typename T>
-    // class LCM_UpdateGoal_Handler {
-    //     public:
-    //         T **xGoal; // local pointer to the global location
-
-    //         LCM_UpdateGoal_Handler(float **xg) : xGoal(xg) {} // init and store the global location
-    //         ~LCM_UpdateGoal_Handler(){} // do nothing in the destructor
-
-    //         // lcm callback function to update the current goal
-    //         void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_target_twist *msg){
-    //             #pragma unroll
-    //             for (int i = 0; i < 3; i++){(*xGoal)[i] = (T)msg->position[i];   (*xGoal)[i+3] = (T)msg->velocity[i];} // update global goal
-    //         }
-    // };
 
 // // 4: LCM call wrappers //
