@@ -38,7 +38,7 @@ void forwardSweepInner(T *s_ApBK, T *Bk, T *dk, T *s_dx, T *xk, T *xpk, T alpha,
 			#pragma unroll
 			for (int i=0; i<DIM_x_r; i++){val += s_ApBK[kx + DIM_A_r*i]*s_dx[i];}
 			// and then add d and the previos value and save to global memory
-			xkp1[kx] += alpha*Bk[kx] + val + (onDefectBoundary(k) ? dk[kx] : 0.0);
+			xkp1[kx] += -alpha*Bk[kx] + val + (onDefectBoundary(k) ? dk[kx] : 0.0);
 		}
 
 		// then update the offsets for the next pass
@@ -523,4 +523,111 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
     // else failed
     return alphaIndex; //-1 on failure
     // LINE SEARCH //
+}
+
+template <typename T>
+__host__ __device__ __forceinline__
+void forwardSimSLQInner(T *s_ApBK, T *s_KT, T *Bk, T *s_dx, T *xk, T *xpk, T *uk, T *duk, T alpha, \
+					    int ld_x, int ld_u, int ld_d, int ld_A, int ld_du, int ld_KT, T *Ak = nullptr, T *KTk = nullptr){
+	// loop forward and compute new states and controls with the sweep (using the AB linearization)
+	T *xkp1 = xk + ld_x;
+	int start, delta; singleLoopVals(&start,&delta);
+   	for(int k=0; k<NUM_TIME_STEPS-1; k++){
+		// compute the new state: xkp1 = xkp1 + (A - B*K)(xnew-x) - alpha*B*du // no defects because one block always
+		// also compute the new control: uk = uk - K*(xnew-x) - alpha*du
+		
+		// stage 1: load in ApBK and KT
+		if (Ak != nullptr){loadMatToShared<T,DIM_A_r,DIM_A_c>(s_ApBK,Ak,ld_A);}
+		if (KTk != nullptr){loadMatToShared<T,DIM_KT_r,DIM_KT_c>(s_KT,KTk,ld_KT);}
+		
+		// stage 1: compute dx = x - xp
+		loadDeltaV<T,DIM_x_r>(s_dx, xk, xpk);
+		hd__syncthreads();
+
+		// stage 2: compute xkp1 += -alpha*Bdu + ApBK*dx + d
+		#pragma unroll
+		for (int kx = start; kx < DIM_x_r; kx += delta){
+			T val = 0;
+			// multiply row kx of ApBK by dx
+			#pragma unroll
+			for (int i=0; i<DIM_x_r; i++){val += s_ApBK[kx + DIM_A_r*i]*s_dx[i];}
+			// and then add Bdu and d and the previos value and save to global memory
+			xkp1[kx] += -alpha*Bk[kx] + val;
+		}
+
+		// stage 2: compute u -= alpha*du + K(dx)
+		#pragma unroll
+		for (int kx = start; kx < DIM_u_r; kx += delta){
+			T val = 0;
+			// multiply row kx of ApBK by dx
+			#pragma unroll
+			for (int i = 0; i < DIM_x_r; i++){val += KTk[i + kx*ld_KT]*s_dx[i];}
+			// and then add du and the previos value and save to global memory
+			uk[kx] -= alpha*duk[kx] + val;
+		}
+
+		// then update the offsets for the next pass
+		xk = xkp1;		xpk += ld_x;	xkp1 += ld_x;
+		uk += ld_u;		Bk += ld_d;		duk += ld_du;
+		if (Ak != nullptr){Ak += ld_A*DIM_A_c;} else{s_ApBK += ld_A*DIM_A_c;}
+		if (KTk != nullptr){KTk += ld_KT*DIM_KT_c;} else{s_KT += ld_KT*DIM_KT_c;}
+		hd__syncthreads();
+   	}
+}
+		
+template <typename T>
+__global__
+void forwardSimSLQKern(T **d_x, T **d_u, T *d_ApBK, T *d_Bdu, T *d_du, T *d_KT, T *d_xp, T *d_alpha, \
+					   int ld_x, int ld_u, int ld_d, int ld_A, int ld_du, int ld_KT){
+	__shared__ T s_ApBK[DIM_A_r*DIM_A_c];
+	__shared__ T s_KT[DIM_KT_r*DIM_KT_c];
+	__shared__ T s_dx[DIM_x_r];
+	T *xk = d_x[blockIdx.x];		T *uk = d_u[blockIdx.x];	T alpha = d_alpha[blockIdx.x];
+	forwardSimSLQInner(s_ApBK,s_KT,d_Bdu,s_dx,xk,d_xp,uk,d_du,alpha,ld_x,ld_u,ld_d,ld_A,ld_du,ld_KT,d_ApBK,d_KT);
+}
+
+template <typename T>
+__host__ __forceinline__
+void forwardPassSLQGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_ApBK, T *d_Bdu, T *d_du, T *d_KT, T *alpha, T *d_alpha, \
+					   T *dJexp, T *d_dJexp, T *J, T *d_JT, T *d_xGoal, T *dJ, T *z, T prevJ, \
+					   cudaStream_t *streams, dim3 ADimms, int *alphaIndex, \
+                   	   int ld_x, int ld_u, int ld_d, int ld_A, int ld_du, int ld_KT){
+	// ACTUAL FORWARD SIM (using linearized dynamics) //
+	forwardSimSLQKern<T><<<NUM_ALPHA,ADimms,0,streams[0]>>>(d_x,d_u,d_ApBK,d_Bdu,d_du,d_KT,d_xp,d_alpha,ld_x,ld_u,ld_d,ld_A,ld_du,ld_KT);
+	gpuErrchk(cudaPeekAtLastError());
+
+	// concurrent to sim save xp into xp2 which we'll need for the backward pass linear transform on the next iter
+	gpuErrchk(cudaMemcpyAsync(d_xp2,d_xp,ld_x*DIM_x_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[2]));
+
+	// also while waiting on the GPU memcpy the expected reduction back that was computed during the back pass and sum
+	gpuErrchk(cudaMemcpyAsync(dJexp, d_dJexp, 2*M_B*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
+	gpuErrchk(cudaStreamSynchronize(streams[1]));
+	for (int i=1; i<M_B; i++){dJexp[0] += dJexp[2*i]; dJexp[1] += dJexp[2*i+1];}
+	// ACTUAL FORWARD SIM //
+
+	// LINE SEARCH //
+	// then compute the cost and defect once the forward simulation finishes
+	#if !EE_COST
+		costKern<T><<<NUM_ALPHA,NUM_TIME_STEPS,NUM_TIME_STEPS*sizeof(T),streams[0]>>>(d_x,d_u,d_JT,d_xGoal,ld_x,ld_u);
+	#else
+		costKern<T,0><<<1,NUM_ALPHA,0,streams[0]>>>(d_JT);
+	#endif
+	gpuErrchk(cudaPeekAtLastError());
+
+	// then find the best J that shows improvement
+	// since NUM_ALPHA <= 32 (usually) the overhead in launching a kernel will outweigh the gains of logN comps vs N serial comps
+	gpuErrchk(cudaStreamSynchronize(streams[0]));
+	gpuErrchk(cudaMemcpyAsync(J, d_JT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, streams[0]));
+	*dJ = -1.0; *z = 0.0; T cdJ = -1.0; T cz = 0.0; bool JFlag, zFlag;
+	gpuErrchk(cudaDeviceSynchronize());
+	for (int i=0; i<NUM_ALPHA; i++){
+		cdJ = prevJ - J[i]; JFlag = cdJ >= 0.0 && cdJ > *dJ;
+		cz = cdJ / (alpha[i]*dJexp[0] + alpha[i]*alpha[i]/2.0*dJexp[1]); zFlag = USE_EXP_RED ? (EXP_RED_MIN < cz && cz < EXP_RED_MAX) : 1;
+		//printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]f[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
+		if(JFlag && zFlag){
+			*alphaIndex = i; *dJ = cdJ; *z = cz; // update current best index, dJ, z
+			if (!ALPHA_BEST_SWITCH){break;} // pick first alpha strategy   
+		}
+	}
+	// LINE SEARCH //
 }

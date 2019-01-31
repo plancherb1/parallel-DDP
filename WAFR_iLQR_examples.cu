@@ -339,6 +339,68 @@ void testGPU(){
    	free(u0);
 }
 
+template <typename T>
+__host__
+void testGPU_SLQ(){
+	// GPU VARS	
+	// first integer constants for the leading dimmensions of allocaitons
+	int ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A;
+	// then vars for stream handles
+	cudaStream_t *streams;
+	// algorithm hyper parameters
+	T *alpha, *d_alpha;
+	int *alphaIndex;
+	// then variables defined by blocks for backward pass
+	T *d_P, *d_p, *d_Pp, *d_pp, *d_AB, *d_H, *d_g, *d_KT, *d_du;
+	// variables for forward pass
+	T **d_x, **d_u, **h_d_x, **h_d_u, *d_xp, *d_xp2, *d_up, *d_JT, *J;
+	// variables for forward sweep
+	T **d_d, **h_d_d, *d_dp, *d_dT, *d, *d_ApBK, *d_Bdu, *d_dM;
+	// for checking inversion errors
+	int *err, *d_err;
+	// for expected cost reduction
+	T *dJexp, *d_dJexp;
+	// goal point
+	T *xGoal, *d_xGoal;
+    // Inertias and Tbodybase
+    T *d_I, *d_Tbody;
+
+	// Allocate space and initialize the variables
+   	allocateMemory_GPU<T>(&d_x, &h_d_x, &d_xp, &d_xp2, &d_u, &h_d_u, &d_up, &d_xGoal, &xGoal,
+   					   &d_P, &d_Pp, &d_p, &d_pp, &d_AB, &d_H, &d_g, &d_KT, &d_du,
+   					   &d_d, &h_d_d, &d_dp, &d_dT, &d_dM, &d, &d_ApBK, &d_Bdu,
+   					   &d_JT, &J, &d_dJexp, &dJexp, &alpha, &d_alpha, &alphaIndex, &d_err, &err, 
+   					   &ld_x, &ld_u, &ld_P, &ld_p, &ld_AB, &ld_H, &ld_g, &ld_KT, &ld_du, &ld_d, &ld_A,
+                       &streams, &d_I, &d_Tbody);
+
+   	T *x0 = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));
+   	T *u0 = (T *)malloc(ld_u*NUM_TIME_STEPS*sizeof(T));
+
+   	for (int i=0; i<TEST_ITERS; i++){
+		printf("<<<TESTING GPU SLQ %d/%d>>>\n",i+1,TEST_ITERS);
+		loadXU<T>(x0,u0,xGoal,ld_x,ld_u);
+      	runSLQ_GPU<T>(x0, u0, nullptr, nullptr, nullptr, nullptr, xGoal, &Jout[i*(MAX_ITER+1)], &alphaOut[i*(MAX_ITER+1)], ROLLOUT_FLAG, 1,  1,
+      				&tTime[i], &fsimTime[i*MAX_ITER], &fsweepTime[i*MAX_ITER], &bpTime[i*MAX_ITER], &nisTime[i*MAX_ITER], &initTime[i], streams,
+					d_x, h_d_x, d_xp, d_xp2, d_u, h_d_u, d_up, d_P, d_p, d_Pp, d_pp, d_AB, d_H, d_g, d_KT, d_du,
+					d_d, h_d_d, d_dp, d_dT, d, d_ApBK, d_Bdu, d_dM, alpha, d_alpha, alphaIndex, d_JT, J, dJexp, d_dJexp, d_xGoal,
+					err, d_err, ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A, d_I, d_Tbody);
+   	}
+   	// print final state
+	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
+	// printf("Final xtraj:\n");   for (int i = 0; i < NUM_TIME_STEPS; i++){printMat<T,1,DIM_x_r>(&x0[i*ld_x],1);}
+
+	// print all requested statistics
+   	printJAlphaStats(Jout,alphaOut);
+   	printAllTimingStats(tTime,initTime,fsimTime,fsweepTime,bpTime,nisTime);
+
+	// free those vars
+	freeMemory_GPU<T>(d_x, h_d_x, d_xp, d_xp2, d_u, h_d_u, d_up, xGoal, d_xGoal,  d_P, d_Pp, d_p, d_pp, d_AB, d_H, d_g, d_KT, d_du, 
+				   d_d, h_d_d, d_dp, d_dM, d_dT, d,  d_ApBK, d_Bdu, d_JT, J, d_dJexp, dJexp, alpha, d_alpha, alphaIndex, d_err, err, 
+                   streams, d_I, d_Tbody);
+	free(x0);
+   	free(u0);
+}
+
 int main(int argc, char *argv[])
 {
 	srand(time(NULL));
@@ -349,6 +411,7 @@ int main(int argc, char *argv[])
 	}
 	if (hardware == 'G'){testGPU<algType>();}
 	else if (hardware == 'C'){int flag = (int)(argv[1][1] == 'S'); testCPU<algType>(flag);}
+	else if (hardware == 'S'){testGPU_SLQ<algType>();}
 	else{printf("%s",errMsg);}
 	return 0;
 }
