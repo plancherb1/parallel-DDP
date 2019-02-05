@@ -39,8 +39,8 @@
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
 const char *ARM_TRAJ_CHANNEL    = "TRAJ_CHANNEL";
-const char *ARM_STATUS_RAW      = "IIWA_STATUS"; // NEED TO INTERCEPT AND COMPUTE VELOCITY
-const char *ARM_STATUS_CHANNEL  = "ARM_STATUS_CHANNEL"; //"IIWA_STATUS" for no intercept
+const char *ARM_STATUS_CHANNEL  = "IIWA_STATUS"; // NEED TO INTERCEPT AND COMPUTE VELOCITY
+const char *ARM_STATUS_FILTERED = "IIWA_STATUS_FILTERED"; //"IIWA_STATUS" for no intercept
 const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
 // #define GOAL_PUBLISHER_RATE_MS 30
 // #define TEST_DELTA 0 // random small delta to keep things interesting (in ms) for tests
@@ -724,7 +724,7 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
         double dt = get_time_steps_us_d(t0,tActual); int ind_rd = static_cast<int>(dt); double fraction = dt - static_cast<double>(ind_rd);
         // printf("Sending ind_rd[%d] w/ fraction[%f] for t0[%f] vs tActual[%f]\n",ind_rd,fraction,t0,tActual);
         // see if beyond bounds and fail
-        if (ind_rd >= NUM_TIME_STEPS-1){return 1;}
+        if (ind_rd >= NUM_TIME_STEPS-2 || ind_rd < 0){return 1;}
         // u,KT do zoh so take rd
         T *uk = &u[ind_rd*ld_u];             T *KTk = &KT[ind_rd*ld_KT*DIM_KT_c];
         // foh for xk
@@ -1000,18 +1000,18 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
 // 4: LCM helpers // 
     // intercept IIWA STATUS and compute velocity
     template <typename T>
-    class LCM_IIWA_STATUS_manager {
+    class LCM_IIWA_STATUS_filter {
         public:
             bool first_pass;    lcm::LCM lcm_ptr;
             int64_t prevTime;   double prevPos[NUM_POS];
 
-            LCM_IIWA_STATUS_manager(){first_pass = 1;   if(!lcm_ptr.good()){printf("LCM Failed to Init in STATUS manager\n");}}
-            ~LCM_IIWA_STATUS_manager(){}
+            LCM_IIWA_STATUS_filter(){first_pass = 1;   if(!lcm_ptr.good()){printf("LCM Failed to Init in STATUS manager\n");}}
+            ~LCM_IIWA_STATUS_filter(){}
 
             void run(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){                
                 // first pass just publish the old msg
                 if (first_pass || 1){
-                    lcm_ptr.publish(ARM_STATUS_CHANNEL,msg); 
+                    lcm_ptr.publish(ARM_STATUS_FILTERED,msg); 
                     // and set up for later passes
                     first_pass = 0;     prevTime = msg->utime;
                     for (int i = 0; i < NUM_POS; i++){prevPos[i] = msg->joint_position_measured[i];}
@@ -1024,7 +1024,7 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
                 dataOut.joint_position_ipo.resize(dataOut.num_joints);          dataOut.joint_torque_measured.resize(dataOut.num_joints);
                 dataOut.joint_torque_commanded.resize(dataOut.num_joints);      dataOut.joint_torque_external.resize(dataOut.num_joints);
                 // copy out time, compute dt, and save time for next pass
-                dataOut.utime = msg->utime;     double dt = static_cast<double>(msg->utime - prevTime)*1000000;     prevTime = msg->utime;
+                dataOut.utime = msg->utime;     double dt = static_cast<double>(msg->utime - prevTime)/1000000;     prevTime = msg->utime;
                 for (int i = 0; i < NUM_POS; i++){
                     // copy over pos and compute vel
                     double pos = msg->joint_position_measured[i];
@@ -1040,16 +1040,16 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
                     dataOut.joint_torque_external[i] = msg->joint_torque_external[i];
                 }    
                 // publish out
-                lcm_ptr.publish(ARM_STATUS_CHANNEL,&dataOut);
+                lcm_ptr.publish(ARM_STATUS_FILTERED,&dataOut);
             }
     };
 
     template <typename T>
     __host__
-    void run_IIWA_STATUS_manager(){
-        lcm::LCM lcm_ptr;
-        LCM_IIWA_STATUS_manager<T> *manager = new LCM_IIWA_STATUS_manager<T>;
-        lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_RAW, &LCM_IIWA_STATUS_manager<T>::run, manager);
+    void run_IIWA_STATUS_filter(){
+        lcm::LCM lcm_ptr;   if(!lcm_ptr.good()){printf("LCM Failed to Init in status manager\n");}
+        LCM_IIWA_STATUS_filter<T> *manager = new LCM_IIWA_STATUS_filter<T>;
+        lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_CHANNEL, &LCM_IIWA_STATUS_filter<T>::run, manager);
         sub->setQueueCapacity(1);
         while(0 == lcm_ptr.handle());
     }
@@ -1115,7 +1115,7 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
         lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner main loop\n");}
         LCM_TrajRunner<T> tr = LCM_TrajRunner<T>(dimms->ld_x, dimms->ld_u, dimms->ld_KT);
         // subscribe to everything
-        lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_CHANNEL, &LCM_TrajRunner<T>::statusCallback, &tr);
+        lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_TrajRunner<T>::statusCallback, &tr);
         lcm::Subscription *trajSub;
         if (std::is_same<T, float>::value){
             trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_f, &tr);
@@ -1208,7 +1208,7 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
     template <typename T>
     __host__
     void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler){
-        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_CHANNEL, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
+        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
         lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoal, handler);
         sub->setQueueCapacity(1);   sub2->setQueueCapacity(1);
         while(0 == lcm_ptr->handle());
@@ -1222,7 +1222,10 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
 
             void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){                
                 double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position_measured[0]), &eePos[0]);
-                printf("[%ld] eePos: [%f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2]);
+                printf("[%ld] eePos: [%f %f %f] w/ jointVel [%f %f %f %f %f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2],
+                    msg->joint_velocity_estimated[0],msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],
+                    msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],msg->joint_velocity_estimated[5],
+                    msg->joint_velocity_estimated[6]);
             }
     };
 
@@ -1230,6 +1233,29 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
     __host__
     void run_IIWA_STATUS_printer(lcm::LCM *lcm_ptr, LCM_IIWA_STATUS_printer<T> *handler){
         lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_CHANNEL, &LCM_IIWA_STATUS_printer<T>::handleMessage, handler);
+        // sub->setQueueCapacity(1);
+        while(0 == lcm_ptr->handle());
+    }
+
+    template <typename T>
+    class LCM_IIWA_STATUS_FILTERED_printer {
+        public:
+            LCM_IIWA_STATUS_FILTERED_printer(){}
+            ~LCM_IIWA_STATUS_FILTERED_printer(){}
+
+            void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){                
+                double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position_measured[0]), &eePos[0]);
+                printf("[%ld] eePos: [%f %f %f] w/ jointVel [%f %f %f %f %f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2],
+                    msg->joint_velocity_estimated[0],msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],
+                    msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],msg->joint_velocity_estimated[5],
+                    msg->joint_velocity_estimated[6]);
+            }
+    };
+
+    template <typename T>
+    __host__
+    void run_IIWA_STATUS_FILTERED_printer(lcm::LCM *lcm_ptr, LCM_IIWA_STATUS_FILTERED_printer<T> *handler){
+        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, &LCM_IIWA_STATUS_FILTERED_printer<T>::handleMessage, handler);
         // sub->setQueueCapacity(1);
         while(0 == lcm_ptr->handle());
     }
@@ -1263,10 +1289,12 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
             ~LCM_traj_printer(){}
 
             void handleMessage_d(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_d *msg){                
-                printf("[%ld] new traj computed\n",msg->utime);
+                double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->x[0]), &eePos[0]);
+                printf("[%ld] new traj computed with eePos0: [%f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2]);
             }
             void handleMessage_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){                
-                printf("[%ld] new traj computed\n",msg->utime);
+                float eePos[NUM_POS];   compute_eePos_scratch<float>((float *)&(msg->x[0]), &eePos[0]);
+                printf("[%ld] new traj computed with eePos0: [%f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2]);
             }
     };
 

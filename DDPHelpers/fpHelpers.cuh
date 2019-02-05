@@ -143,6 +143,7 @@ void costKern(T **d_x, T **d_u, T *d_JT, T *d_xg, int ld_x, int ld_u){
       	__syncthreads();
    		// then sum it all up per alpha with a reduce pattern
       	reduceSum<T>(s_J);
+      	__syncthreads();
    		if (threadIdx.x == 0){d_JT[a] = s_J[0];}
    		__syncthreads();
    	}

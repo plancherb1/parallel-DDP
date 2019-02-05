@@ -248,6 +248,10 @@ void costGrad(T *Hk, T*gk, T *s_eePos, T *s_deePos, T *d_eeGoal, T *s_x, T *s_u,
 	#ifdef __CUDA_ARCH__
 		if(threadIdx.x != 0 || threadIdx.y != 0){flag = 0;}
 		if (flag){d_JT[ind] = costFunc(s_eePos,d_eeGoal,s_x,s_u,k);}
+			// printf("Cost for ind[%d] for k[%d] and eePos[%f %f %f %f %f %f] and goal[%f %f %f %f %f %f] with u[%f %f %f %f %f %f] and x[%f %f %f %f %f %f %f %f %f %f %f %f] is J[%f]\n",
+			// 	    ind,k,s_eePos[0],s_eePos[1],s_eePos[2],s_eePos[3],s_eePos[4],s_eePos[5],d_eeGoal[0],d_eeGoal[1],d_eeGoal[2],d_eeGoal[3],d_eeGoal[4],d_eeGoal[5],
+			// 	    s_u[0],s_u[1],s_u[2],s_u[3],s_u[4],s_u[5],s_u[6],
+			// 	    s_x[0],s_x[1],s_x[2],s_x[3],s_x[4],s_x[5],s_x[6],s_x[7],s_x[8],s_x[9],s_x[10],s_x[11],s_x[12],s_x[13],d_JT[ind]);}
 	#else
 		if (flag){d_JT[ind] += costFunc(s_eePos,d_eeGoal,s_x,s_u,k);}
 	#endif

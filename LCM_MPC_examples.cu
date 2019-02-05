@@ -13,7 +13,6 @@ nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadU
 #include <iostream>
 
 #define ROLLOUT_FLAG 0
-char errMsg[]  = "Error: Unkown code - usage is [C]PU or [G]PU with flag 1/0 for doFig8\n";
 char tot[]  = "  TOT";		char init[] = " INIT";	char fsim[]   = "  SIM";	
 char fsweep[]   = "SWEEP";	char bp[]   = "   BP";	char nis[]  = "  NIS";
 
@@ -239,7 +238,7 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 	// get the max iters per solve
 	int timeLimit = getTimeBudget(1000, 1); //note in ms
 	// get the total time for the trajectory
-	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));	double timePrint = 0;
+	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));	//double timePrint = 0;
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
 	if (hardware == 'G'){
@@ -382,12 +381,12 @@ template <typename T>
 __host__
 void testMPC_LCM_singleGoal(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, matDimms *dimms, char hardware){
     // launch the simulator
-    printf("Make sure the simulator is launched in another process!!!\n");
+    printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");//, [F]ilter, [G]oal changer, and traj[R]unner are launched!!!\n");
 	// get the max iters per solve
 	int itersToDo = getMaxIters(1000, 1);
 	// get the max iters per solve
 	int timeLimit = getTimeBudget(1000, 1); //note in ms
-	// get the total time for the trajectory
+	// get he total traj time
 	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
@@ -398,7 +397,7 @@ void testMPC_LCM_singleGoal(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *
     if (hardware == 'G'){
 		allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);
 		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(gvars,0,totalTime_us);
+		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(gvars,0,1);
 		for (int i = 0; i < NUM_ALPHA; i++){
 			gpuErrchk(cudaMemcpy(gvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
 			gpuErrchk(cudaMemcpy(gvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
@@ -413,7 +412,7 @@ void testMPC_LCM_singleGoal(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *
     else{
 		allocateMemory_CPU_MPC<T>(cvars, dimms, tvars);
 		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(cvars,0,totalTime_us);
+		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(cvars,0,1);
 		memcpy(cvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(cvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(cvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
@@ -425,25 +424,18 @@ void testMPC_LCM_singleGoal(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *
     }
     // launch the trajRunner
     std::thread trajThread = std::thread(&runTrajRunner<T>, dimms);
-    // setCPUForThread(&trajThread, 2);
+    // launch the status filter
+    std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<algType>);
     // launch the goal monitor
-    std::thread goalThread = std::thread(&runFig8GoalLCM<T>, totalTime_us, 0.05, 0.05);
-    // setCPUForThread(&trajThread, 3);
-    // launch the status manager
-    std::thread statusThread = std::thread(&run_IIWA_STATUS_manager<T>);
-    // setCPUForThread(&trajThread, 4);
+    std::thread goalThread = std::thread(&runFig8GoalLCM<algType>, totalTime_us, 0.05, 0.05);
     printf("All threads launched -- check simulator output!\n");
     // clear it all 10 seconds later
     // struct timeval start, end;       gettimeofday(&start,NULL);          while(1){gettimeofday(&end,NULL);       if (time_delta_ms(start,end) >= 10000){break;}}
     // printf("Time up unsubscribing and joining\n");
     // lcm_ptr->unsubscribe(mpcSub);    lcm_ptr->unsubscribe(trajSub);      // need to unsubscribe before freeing or will segfault
-    mpcThread.join();
-    trajThread.join();
-    goalThread.join();
-    statusThread.join();
+    mpcThread.join();	trajThread.join();	filterThread.join();	goalThread.join();
     // printf("Threads Joined\n");
-    // if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars);}  else{freeMemory_CPU_MPC<T>(cvars);}     delete gvars;   delete cvars;
-    // printf("memory freed\n");
+    if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars);}  else{freeMemory_CPU_MPC<T>(cvars);}     delete gvars;   delete cvars;
 }
 // TODO: LCM work in progress -- currently unstable
 // template <typename T>
@@ -507,8 +499,8 @@ int main(int argc, char *argv[])
 	trajVars<algType> *tvars = new trajVars<algType>;	algTrace<algType> *atrace = new algTrace<algType>;	matDimms *dimms = new matDimms;
 	if (hardware == 'C' || hardware == 'G'){
 		int flag = atoi(&argv[1][1]);
-		if (flag != 0 && flag != 1){printf("%s",errMsg); return 1;};
-		testMPC_lockstep<algType>(tvars,atrace,dimms,hardware,flag);
+		if (flag != 0 && flag != 1){hardware = '?';}
+		else{testMPC_lockstep<algType>(tvars,atrace,dimms,hardware,flag);}
 	}
 	// TODO: LCM current unstable need to update and test
 	else if (hardware == 'L'){
@@ -517,18 +509,43 @@ int main(int argc, char *argv[])
 		testMPC_LCM_singleGoal<algType>(&lcm_ptr,tvars,atrace,dimms,hardware);
 		// testMPC_lockstepLCM<algType>(&lcm_ptr,tvars,atrace,dimms,hardware);
 	}
+	// run the status filter
+	else if (hardware == 'F'){
+		run_IIWA_STATUS_filter<algType>();
+	}
+	// run the goal monitor
+	else if (hardware == '8'){
+		double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));
+    	runFig8GoalLCM<algType>(totalTime_us, 0.05, 0.05);
+	}
+	// various printers
 	else if (hardware == 'P'){
 		char type = argv[1][1];
 		lcm::LCM lcm_ptr;	if(!lcm_ptr.good()){printf("LCM Failed to Init\n"); return 1;} 
-		LCM_IIWA_STATUS_printer<algType> *shandler = new LCM_IIWA_STATUS_printer<algType>;
-		LCM_IIWA_COMMAND_printer<algType> *chandler = new LCM_IIWA_COMMAND_printer<algType>;
-		LCM_traj_printer<algType> *thandler = new LCM_traj_printer<algType>;
-		if(type == 'S'){run_IIWA_STATUS_printer<algType>(&lcm_ptr,shandler);}
-		if(type == 'C'){run_IIWA_COMMAND_printer<algType>(&lcm_ptr,chandler);}
-		if(type == 'T'){run_traj_printer<algType>(&lcm_ptr,thandler);}
-		delete shandler;	delete chandler;	delete thandler;
+		if(type == 'S'){
+			LCM_IIWA_STATUS_printer<algType> *shandler = new LCM_IIWA_STATUS_printer<algType>;
+			run_IIWA_STATUS_printer<algType>(&lcm_ptr,shandler);
+			delete shandler;	
+		}
+		else if(type == 'C'){
+			LCM_IIWA_COMMAND_printer<algType> *chandler = new LCM_IIWA_COMMAND_printer<algType>;
+			run_IIWA_COMMAND_printer<algType>(&lcm_ptr,chandler);
+			delete chandler;
+		}
+		else if(type == 'T'){
+			LCM_traj_printer<algType> *thandler = new LCM_traj_printer<algType>;
+			run_traj_printer<algType>(&lcm_ptr,thandler);
+			delete thandler;
+		}
+		else if(type == 'F'){
+			LCM_IIWA_STATUS_FILTERED_printer<algType> *fhandler = new LCM_IIWA_STATUS_FILTERED_printer<algType>;
+			run_IIWA_STATUS_FILTERED_printer<algType>(&lcm_ptr,fhandler);
+			delete fhandler;
+		}
+		else{printf("Invalid printer requested [%c]. Currently supports: [S]tatus, [C]ommand, [T]rajectory, or [F]iltered Status\n",type);}
 	}
-	else{printf("%s",errMsg); hardware = '?';}
+	// else error
+	printf("Error: Unkown code - usage is: [C]PU, [G]PU, [P]rinters, [F]ilter, Figure[8] Goal monitor\n"); hardware = '?';
 	// free the trajVars and the wrappers
 	freeTrajVars<algType>(tvars);	delete atrace;	delete tvars;	delete dimms;
 	return (hardware == '?');

@@ -317,7 +317,6 @@ void initAlgGPU(T **d_x, T **h_d_x, T *d_xp, T *d_xp2, T **d_u, T **h_d_u, T *d_
 	gpuErrchk(cudaMemcpyAsync(d_xp2,h_d_x[*alphaIndex],ld_x*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[6]));
 	gpuErrchk(cudaMemcpyAsync(d_up,h_d_u[*alphaIndex],ld_u*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[7]));
 	if (M_F > 1){gpuErrchk(cudaMemcpyAsync(d_dp,h_d_d[*alphaIndex],ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[7]));}
-
 	// get the cost and add epsilon in case the intialization results in zero update for the first pass
 	defectKern<T><<<NUM_ALPHA,NUM_TIME_STEPS,0,streams[5]>>>(d_d,d_dT,ld_d); gpuErrchk(cudaPeekAtLastError());
 	#if !EE_COST

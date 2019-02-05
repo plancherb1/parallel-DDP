@@ -153,6 +153,9 @@ typedef float algType;
 #ifndef USE_LIMITS_FLAG
 	#define USE_LIMITS_FLAG 0 // use joint vel torque limits (quad pen)
 #endif
+#ifndef CONSTRAINTS_ON
+	#define CONSTRAINTS_ON 0 // AL style constraints
+#endif
 
 // Matrix Dimms
 	#define DIM_x_r STATE_SIZE
