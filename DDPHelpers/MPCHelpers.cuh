@@ -1311,85 +1311,81 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
         while(0 == lcm_ptr->handle());
     }
 
-    // struct SimVars{
-    //     double uCom[CONTROL_SIZE];  
-    //     double xCom[STATE_SIZE];
-    //     bool flag;
-    //     std::mutex *lock;
-    // };
+    class LCM_Simulator_Handler {
+        public:
+            int numSteps;               double dt;double step_dt;    int64_t currTime;
+            double nextX[STATE_SIZE];   double currX[STATE_SIZE];    double qdd[NUM_POS];
+            double Tbody[36*NUM_POS];   double I[36*NUM_POS];        double torqueCom[CONTROL_SIZE]; 
+            lcm::LCM lcm_ptr;
 
-    // class LCM_Simulator_Handler {
-    //     public:
-    //         SimVars *svars;
+            LCM_Simulator_Handler(int _numSteps, double _dt, double *xInit) : numSteps(_numSteps), dt(_dt) {
+                for(int i=0; i < STATE_SIZE; i++){currX[i] = xInit[i];}
+                for(int i=0; i < CONTROL_SIZE; i++){torqueCom[i] = 0;}
+                if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
+                initI<double>(I);       initT<double>(Tbody);     currTime = 0;       step_dt = dt/numSteps;
+                runSim();
+            }
+            ~LCM_Simulator_Handler(){}
 
-    //         LCM_Simulator_Handler(SimVars *svin) : svars(svin){}
-    //         ~LCM_Simulator_Handler(){}
+            // lcm callback function to update the torqueCom
+            void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command *msg){
+                for(int i = 0; i < CONTROL_SIZE; i++){
+                    torqueCom[i] = msg->joint_torque[i];
+                }
+            }
 
-    //         // lcm callback function to update the svars
-    //         void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command *msg){
-    //             while(!(svars->lock)->try_lock());
-    //             for(int i = 0; i < NUM_POS; i++){(svars->xCom)[i] = msg->joint_position[i]; (svars->uCom)[i] = msg->joint_torque[i];}
-    //             if(!(svars->flag)){svars->flag = 1;}
-    //             (svars->lock)->unlock();
-    //         }
-    // };
+            // do simulation
+            void simulate(){
+                currTime += static_cast<int64_t>(dt*1000000);
+                // run integration in a bunch of steps
+                for (int i = 0; i < numSteps; i++){
+                    _integrator<double>(nextX,currX,torqueCom,qdd,I,Tbody,step_dt);
+                    printf("[%ld] f(%f,[%f %f %f %f %f %f %f %f %f %f %f %f %f %f],[%f %f %f %f %f %f %f]) -> [%f %f %f %f %f %f %f]\n",
+                        currTime,step_dt,currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13],
+                        torqueCom[0],torqueCom[1],torqueCom[2],torqueCom[3],torqueCom[4],torqueCom[5],torqueCom[6],qdd[0],qdd[1],qdd[2],qdd[3],qdd[4],qdd[5],qdd[6]);
+                    // printf("[%ld] f([%f %f %f %f %f %f %f %f %f %f %f %f %f %f],[%f %f %f %f %f %f %f],%f) -> [%f %f %f %f %f %f %f %f %f %f %f %f %f %f]\n",
+                    //     currTime,currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13],
+                    //     torqueCom[0],torqueCom[1],torqueCom[2],torqueCom[3],torqueCom[4],torqueCom[5],torqueCom[6],step_dt,
+                    //     nextX[0],nextX[1],nextX[2],nextX[3],nextX[4],nextX[5],nextX[6],nextX[7],nextX[8],nextX[9],nextX[10],nextX[11],nextX[12],nextX[13]);
+                    for(int i = 0; i < STATE_SIZE; i++){currX[i] = nextX[i];}
+                }
+            }
 
-    // __host__
-    // void runSimulatorHandler(SimVars *svars, lcm::LCM *lcm_ptr, lcm::Subscription *sub){
-    //     // launch the thread running the trajRunner
-    //     LCM_Simulator_Handler handler = LCM_Simulator_Handler(svars);
-    //     sub = lcm_ptr->subscribe(ARM_COMMAND_CHANNEL, &LCM_Simulator_Handler::handleMessage, &handler);
-    //     sub->setQueueCapacity(1);
-    //     while(0 == lcm_ptr->handle());
-    // }
+            // publish currX
+            void publish(){
+                //construct output msg container and begin to load it with data
+                drake::lcmt_iiwa_status dataOut;                                dataOut.utime = currTime;
+                dataOut.num_joints = static_cast<int32_t>(NUM_POS);             dataOut.joint_position_measured.resize(dataOut.num_joints);      
+                dataOut.joint_velocity_estimated.resize(dataOut.num_joints);    dataOut.joint_position_commanded.resize(dataOut.num_joints);  
+                dataOut.joint_position_ipo.resize(dataOut.num_joints);          dataOut.joint_torque_measured.resize(dataOut.num_joints);  
+                dataOut.joint_torque_commanded.resize(dataOut.num_joints);      dataOut.joint_torque_external.resize(dataOut.num_joints);
+                for(int i = 0; i < NUM_POS; i++){
+                    dataOut.joint_position_commanded[i] = 0;        dataOut.joint_position_ipo[i] = 0;
+                    double val = torqueCom[i];                      dataOut.joint_torque_external[i] = 0;
+                    dataOut.joint_torque_measured[i] = val;         dataOut.joint_torque_commanded[i] = val;
+                    dataOut.joint_position_measured[i] = currX[i];  dataOut.joint_velocity_estimated[i] = currX[i+NUM_POS];
+                }
+                lcm_ptr.publish(ARM_STATUS_CHANNEL,&dataOut);
+            }
 
-    // __host__
-    // void runSimulator(lcm::LCM *lcm_ptr, lcm::Subscription *sub, double *xInit, int dt_us = 1000){
-    //     double currX[STATE_SIZE];       double nextX[STATE_SIZE];   double qdd[NUM_POS];
-    //     for(int i=0; i<STATE_SIZE; i++){currX[i] = xInit[i];}
-    //     double Tbody[36*NUM_POS];       double I[36*NUM_POS];       
-    //     initI<double>(I);               initT<double>(Tbody);
-    //     int64_t time = 0;               double dt = static_cast<double>(dt_us)/1000.0/1000.0;    struct timeval start, end;
-    //     SimVars *svars = new SimVars;   svars->flag = 0;    svars->lock = new std::mutex(); 
-    //     // launch the thread running the trajRunner
-    //     std::thread lcmThread = std::thread(runSimulatorHandler, svars, lcm_ptr, sub);
-    //     lcmThread.detach(); // how do I kill later?
-    //     lcm::LCM lcm_ptr2;  if(!lcm_ptr2.good()){printf("LCM Failed to Init\n");}
-    //     // simulator and publisher
-    //     while(1){
-    //         if (svars->flag){
-    //             gettimeofday(&start,NULL);   time += dt_us;
-    //             //construct output msg container and begin to load it with data
-    //             drake::lcmt_iiwa_status dataOut; dataOut.utime = time;
-    //             dataOut.num_joints = static_cast<int32_t>(NUM_POS); 
-    //             dataOut.joint_position_measured.resize(dataOut.num_joints);      
-    //             dataOut.joint_velocity_estimated.resize(dataOut.num_joints);
-    //             dataOut.joint_position_commanded.resize(dataOut.num_joints);  
-    //             dataOut.joint_position_ipo.resize(dataOut.num_joints);  
-    //             dataOut.joint_torque_measured.resize(dataOut.num_joints);  
-    //             dataOut.joint_torque_commanded.resize(dataOut.num_joints);
-    //             dataOut.joint_torque_external.resize(dataOut.num_joints);
-    //             while(!(svars->lock)->try_lock());
-    //             for(int i = 0; i < NUM_POS; i++){
-    //                 dataOut.joint_position_commanded[i] = (svars->xCom)[i];  dataOut.joint_position_ipo[i] = 0;
-    //                 double val = (svars->uCom)[i];                           dataOut.joint_torque_external[i] = 0;
-    //                 dataOut.joint_torque_measured[i] = val;                  dataOut.joint_torque_commanded[i] = val;
-    //             }
-    //             (svars->lock)->unlock();
-    //             // run integration in a bunch of steps
-    //             int numSteps = 1; dt /= numSteps;
-    //             for (int i = 0; i < numSteps; i++){
-    //                 _integrator<double>(nextX,currX,&(dataOut.joint_torque_measured[0]),qdd,I,Tbody,dt);
-    //                 for(int i = 0; i < STATE_SIZE; i++){currX[i] = nextX[i];}
-    //             }
-    //             for(int i = 0; i < STATE_SIZE; i++){
-    //                 if (i < NUM_POS){dataOut.joint_position_measured[i] = currX[i];}
-    //                 else{dataOut.joint_velocity_estimated[i-NUM_POS] = currX[i];}
-    //             }
-    //             lcm_ptr2.publish(ARM_STATUS_CHANNEL,&dataOut);
-    //         }
-    //         while(1){gettimeofday(&end,NULL);   if (time_delta_ms(start,end) >= dt_us){break;}}
-    //     }
-    // }
+            // run the simulator forever
+            void runSim(){
+                while(1){
+                    publish();
+                    simulate();
+                }
+            }
+    };
+
+
+    __host__
+    void runSimulator(int numSteps, double dt, double *xInit){
+        lcm::LCM lcm_ptr;
+        if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
+        LCM_Simulator_Handler handler = LCM_Simulator_Handler(numSteps, dt, xInit);
+        lcm::Subscription *sub = lcm_ptr.subscribe(ARM_COMMAND_CHANNEL, &LCM_Simulator_Handler::handleMessage, &handler);
+        sub->setQueueCapacity(1);
+        while(0 == lcm_ptr.handle());
+    }
 
 // // 4: LCM call wrappers //

@@ -518,6 +518,13 @@ int main(int argc, char *argv[])
 		double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));
     	runFig8GoalLCM<algType>(totalTime_us, 0.05, 0.05);
 	}
+	// run the simulator
+	else if (hardware == 'S'){
+		double xInit[STATE_SIZE] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+		// LCM_Simulator_Handler<algType> *shandler = new LCM_Simulator_Handler<algType>(5,0.001,xInit);
+		runSimulator(5,0.001,xInit);
+		// delete shandler;
+	}
 	// various printers
 	else if (hardware == 'P'){
 		char type = argv[1][1];
