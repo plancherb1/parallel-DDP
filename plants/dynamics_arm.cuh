@@ -49,6 +49,8 @@
 template <typename T>
 __host__ __device__ 
 void initI(T *s_I){
+    #pragma unroll
+    for (int i = 0; i < 36*NUM_POS; i++){s_I[i] = 0.0;}
     s_I[0] = 0.121128;
     s_I[4] = -0.6912;
     s_I[5] = -0.1728;
@@ -203,7 +205,7 @@ template <typename T>
 __host__ __device__ 
 void initT(T *s_T){
     #pragma unroll
-    for (int i = 0; i < 36*7; i++){s_T[i] = 0.0;}
+    for (int i = 0; i < 36*NUM_POS; i++){s_T[i] = 0.0;}
     s_T[10] = 1.0;
     s_T[14] = 0.1575;
     s_T[15] = 1.0;

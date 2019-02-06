@@ -1313,40 +1313,32 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
 
     class LCM_Simulator_Handler {
         public:
-            int numSteps;               double dt;double step_dt;    int64_t currTime;
+            int numSteps;               struct timeval start, end;   int64_t currTime;
             double nextX[STATE_SIZE];   double currX[STATE_SIZE];    double qdd[NUM_POS];
             double Tbody[36*NUM_POS];   double I[36*NUM_POS];        double torqueCom[CONTROL_SIZE]; 
             lcm::LCM lcm_ptr;
 
-            LCM_Simulator_Handler(int _numSteps, double _dt, double *xInit) : numSteps(_numSteps), dt(_dt) {
+            LCM_Simulator_Handler(int _numSteps, double *xInit) : numSteps(_numSteps) {
                 for(int i=0; i < STATE_SIZE; i++){currX[i] = xInit[i];}
                 for(int i=0; i < CONTROL_SIZE; i++){torqueCom[i] = 0;}
                 if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
-                initI<double>(I);       initT<double>(Tbody);     currTime = 0;       step_dt = dt/numSteps;
-                runSim();
+                initI<double>(I);       initT<double>(Tbody);     gettimeofday(&start,NULL);    currTime = 0;
             }
             ~LCM_Simulator_Handler(){}
 
             // lcm callback function to update the torqueCom
             void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command *msg){
-                for(int i = 0; i < CONTROL_SIZE; i++){
-                    torqueCom[i] = msg->joint_torque[i];
-                }
+                #pragma unroll
+                for(int i = 0; i < CONTROL_SIZE; i++){torqueCom[i] = msg->joint_torque[i];}
             }
 
             // do simulation
-            void simulate(){
-                currTime += static_cast<int64_t>(dt*1000000);
-                // run integration in a bunch of steps
-                for (int i = 0; i < numSteps; i++){
-                    _integrator<double>(nextX,currX,torqueCom,qdd,I,Tbody,step_dt);
-                    printf("[%ld] f(%f,[%f %f %f %f %f %f %f %f %f %f %f %f %f %f],[%f %f %f %f %f %f %f]) -> [%f %f %f %f %f %f %f]\n",
-                        currTime,step_dt,currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13],
-                        torqueCom[0],torqueCom[1],torqueCom[2],torqueCom[3],torqueCom[4],torqueCom[5],torqueCom[6],qdd[0],qdd[1],qdd[2],qdd[3],qdd[4],qdd[5],qdd[6]);
-                    // printf("[%ld] f([%f %f %f %f %f %f %f %f %f %f %f %f %f %f],[%f %f %f %f %f %f %f],%f) -> [%f %f %f %f %f %f %f %f %f %f %f %f %f %f]\n",
-                    //     currTime,currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13],
-                    //     torqueCom[0],torqueCom[1],torqueCom[2],torqueCom[3],torqueCom[4],torqueCom[5],torqueCom[6],step_dt,
-                    //     nextX[0],nextX[1],nextX[2],nextX[3],nextX[4],nextX[5],nextX[6],nextX[7],nextX[8],nextX[9],nextX[10],nextX[11],nextX[12],nextX[13]);
+            void simulate(double simTime){
+                currTime += static_cast<int64_t>(1000000*simTime);
+                double stepTime = simTime/static_cast<double>(numSteps);
+                for (int i=0; i< numSteps; i++){
+                    _integrator<double>(nextX,currX,torqueCom,qdd,I,Tbody,stepTime);
+                    #pragma unroll
                     for(int i = 0; i < STATE_SIZE; i++){currX[i] = nextX[i];}
                 }
             }
@@ -1368,24 +1360,29 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
                 lcm_ptr.publish(ARM_STATUS_CHANNEL,&dataOut);
             }
 
-            // run the simulator forever
+            // run the simulator for ellapsed time
             void runSim(){
-                while(1){
-                    publish();
-                    simulate();
-                }
+                gettimeofday(&end,NULL);    double simTime = time_delta_s(start,end);   gettimeofday(&start,NULL);
+                simulate(simTime);          publish();
             }
     };
 
 
     __host__
-    void runSimulator(int numSteps, double dt, double *xInit){
+    void runSimulator(int numSteps, double *xInit){
         lcm::LCM lcm_ptr;
         if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
-        LCM_Simulator_Handler handler = LCM_Simulator_Handler(numSteps, dt, xInit);
+        LCM_Simulator_Handler handler = LCM_Simulator_Handler(numSteps, xInit);
         lcm::Subscription *sub = lcm_ptr.subscribe(ARM_COMMAND_CHANNEL, &LCM_Simulator_Handler::handleMessage, &handler);
         sub->setQueueCapacity(1);
-        while(0 == lcm_ptr.handle());
+        // poll the fd for updates
+        while(1){   
+            int lcm_fd = lcm_ptr.getFileno();  fd_set fds;     FD_ZERO(&fds);  FD_SET(lcm_fd, &fds);
+            struct timeval timeout = {0,10};   // seconds, microseconds to wait for message
+            if (select(lcm_fd + 1, &fds, 0, 0, &timeout)) {if (FD_ISSET(lcm_fd, &fds)){lcm_ptr.handle();}} 
+            handler.runSim();
+        }
+        // while(0 == lcm_ptr.handle());
     }
 
 // // 4: LCM call wrappers //

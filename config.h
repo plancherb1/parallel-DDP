@@ -124,6 +124,7 @@ typedef float algType;
 #define get_time_ms(time) (get_time_us(time) / 1000.0)
 #define time_delta_us(start,end) (static_cast<double>(get_time_us(end) - get_time_us(start)))
 #define time_delta_ms(start,end) (time_delta_us(start,end)/1000.0)
+#define time_delta_s(start,end) (time_delta_ms(start,end)/1000.0)
 
 // GPU Stream Options
 #define NUM_STREAMS (max(18,4+NUM_ALPHA))
