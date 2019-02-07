@@ -1221,11 +1221,16 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
             ~LCM_IIWA_STATUS_printer(){}
 
             void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){                
-                double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position_measured[0]), &eePos[0]);
-                printf("[%ld] eePos: [%f %f %f] w/ jointVel [%f %f %f %f %f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2],
-                    msg->joint_velocity_estimated[0],msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],
-                    msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],msg->joint_velocity_estimated[5],
-                    msg->joint_velocity_estimated[6]);
+                // double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position_measured[0]), &eePos[0]);
+                // printf("[%ld] eePos: [%f %f %f] w/ jointVel [%f %f %f %f %f %f %f]\n",msg->utime,eePos[0],eePos[1],eePos[2],
+                //     msg->joint_velocity_estimated[0],msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],
+                //     msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],msg->joint_velocity_estimated[5],
+                //     msg->joint_velocity_estimated[6]);
+                printf("%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+                    msg->joint_position_measured[0],msg->joint_position_measured[1],msg->joint_position_measured[2],msg->joint_position_measured[3],
+                    msg->joint_position_measured[4],msg->joint_position_measured[5],msg->joint_position_measured[6],msg->joint_velocity_estimated[0],
+                    msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],
+                    msg->joint_velocity_estimated[5],msg->joint_velocity_estimated[6]);
             }
     };
 
@@ -1330,6 +1335,9 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
             void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command *msg){
                 #pragma unroll
                 for(int i = 0; i < CONTROL_SIZE; i++){torqueCom[i] = msg->joint_torque[i];}
+                // printf("currPosDes [%f %f %f %f %f %f %f] vs currPos [%f %f %f %f %f %f %f]\n",
+                //     msg->joint_position[0],msg->joint_position[1],msg->joint_position[2],msg->joint_position[3],
+                //     msg->joint_position[4],msg->joint_position[5],msg->joint_position[6],currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6]);
             }
 
             // do simulation

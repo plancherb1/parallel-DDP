@@ -341,7 +341,16 @@ class LCM_Fig8Goal_Handler {
 		void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
 			// get current goal
 			T goal[3];	double time = inFig8 ? msg->utime - zeroTime : 0;	loadFig8Goal(goal,time,totalTime);
-			// figure out if we are in the goal moving time
+			// compute the position error norm and velocity norm
+			T eNorm; T vNorm; T currX[STATE_SIZE];
+			for(int i=0; i < STATE_SIZE; i++){
+				if(i < NUM_POS){currX[i] = static_cast<T>(msg->joint_position_measured[i]);}
+				else{			currX[i] = static_cast<T>(msg->joint_velocity_estimated[i-NUM_POS]);}
+			}
+			evNorm(currX, goal, &eNorm, &vNorm);
+			// debug print
+			printf("[%f] eNorm[%f] vNorm[%f] for goal[%f %f %f]\n",static_cast<double>(msg->utime),eNorm,vNorm,goal[0],goal[1],goal[2]);
+			// then figure out if we are in the goal moving time
 			if(inFig8){
 				// then load in goal pos and zero out vel, orientation, angularVelocity (for now) -- note orientation is size 4 (quat)
 				kuka::lcmt_target_twist dataOut;               dataOut.utime = msg->utime;
@@ -350,21 +359,9 @@ class LCM_Fig8Goal_Handler {
 				dataOut.orientation[3] = 0;
 				// and publish it to goal channel
 			    lcm_ptr.publish(ARM_GOAL_CHANNEL,&dataOut);
-			    printf("[%f] Goal is at [%f %f %f]\n",static_cast<double>(msg->utime),goal[0],goal[1],goal[2]);
 			}
 			// else check to see if we should update goal next time
-			else{
-				// compute the position error norm and velocity norm
-				T eNorm; T vNorm; T currX[STATE_SIZE];
-				for(int i=0; i < STATE_SIZE; i++){
-					if(i < NUM_POS){currX[i] = static_cast<T>(msg->joint_position_measured[i]);}
-					else{			currX[i] = static_cast<T>(msg->joint_velocity_estimated[i]);}
-				}
-				evNorm(currX, goal, &eNorm, &vNorm);
-				// if in limits then set up for the moving goal
-				if (eNorm < eNormLim /*&& vNorm < vNormLim*/){zeroTime = msg->utime; inFig8 = 1;}
-				else{printf("[%f] eNorm[%f] vNorm[%f]\n",static_cast<double>(msg->utime),eNorm,vNorm);}
-			}
+			else if (eNorm < eNormLim && vNorm < vNormLim){zeroTime = msg->utime; inFig8 = 1;}
 			
 		}
 };
@@ -372,7 +369,7 @@ template <typename T>
 void runFig8GoalLCM(double tTime, double eLim, double vLim){
 	lcm::LCM lcm_ptr;
 	LCM_Fig8Goal_Handler<T> handler = LCM_Fig8Goal_Handler<T>(tTime, eLim, vLim);
-	lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_CHANNEL, &LCM_Fig8Goal_Handler<T>::handleStatus, &handler);
+	lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_Fig8Goal_Handler<T>::handleStatus, &handler);
     sub->setQueueCapacity(1);
     while(0 == lcm_ptr.handle());
 }
@@ -427,7 +424,7 @@ void testMPC_LCM_singleGoal(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *
     // launch the status filter
     std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<algType>);
     // launch the goal monitor
-    std::thread goalThread = std::thread(&runFig8GoalLCM<algType>, totalTime_us, 0.05, 0.05);
+    std::thread goalThread = std::thread(&runFig8GoalLCM<algType>, totalTime_us, 0.05, 0.1);
     printf("All threads launched -- check simulator output!\n");
     // clear it all 10 seconds later
     // struct timeval start, end;       gettimeofday(&start,NULL);          while(1){gettimeofday(&end,NULL);       if (time_delta_ms(start,end) >= 10000){break;}}
