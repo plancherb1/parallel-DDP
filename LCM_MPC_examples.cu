@@ -519,7 +519,7 @@ int main(int argc, char *argv[])
 	else if (hardware == 'S'){
 		double xInit[STATE_SIZE] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 		// LCM_Simulator_Handler<algType> *shandler = new LCM_Simulator_Handler<algType>(5,0.001,xInit);
-		runSimulator(10,xInit);
+		runSimulator(50,xInit);
 		// delete shandler;
 	}
 	// various printers

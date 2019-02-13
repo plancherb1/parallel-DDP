@@ -1272,10 +1272,12 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
             ~LCM_IIWA_COMMAND_printer(){}
 
             void handleMessage(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command *msg){                
-                double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position[0]), &eePos[0]);
-                printf("[%ld] eePosDes: [%f %f %f] control: [%f %f %f %f %f %f %f ]\n",msg->utime,eePos[0],eePos[1],eePos[2],
-                                            msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],msg->joint_torque[3],
-                                            msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
+                printf("%ld %f %f %f %f %f %f %f\n",msg->utime,msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],
+                                                     msg->joint_torque[3],msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
+                // double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position[0]), &eePos[0]);
+                // printf("[%ld] eePosDes: [%f %f %f] control: [%f %f %f %f %f %f %f ]\n",msg->utime,eePos[0],eePos[1],eePos[2],
+                //                             msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],msg->joint_torque[3],
+                //                             msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
             }
     };
 
@@ -1342,13 +1344,26 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
 
             // do simulation
             void simulate(double simTime){
+                double prevX[STATE_SIZE];
+                #pragma unroll
+                for(int i = 0; i < STATE_SIZE; i++){prevX[i] = currX[i];}
+                double currU[STATE_SIZE];
+                #pragma unroll
+                for(int i = 0; i < CONTROL_SIZE; i++){currU[i] = torqueCom[i];}
+
                 currTime += static_cast<int64_t>(1000000*simTime);
                 double stepTime = simTime/static_cast<double>(numSteps);
                 for (int i=0; i< numSteps; i++){
-                    _integrator<double>(nextX,currX,torqueCom,qdd,I,Tbody,stepTime);
+                    _integrator<double>(nextX,currX,currU,qdd,I,Tbody,stepTime);
                     #pragma unroll
                     for(int i = 0; i < STATE_SIZE; i++){currX[i] = nextX[i];}
                 }
+
+                printf("%f:%f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+                       simTime,
+                       currU[0],currU[1],currU[2],currU[3],currU[4],currU[5],currU[6],
+                       prevX[0],prevX[1],prevX[2],prevX[3],prevX[4],prevX[5],prevX[6],prevX[7],prevX[8],prevX[9],prevX[10],prevX[11],prevX[12],prevX[13],
+                       currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13]);
             }
 
             // publish currX
@@ -1370,7 +1385,13 @@ const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
 
             // run the simulator for ellapsed time
             void runSim(){
-                gettimeofday(&end,NULL);    double simTime = time_delta_s(start,end);   gettimeofday(&start,NULL);
+                double simTime;
+                while(1){
+                    gettimeofday(&end,NULL);
+                    simTime = time_delta_s(start,end);
+                    if (simTime >= 0.001){break;}
+                } 
+                gettimeofday(&start,NULL);
                 simulate(simTime);          publish();
             }
     };
