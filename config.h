@@ -53,7 +53,7 @@
 #endif
 
 // optiomizer options
-#define DEBUG_SWITCH 0 // 1 for on 0 for off
+#define DEBUG_SWITCH 1 // 1 for on 0 for off
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
 #define FINITE_DIFF_EPSILON 0.0000001
 // define if we are working in doubles or floats
@@ -73,7 +73,7 @@ typedef float algType;
 #endif
 
 // parallelization options
-#define M 4
+#define M 1
 #define M_B M // how many time steps to do in parallel on back pass
 #define M_F M // how many multiple shooting intervals to use in the forward pass
 #define N_B (NUM_TIME_STEPS/M_B)

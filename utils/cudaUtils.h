@@ -64,6 +64,16 @@
 			__syncthreads();
   		#endif
 	}
+
+	template <int tx, int ty, int bx, int by>
+	__host__ __device__ __forceinline__
+	int hd__printOnce(){
+		#ifdef __CUDA_ARCH__
+			if(threadIdx.x != tx || threadIdx.y != ty || blockIdx.x != bx || blockIdx.y != by){return 0;}
+  		#endif
+		return 1;
+
+	}
 /*** 0 Host Device loop bounds and sync code 0 ***/
 
 /*** 1 CUDA ERROR CHECKING CODE 1 ***/

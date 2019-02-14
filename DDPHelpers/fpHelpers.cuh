@@ -239,6 +239,15 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 		T *s_xkp1 = s_dx; // re-use this shared mem as we are done with it for this loop
 		if(tempFlag){_integrator<T>(s_xkp1,s_x,s_u,s_qdd,d_I,d_Tbody,dt,s_eePos);}
 		else        {_integrator<T>(s_xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,s_eePos);}
+		// hd__syncthreads();
+		// if (hd__printOnce<0,0,0,NUM_ALPHA-1>()){printf("alpha: %f\n",alpha);
+		// 										printMat<T,1,STATE_SIZE>(xk,1);
+		// 										printMat<T,1,STATE_SIZE>(xpk,1);
+		// 										printMat<T,1,STATE_SIZE>(s_x,1);
+		// 										printMat<T,1,CONTROL_SIZE>(uk,1);
+		// 										printMat<T,1,CONTROL_SIZE>(s_u,1);
+		// 										printMat<T,1,NUM_POS>(s_qdd,1);
+		// 										printMat<T,1,STATE_SIZE>(s_xkp1,1);}
 		hd__syncthreads();
 		// then write to global memory unless "final" state where we just use for defect on boundary
 		#pragma unroll
@@ -374,7 +383,7 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 		cdJ = prevJ - J[i]; JFlag = cdJ >= 0.0 && cdJ > *dJ;
 		cz = cdJ / (alpha[i]*dJexp[0] + alpha[i]*alpha[i]/2.0*dJexp[1]); zFlag = USE_EXP_RED ? (EXP_RED_MIN < cz && cz < EXP_RED_MAX) : 1;
 		dFlag = M_F == 1 || *ignore_defect ? 1 :  d[i] < MAX_DEFECT_SIZE;
-		//printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]f[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
+		// printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]f[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
 		if(JFlag && zFlag && dFlag){
 			if (d[i] < USE_MAX_DEFECT){*ignore_defect = 0;} // update the ignore defect
 			*alphaIndex = i; *dJ = cdJ; *z = cz; // update current best index, dJ, z
