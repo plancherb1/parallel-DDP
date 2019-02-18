@@ -4,42 +4,61 @@
  * TBD NEED TO ADD DOC HERE
  *****************************************************************/
 
-#define Q1 0.1 // q
-#define Q2 0.001 // qd
-#define R  0.0001
-#define QF1 1000.0 // q
-#define QF2 1000.0 // qd
-
-#define USE_SMOOTH_ABS 0
-#define SMOOTH_ABS_ALPHA 0.2
-
-#ifndef MPC_MODE
-	#if USE_SMOOTH_ABS
-		#define Q_HAND1 0.1		//2.0 // xyz
-		#define Q_HAND2 0.001		//2.0 // rpy
-		#define R_HAND 0.0001		//0.0001
-		#define QF_HAND1 1000000.0	//20000.0 // xyz
-		#define QF_HAND2 10000.0	//20000.0 // rpy
-		#define Q_xdHAND 0.1		//1.0//0.1
-		#define QF_xdHAND 10000.0	//10.0//100.0
-		#define Q_xHAND 0.0		//0.0//0.001//1.0
-		#define QF_xHAND 0.0		//0.0//1.0
+#if USE_WAFR_URDF
+ 	#define Q1 0.1 // q
+	#define Q2 0.001 // qd
+	#define R  0.0001
+	#define QF1 1000.0 // q
+	#define QF2 1000.0 // qd
+	#define USE_SMOOTH_ABS 0
+	#define SMOOTH_ABS_ALPHA 0.2
+	
+	#ifndef MPC_MODE
+		#if USE_SMOOTH_ABS
+			#define Q_HAND1 0.1		//2.0 // xyz
+			#define Q_HAND2 0.001		//2.0 // rpy
+			#define R_HAND 0.0001		//0.0001
+			#define QF_HAND1 1000000.0	//20000.0 // xyz
+			#define QF_HAND2 10000.0	//20000.0 // rpy
+			#define Q_xdHAND 0.1		//1.0//0.1
+			#define QF_xdHAND 10000.0	//10.0//100.0
+			#define Q_xHAND 0.0		//0.0//0.001//1.0
+			#define QF_xHAND 0.0		//0.0//1.0
+		#else
+			#define Q_HAND1 0.1		//1.0 // xyz
+			#define Q_HAND2 0//0.001		//1.0 // rpy
+			#define R_HAND 0.0001		//0.001
+			#define QF_HAND1 1000.0		//5000.0 // xyz
+			#define QF_HAND2 0//10.0		//5000.0 // rpy
+			#define Q_xdHAND 0.1		//1.0//0.1
+			#define QF_xdHAND 1000.0	//10.0//100.0
+			#define Q_xHAND 0.0		//0.0//0.001//1.0
+			#define QF_xHAND 0.0		//0.0//1.0
+		#endif
 	#else
 		#define Q_HAND1 0.1		//1.0 // xyz
-		#define Q_HAND2 0//0.001		//1.0 // rpy
+		#define Q_HAND2 0		//1.0 // rpy
 		#define R_HAND 0.0001		//0.001
 		#define QF_HAND1 1000.0		//5000.0 // xyz
-		#define QF_HAND2 0//10.0		//5000.0 // rpy
+		#define QF_HAND2 0		//5000.0 // rpy
 		#define Q_xdHAND 0.1		//1.0//0.1
-		#define QF_xdHAND 1000.0	//10.0//100.0
+		#define QF_xdHAND 10.0	//10.0//100.0
 		#define Q_xHAND 0.0		//0.0//0.001//1.0
 		#define QF_xHAND 0.0		//0.0//1.0
 	#endif
-#else
-	#define Q_HAND1 0.1		//1.0 // xyz
+#else 
+ 	#define Q1 0.001 // q
+	#define Q2 1.0 // qd
+	#define R  1000.0
+	#define QF1 1.0 // q
+	#define QF2 1.0 // qd
+	
+	#define USE_SMOOTH_ABS 0
+	#define SMOOTH_ABS_ALPHA 0.2
+	#define Q_HAND1 0.001		//1.0 // xyz
 	#define Q_HAND2 0		//1.0 // rpy
-	#define R_HAND 0.0001		//0.001
-	#define QF_HAND1 1000.0		//5000.0 // xyz
+	#define R_HAND 1000.0		//0.001
+	#define QF_HAND1 1.0		//5000.0 // xyz
 	#define QF_HAND2 0		//5000.0 // rpy
 	#define Q_xdHAND 0.1		//1.0//0.1
 	#define QF_xdHAND 10.0	//10.0//100.0

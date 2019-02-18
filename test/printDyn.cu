@@ -1,9 +1,9 @@
 /***
-nvcc -std=c++11 -o test.exe test.cu utils/cudaUtils.cu utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o printDyn.exe printDyn.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
 #define EE_COST 1
 #define PLANT 4
-#include "DDPHelpers.cuh"
+#include "../DDPHelpers.cuh"
 #include <random>
 #include <vector>
 #include <algorithm>

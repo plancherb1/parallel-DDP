@@ -59,6 +59,13 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 			bpTime[iter-1] = time_delta_ms(start2,end2);
 		// BACKWARD PASS //
 
+		// printf("x original\n");
+		// for(unsigned int k=0; k < NUM_TIME_STEPS; k++){printMatKern<T,1,DIM_x_r><<<1,1>>>(h_d_x[NUM_ALPHA-1] + ld_x*k,1);gpuErrchk(cudaDeviceSynchronize());}
+		// printf("xp original\n");
+		// for(unsigned int k=0; k < NUM_TIME_STEPS; k++){printMatKern<T,1,DIM_x_r><<<1,1>>>(d_xp + ld_x*k,1);gpuErrchk(cudaDeviceSynchronize());}
+		// printf("u original\n");
+		// for(unsigned int k=0; k < NUM_TIME_STEPS-1; k++){printMatKern<T,1,DIM_u_r><<<1,1>>>(h_d_u[NUM_ALPHA-1] + ld_u*k,1);gpuErrchk(cudaDeviceSynchronize());}
+
 		// FORWARD PASS //
 			// FORWARD SWEEP //
 				gettimeofday(&start2,NULL);
@@ -80,6 +87,11 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 				simTime[iter-1] = time_delta_ms(start2,end2);
 			// FORWARD SIM //
 		// FORWARD PASS //
+				// printf("x final\n");
+				// for(unsigned int k=0; k < NUM_TIME_STEPS; k++){printMatKern<T,1,DIM_x_r><<<1,1>>>(h_d_x[NUM_ALPHA-1] + ld_x*k,1);gpuErrchk(cudaDeviceSynchronize());}
+				// printf("u final\n");
+				// for(unsigned int k=0; k < NUM_TIME_STEPS-1; k++){printMatKern<T,1,DIM_u_r><<<1,1>>>(h_d_u[NUM_ALPHA-1] + ld_u*k,1);gpuErrchk(cudaDeviceSynchronize());}
+				// return;
 
 		// NEXT ITERATION SETUP //
 			gettimeofday(&start2,NULL);

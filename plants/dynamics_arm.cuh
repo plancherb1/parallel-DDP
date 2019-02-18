@@ -45,13 +45,12 @@
    #define GRAVITY 9.81 // in full iLQR sim we are trying to come up with something assuming no gravity comp or anything hardware related
 #endif
 /*** PLANT SPECIFIC RBDYN HELPERS ***/
-#define USE_OLD 0
 template <typename T>
 __host__ __device__ 
 void initI(T *s_I){
     #pragma unroll
     for (int i = 0; i < 36*NUM_POS; i++){s_I[i] = 0.0;}
-    #if USE_OLD
+    #if USE_WAFR_URDF
         s_I[0] = 0.121128;
         s_I[4] = -0.6912;
         s_I[5] = -0.1728;
@@ -331,7 +330,7 @@ __host__ __device__
 void initT(T *s_T){
     #pragma unroll
     for (int i = 0; i < 36*NUM_POS; i++){s_T[i] = 0.0;}
-    #if USE_OLD
+    #if USE_WAFR_URDF
         s_T[10] = 1.0;
         s_T[14] = 0.1575;
         s_T[15] = 1.0;
@@ -406,7 +405,7 @@ void initT(T *s_T){
 template <typename T>
 __host__ __device__ 
 void updateT(T *s_T, T *s_cosx, T *s_sinx){
-    #if USE_OLD
+    #if USE_WAFR_URDF
         s_T[0] = s_cosx[0];
         s_T[1] = s_sinx[0];
         s_T[4] = -s_sinx[0];
@@ -501,7 +500,7 @@ void updateT(T *s_T, T *s_cosx, T *s_sinx){
 template <typename T>
 __host__ __device__ 
 void loadTdx4(T *s_Tdx, T *s_cosx, T *s_sinx){
-    #if USE_OLD
+    #if USE_WAFR_URDF
         s_Tdx[0] = -s_sinx[0];
         s_Tdx[1] = s_cosx[0];
         s_Tdx[4] = -s_cosx[0];

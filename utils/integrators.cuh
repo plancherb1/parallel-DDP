@@ -13,6 +13,7 @@
  ****************************************************************/
 // x = [q;qd] so xd = [dq,qdd] thus dxd_dx,u = [0_{numpos},I_{numpos},0_{numpos};dqdd]
 #define dqdd2dxd(dqdd,r,c) (r < NUM_POS ? (r + NUM_POS == c ? 1.0 : 0.0) : dqdd[(c-1)*NUM_POS + r])
+#define dqddk2dxd(dqddk,r,c) (r < NUM_POS ? (r + NUM_POS == c ? 1.0 : 0.0) : dqddk)
 
 #if INTEGRATOR == 1 // Euler
 	template <typename T>

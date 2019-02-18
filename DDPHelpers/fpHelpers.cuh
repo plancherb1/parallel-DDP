@@ -239,16 +239,17 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 		T *s_xkp1 = s_dx; // re-use this shared mem as we are done with it for this loop
 		if(tempFlag){_integrator<T>(s_xkp1,s_x,s_u,s_qdd,d_I,d_Tbody,dt,s_eePos);}
 		else        {_integrator<T>(s_xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,s_eePos);}
-		// hd__syncthreads();
-		// if (hd__printOnce<0,0,0,NUM_ALPHA-1>()){printf("alpha: %f\n",alpha);
-		// 										printMat<T,1,STATE_SIZE>(xk,1);
-		// 										printMat<T,1,STATE_SIZE>(xpk,1);
-		// 										printMat<T,1,STATE_SIZE>(s_x,1);
-		// 										printMat<T,1,CONTROL_SIZE>(uk,1);
-		// 										printMat<T,1,CONTROL_SIZE>(s_u,1);
-		// 										printMat<T,1,NUM_POS>(s_qdd,1);
-		// 										printMat<T,1,STATE_SIZE>(s_xkp1,1);}
 		hd__syncthreads();
+		// if (hd__printOnce<0,0,0,NUM_ALPHA-1>()){
+		// 		printf("alpha: %f\n",alpha);
+		// 		printMat<T,1,STATE_SIZE>(xk,1);
+		// 		printMat<T,1,STATE_SIZE>(xpk,1);
+		// 		if(tempFlag){printMat<T,1,STATE_SIZE>(s_x,1);}
+		// 		printMat<T,1,CONTROL_SIZE>(uk,1);
+		// 		if(tempFlag){printMat<T,1,CONTROL_SIZE>(s_u,1);}
+		// 		printMat<T,1,NUM_POS>(s_qdd,1);
+		// 		printMat<T,1,STATE_SIZE>(s_xkp1,1);}
+		// hd__syncthreads();
 		// then write to global memory unless "final" state where we just use for defect on boundary
 		#pragma unroll
 		for (int ind = start; ind < STATE_SIZE; ind += delta){

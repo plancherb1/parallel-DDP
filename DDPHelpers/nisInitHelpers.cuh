@@ -102,37 +102,37 @@ void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *x
 	}
 }
 
-#if USE_FINITE_DIFF
-	template <typename T>
-	__host__ __device__ __forceinline__
-	void finiteDiffInner(T *ABk, T *xk, T *uk, T *s_x, T *s_u, T *s_qdd, T *d_I, T *d_Tbody, int outputCol){
-		int start, delta; singleLoopVals(&start,&delta);
-		#pragma unroll
-		for (int ind = start; ind < STATE_SIZE; ind += delta){
-			T val = xk[ind];
-			T adj = (outputCol == ind ? FINITE_DIFF_EPSILON : 0.0);
-			s_x[ind] = val + adj;
-			s_x[ind + STATE_SIZE] = val - adj;
-			if (ind < CONTROL_SIZE){
-				val = uk[ind];
-				adj = (outputCol == ind + STATE_SIZE ? FINITE_DIFF_EPSILON : 0.0);
-				s_u[ind] = val + adj;
-				s_u[ind + CONTROL_SIZE] = val - adj;
-			}
-		}
-		hd__syncthreads();
-		// run dynamics on both states
-		dynamics<T>(s_qdd,s_x,s_u,d_I,d_Tbody,nullptr,2);
-		hd__syncthreads();
-		// now do the finite diff rule
-		#pragma unroll
-		for (int ind = start; ind < STATE_SIZE; ind += delta){
-			T delta = ind < NUM_POS ? (s_x[ind + NUM_POS] - s_x[ind + NUM_POS + STATE_SIZE]) : (s_qdd[ind-NUM_POS] - s_qdd[ind]);
-			T dxdd = delta / (2.0*FINITE_DIFF_EPSILON);
-			ABk[ind] = (ind == outputCol ? 1.0 : 0.0) + TIME_STEP * dxdd;
+template <typename T>
+__host__ __device__ __forceinline__
+void finiteDiffInner(T *ABk, T *xk, T *uk, T *s_x, T *s_u, T *s_qdd, T *d_I, T *d_Tbody, int outputCol){
+	int start, delta; singleLoopVals(&start,&delta);
+	#pragma unroll
+	for (int ind = start; ind < STATE_SIZE; ind += delta){
+		T val = xk[ind];
+		T adj = (outputCol == ind ? FINITE_DIFF_EPSILON : 0.0);
+		s_x[ind] = val + adj;
+		s_x[ind + STATE_SIZE] = val - adj;
+		if (ind < CONTROL_SIZE){
+			val = uk[ind];
+			adj = (outputCol == ind + STATE_SIZE ? FINITE_DIFF_EPSILON : 0.0);
+			s_u[ind] = val + adj;
+			s_u[ind + CONTROL_SIZE] = val - adj;
 		}
 	}
+	hd__syncthreads();
+	// run dynamics on both states
+	dynamics<T>(s_qdd,s_x,s_u,d_I,d_Tbody,nullptr,2);
+	hd__syncthreads();
+	// now do the finite diff rule and apply euler integraetion 
+	#pragma unroll
+	for (int ind = start; ind < STATE_SIZE; ind += delta){
+		T delta = ind < NUM_POS ? (s_x[ind + NUM_POS] - s_x[ind + NUM_POS + STATE_SIZE]) : (s_qdd[ind-NUM_POS] - s_qdd[ind]);
+		T dxdd = delta / (2.0*FINITE_DIFF_EPSILON);
+		ABk[ind] = (ind == outputCol ? 1.0 : 0.0) + (T)TIME_STEP*dqddk2dxd(dxdd,ind,outputCol);
+	}
+}
 
+#if USE_FINITE_DIFF
 	template <typename T>
 	__global__
 	void integratorGradientKern(T *d_AB, T *d_x, T *d_u, T *d_I, T *d_Tbody, int ld_x, int ld_u, int ld_AB){

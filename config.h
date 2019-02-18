@@ -55,7 +55,7 @@
 // optiomizer options
 #define DEBUG_SWITCH 1 // 1 for on 0 for off
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
-#define FINITE_DIFF_EPSILON 0.0000001
+#define FINITE_DIFF_EPSILON 0.00001
 // define if we are working in doubles or floats
 // typedef double algType;
 typedef float algType;
@@ -156,6 +156,11 @@ typedef float algType;
 #endif
 #ifndef CONSTRAINTS_ON
 	#define CONSTRAINTS_ON 0 // AL style constraints
+#endif
+
+// dynamics URDF options (only applies to Kuka)
+#ifndef USE_WAFR_URDF
+	#define USE_WAFR_URDF 0
 #endif
 
 // Matrix Dimms
