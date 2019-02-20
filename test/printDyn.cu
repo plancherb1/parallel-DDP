@@ -9,6 +9,13 @@ nvcc -std=c++11 -o printDyn.exe printDyn.cu ../utils/cudaUtils.cu ../utils/threa
 #include <algorithm>
 #include <iostream>
 
+void print_x_u_qdd_dqdd(double *s_xk, double *s_uk, double *s_qddk, double *s_dqddk, double *d_I, double *d_Tbody){
+	printf("xk:\n");for (int j = 0; j < STATE_SIZE; j++){printf("%f ",s_xk[j]);}printf("\n");
+	printf("uk:\n");for (int j = 0; j < CONTROL_SIZE; j++){printf("%f ",s_uk[j]);}printf("\n");
+	printf("qdd:\n");dynamics(s_qddk,s_xk,s_uk,d_I,d_Tbody);printMat<double,1,NUM_POS>(s_qddk,1);
+	printf("dqdd:\n");dynamicsGradient(s_dqddk,s_qddk,s_xk,s_uk,d_I,d_Tbody);printMat<double,NUM_POS,3*NUM_POS>(s_dqddk,NUM_POS);printf("\n");
+}
+
 int main(int argc, char *argv[]){
 	double d_I[36*NUM_POS];
 	double d_Tbody[36*NUM_POS];
