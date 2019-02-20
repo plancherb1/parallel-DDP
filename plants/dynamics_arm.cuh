@@ -334,29 +334,35 @@ void initT(T *s_T){
         s_T[10] = 1.0;
         s_T[14] = 0.1575;
         s_T[15] = 1.0;
+
         s_T[44] = -0.00000000000020682;
         s_T[45] = 1.0;
         s_T[46] = 0.0000000000048966;
         s_T[50] = 0.2025;
         s_T[51] = 1.0;
+
         s_T[80] = -0.00000000000020682;
         s_T[81] = 1.0;
         s_T[82] = 0.0000000000048966;
         s_T[85] = 0.2045;
         s_T[87] = 1.0;
+
         s_T[117] = -1.0;
         s_T[118] = 0.0000000000048966;
         s_T[122] = 0.2155;
         s_T[123] = 1.0;
+
         s_T[152] = -0.0000000000000000000000010127;
         s_T[153] = 1.0;
         s_T[154] = -0.0000000000048966;
         s_T[157] = 0.1845;
         s_T[159] = 1.0;
+
         s_T[189] = -1.0;
         s_T[190] = 0.0000000000048966;
         s_T[194] = 0.2155;
         s_T[195] = 1.0;
+
         s_T[224] = -0.0000000000000000000000010127;
         s_T[225] = 1.0;
         s_T[226] = -0.0000000000048966;
@@ -410,6 +416,7 @@ void updateT(T *s_T, T *s_cosx, T *s_sinx){
         s_T[1] = s_sinx[0];
         s_T[4] = -s_sinx[0];
         s_T[5] = s_cosx[0];
+
         s_T[36] = 0.0000000000000000000000010127*s_sinx[1]-s_cosx[1];
         s_T[37] = -0.00000000000020682*s_cosx[1]-0.0000000000048966*s_sinx[1];
         s_T[38] = s_sinx[1];
@@ -417,30 +424,35 @@ void updateT(T *s_T, T *s_cosx, T *s_sinx){
         s_T[41] = 0.00000000000020682*s_sinx[1]-0.0000000000048966*s_cosx[1];
         s_T[42] = s_cosx[1];
         s_T[44] = -0.00000000000020682;
+
         s_T[72] = 0.0000000000000000000000010127*s_sinx[2]-s_cosx[2];
         s_T[73] = -0.00000000000020682*s_cosx[2]-0.0000000000048966*s_sinx[2];
         s_T[74] = s_sinx[2];
         s_T[76] = 0.0000000000000000000000010127*s_cosx[2]+s_sinx[2];
         s_T[77] = 0.00000000000020682*s_sinx[2]-0.0000000000048966*s_cosx[2];
         s_T[78] = s_cosx[2];
+
         s_T[108] = s_cosx[3];
         s_T[109] = 0.0000000000048966*s_sinx[3];
         s_T[110] = s_sinx[3];
         s_T[112] = -s_sinx[3];
         s_T[113] = 0.0000000000048966*s_cosx[3];
         s_T[114] = s_cosx[3];
+
         s_T[144] = 0.00000000000020682*s_sinx[4]-s_cosx[4];
         s_T[145] = 0.0000000000048966*s_sinx[4];
         s_T[146] = 0.00000000000020682*s_cosx[4]+s_sinx[4];
         s_T[148] = 0.00000000000020682*s_cosx[4]+s_sinx[4];
         s_T[149] = 0.0000000000048966*s_cosx[4];
         s_T[150] = -0.00000000000020682*s_sinx[4]+s_cosx[4];
+
         s_T[180] = s_cosx[5];
         s_T[181] = 0.0000000000048966*s_sinx[5];
         s_T[182] = s_sinx[5];
         s_T[184] = -s_sinx[5];
         s_T[185] = 0.0000000000048966*s_cosx[5];
         s_T[186] = s_cosx[5];
+
         s_T[216] = 0.00000000000020682*s_sinx[6]-s_cosx[6];
         s_T[217] = 0.0000000000048966*s_sinx[6];
         s_T[218] = 0.00000000000020682*s_cosx[6]+s_sinx[6];
@@ -1236,6 +1248,7 @@ void compute_M_Tau(T *s_M, T *s_Tau, T *s_W, T *s_JdotV, T *s_F, T *s_Icrbs, T *
       }     
       // for our robot damping is all velocity dependent and =0.5v and B = I so tau = u-(c+0.5v)
       s_Tau[ind] = s_u[ind] - (val + 0.5*s_x[NUM_POS+ind]);
+      // printf("Ind[%d]: Tau[%f] = u[%f] - (val[%f] + 0.5qd[%f])\n",ind,s_Tau[ind],s_u[ind],val,0.5*s_x[NUM_POS+ind]);
    }
 }
 
@@ -1820,7 +1833,7 @@ void dynamics(T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody, T *s_eePos = nullptr
       // TBD: DO SOMETHING WITH THE ERROR
       T *s_Minv = &s_temp2[NUM_POS*NUM_POS];
       hd__syncthreads();
-      // finally compute qdd
+      // finally compute qdd 
       compute_qdd(s_qddk,s_Minv,s_Tau);
    }
 }

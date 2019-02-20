@@ -47,11 +47,11 @@
 		#define QF_xHAND 0.0		//0.0//1.0
 	#endif
 #else 
- 	#define Q1 0.001 // q
-	#define Q2 1.0 // qd
-	#define R  1000.0
-	#define QF1 1.0 // q
-	#define QF2 1.0 // qd
+ 	#define Q1 0.1 // q
+	#define Q2 0.001 // qd
+	#define R  0.0001
+	#define QF1 1000.0 // q
+	#define QF2 1000.0 // qd
 	
 	#define USE_SMOOTH_ABS 0
 	#define SMOOTH_ABS_ALPHA 0.2

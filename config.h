@@ -53,12 +53,12 @@
 #endif
 
 // optiomizer options
-#define DEBUG_SWITCH 1 // 1 for on 0 for off
+#define DEBUG_SWITCH 0 // 1 for on 0 for off
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
 #define FINITE_DIFF_EPSILON 0.00001
 // define if we are working in doubles or floats
-// typedef double algType;
-typedef float algType;
+typedef double algType;
+// typedef float algType;
 
 // algorithmic options
 #ifndef INTEGRATOR

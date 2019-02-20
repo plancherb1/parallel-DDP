@@ -11,7 +11,7 @@ nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu utils/cudaUtils.cu utils/threa
 #include <iostream>
 
 #define TEST_ITERS 1
-#define ROLLOUT_FLAG 0
+#define ROLLOUT_FLAG 1
 #define RANDOM_MEAN 0.0
 #if PLANT == 1 // pend
 	#define RANDOM_STDEV 0.001
@@ -74,8 +74,13 @@ void loadXU(T *x, T *u, T *xGoal, int ld_x, int ld_u){
 		#elif PLANT == 3 // quad
 			for (int k2=0; k2<CONTROL_SIZE; k2++){uk[k2] = 1.22625;}
 		#elif PLANT == 4 // arm
-			uk[0] = 0.0;		uk[1] = -102.9832;	uk[2] = 11.1968;
-			uk[3] = 47.0724;	uk[4] = 2.5993;		uk[5] = -7.0290;	uk[6] = -0.0907;
+			#if USE_WAFR_URDF
+				uk[0] = 0.0;		uk[1] = -102.9832;	uk[2] = 11.1968;
+				uk[3] = 47.0724;	uk[4] = 2.5993;		uk[5] = -7.0290;	uk[6] = -0.0907;
+			#else
+				uk[0] = -0.0000000001;	uk[1] = -62.282937;		uk[2] =  4.172921;
+				uk[3] = 21.513797;		uk[4] = -0.088674;		uk[5] = -0.890626;	uk[6] = 0.0000000001;
+			#endif
 		#endif
 	}
 	#if EE_COST
