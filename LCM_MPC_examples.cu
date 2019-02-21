@@ -1,10 +1,10 @@
 /***
-nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o MPC.exe LCM_MPC_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
 #define EE_COST 1
 #define MPC_MODE 1
-#define IGNORE_MAX_ROX_EXIT 1//0
-#define TOL_COST 0//0.00001
+#define IGNORE_MAX_ROX_EXIT 0
+#define TOL_COST 0.00001
 #define PLANT 4
 #include "DDPHelpers.cuh"
 #include <random>

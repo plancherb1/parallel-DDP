@@ -57,8 +57,8 @@
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
 #define FINITE_DIFF_EPSILON 0.00001
 // define if we are working in doubles or floats
-typedef double algType;
-// typedef float algType;
+// typedef double algType;
+typedef float algType;
 
 // algorithmic options
 #ifndef INTEGRATOR
@@ -73,7 +73,7 @@ typedef double algType;
 #endif
 
 // parallelization options
-#define M 1
+#define M 4
 #define M_B M // how many time steps to do in parallel on back pass
 #define M_F M // how many multiple shooting intervals to use in the forward pass
 #define N_B (NUM_TIME_STEPS/M_B)

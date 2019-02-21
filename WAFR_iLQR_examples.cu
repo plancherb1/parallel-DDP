@@ -11,7 +11,7 @@ nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu utils/cudaUtils.cu utils/threa
 #include <iostream>
 
 #define TEST_ITERS 1
-#define ROLLOUT_FLAG 1
+#define ROLLOUT_FLAG 0
 #define RANDOM_MEAN 0.0
 #if PLANT == 1 // pend
 	#define RANDOM_STDEV 0.001

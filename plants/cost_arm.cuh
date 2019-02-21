@@ -55,10 +55,10 @@
 	
 	#define USE_SMOOTH_ABS 0
 	#define SMOOTH_ABS_ALPHA 0.2
-	#define Q_HAND1 0.001		//1.0 // xyz
+	#define Q_HAND1 0.1		//1.0 // xyz
 	#define Q_HAND2 0		//1.0 // rpy
-	#define R_HAND 1000.0		//0.001
-	#define QF_HAND1 1.0		//5000.0 // xyz
+	#define R_HAND 0.0001		//0.001
+	#define QF_HAND1 1000.0		//5000.0 // xyz
 	#define QF_HAND2 0		//5000.0 // rpy
 	#define Q_xdHAND 0.1		//1.0//0.1
 	#define QF_xdHAND 10.0	//10.0//100.0
