@@ -1,6 +1,7 @@
 /***
 nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
+#define USE_WAFR_URDF 0
 #define EE_COST 1
 #define MPC_MODE 1
 #define IGNORE_MAX_ROX_EXIT 0
@@ -290,13 +291,13 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 				// printf(" With expected:\n");
 				// printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*(dimms->ld_x),1);
       		// print the state we sim to
-				T *xk = &(algvars->xActual[0]);
-				printf("%f,%f,%f,%f,%f,%f,%f,%f\n",timePrint,xk[0],xk[1],xk[2],xk[3],xk[4],xk[5],xk[6]);
-				timePrint += elapsedTime_us;
+				// T *xk = &(algvars->xActual[0]);
+				// printf("%f,%f,%f,%f,%f,%f,%f,%f\n",timePrint,xk[0],xk[1],xk[2],xk[3],xk[4],xk[5],xk[6]);
+				// timePrint += elapsedTime_us;
 			// print the error and the end effector position
-				// T eePos[NUM_POS];   compute_eePos_scratch<T>(&(algvars->xActual[0]), &eePos[0]);
-				// evNorm(algvars->xActual, algvars->xGoal, &eNorm, &vNorm);
-				// printf("[[%f,%f,%f],[%f,%f,%f],%f,%f,%f],\n",eePos[0],eePos[1],eePos[2],algvars->xGoal[0],algvars->xGoal[1],algvars->xGoal[2],eNorm,error/counter,vNorm);
+				T eePos[NUM_POS];   compute_eePos_scratch<T>(&(algvars->xActual[0]), &eePos[0]);
+				evNorm(algvars->xActual, algvars->xGoal, &eNorm, &vNorm);
+				printf("[[%f,%f,%f],[%f,%f,%f],%f,%f,%f],\n",eePos[0],eePos[1],eePos[2],algvars->xGoal[0],algvars->xGoal[1],algvars->xGoal[2],eNorm,error/counter,vNorm);
    			if (initial_convergence_flag){goalTime += elapsedTime_us;}
    			if(loadFig8Goal<T>(algvars,goalTime,totalTime_us) > 1){break;};
    			if (doFig8 && eNorm < eNormLim && vNorm < vNormLim){initial_convergence_flag = 1; error = 0; counter = 0;}
