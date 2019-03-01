@@ -219,7 +219,8 @@ void computeControlKT(T *u, T *x, T *xp, T *KT, T *du, T alpha, T *s_dx, int ld_
 template <typename T>
 __host__ __device__ __forceinline__
 void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T *s_qdd, T dt, int bInd, int ld_x, int ld_u, int ld_KT, int ld_du, int ld_d, \
-					 T *d_I = nullptr, T *d_Tbody = nullptr, T* s_x = nullptr, T *s_u = nullptr, T *s_cost = nullptr, T *s_eePos = nullptr, T *d_xGoal = nullptr){
+					 T *d_I = nullptr, T *d_Tbody = nullptr, T* s_x = nullptr, T *s_u = nullptr, T *s_cost = nullptr, \
+					 T *s_eePos = nullptr, T *d_xGoal = nullptr, T *s_eeVel = nullptr){
 	int start, delta; singleLoopVals(&start,&delta);
 	int kStart = bInd * N_F;
 	unsigned int iters = EE_COST ? N_F : (bInd < M_F - 1 ? N_F : N_F - 1);
@@ -237,19 +238,9 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 		hd__syncthreads();
 		// then use this control to compute the new state
 		T *s_xkp1 = s_dx; // re-use this shared mem as we are done with it for this loop
-		if(tempFlag){_integrator<T>(s_xkp1,s_x,s_u,s_qdd,d_I,d_Tbody,dt,s_eePos);}
-		else        {_integrator<T>(s_xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,s_eePos);}
+		if(tempFlag){_integrator<T>(s_xkp1,s_x,s_u,s_qdd,d_I,d_Tbody,dt,s_eePos,s_eeVel);}
+		else        {_integrator<T>(s_xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,s_eePos,s_eeVel);}
 		hd__syncthreads();
-		// if (hd__printOnce<0,0,0,NUM_ALPHA-1>()){
-		// 		printf("alpha: %f\n",alpha);
-		// 		printMat<T,1,STATE_SIZE>(xk,1);
-		// 		printMat<T,1,STATE_SIZE>(xpk,1);
-		// 		if(tempFlag){printMat<T,1,STATE_SIZE>(s_x,1);}
-		// 		printMat<T,1,CONTROL_SIZE>(uk,1);
-		// 		if(tempFlag){printMat<T,1,CONTROL_SIZE>(s_u,1);}
-		// 		printMat<T,1,NUM_POS>(s_qdd,1);
-		// 		printMat<T,1,STATE_SIZE>(s_xkp1,1);}
-		// hd__syncthreads();
 		// then write to global memory unless "final" state where we just use for defect on boundary
 		#pragma unroll
 		for (int ind = start; ind < STATE_SIZE; ind += delta){
@@ -283,13 +274,13 @@ void forwardSimKern(T **d_x, T **d_u, T *d_KT, T *d_du, T **d_d, T *d_alpha, \
 	int alphaInd = blockIdx.y;		int bInd = blockIdx.x;
 	// zero out the cost and set up to track eePos if in EE_COST scenario
 	#if EE_COST
-		__shared__ T s_cost[NUM_POS];	__shared__ T s_eePos[6];	zeroSharedMem<T,NUM_POS>(s_cost);
+		__shared__ T s_cost[NUM_POS];	__shared__ T s_eePos[6];	__shared__ T s_eeVel[6];	zeroSharedMem<T,NUM_POS>(s_cost);
 	#else
-		T *s_cost = nullptr;	T *s_eePos = nullptr;
+		T *s_cost = nullptr;	T *s_eePos = nullptr;	T *s_eeVel = nullptr;
 	#endif
 	// loop forward and compute new states and controls
 	forwardSimInner(d_x[alphaInd],d_u[alphaInd],d_KT,d_du,d_d[alphaInd],d_alpha[alphaInd],d_xp,s_dx,s_qdd,
-					(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,s_x,s_u,s_cost,s_eePos,d_xGoal);
+					(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,s_x,s_u,s_cost,s_eePos,d_xGoal,s_eeVel);
 	#if EE_COST // sum up the total cost
 		if (threadIdx.y == 0 && threadIdx.x == 0){d_JT[bInd + alphaInd*M_F] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];}
 	#endif
@@ -303,14 +294,14 @@ void forwardSim(threadDesc_t desc, T *x, T *u, T *KT, T *du, T *d, T alpha, T *x
 	T *s_x = nullptr;		T *s_u = nullptr;		T s_qdd [NUM_POS];		T s_dx[STATE_SIZE];
 	// zero out the cost and set up to track eePos if EE_COST scenario
 	#if EE_COST
-		T s_cost[NUM_POS];	T s_eePos[6];	zeroSharedMem<T,NUM_POS>(s_cost);
+		T s_cost[NUM_POS];	T s_eePos[6];	T s_eeVel[6];	zeroSharedMem<T,NUM_POS>(s_cost);
 	#else
-		T *s_cost = nullptr; 	T *s_eePos = nullptr;
+		T *s_cost = nullptr; 	T *s_eePos = nullptr;	T *s_eeVel = nullptr;
 	#endif
 	// loop forward and coT mpute new states and controls
 	for (unsigned int i=0; i<desc.reps; i++){
   		int bInd = (desc.tid+i*desc.dim);
-		forwardSimInner(x,u,KT,du,d,alpha,xp,s_dx,s_qdd,(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody,s_x,s_u,s_cost,s_eePos,xGoal);
+		forwardSimInner(x,u,KT,du,d,alpha,xp,s_dx,s_qdd,(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody,s_x,s_u,s_cost,s_eePos,xGoal,s_eeVel);
 	}
 	#if EE_COST // sum up the total cost
 		JT[desc.tid] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];

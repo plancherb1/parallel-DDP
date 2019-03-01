@@ -707,6 +707,8 @@ void updateT(T *s_T, T *s_cosx, T *s_sinx){
 template <typename T>
 __host__ __device__ 
 void loadTdx4(T *s_Tdx, T *s_cosx, T *s_sinx){
+    #pragma unroll
+    for (int i = 0; i < 16*NUM_POS; i++){s_Tdx[i] = 0.0;}
     #if USE_WAFR_URDF
         s_Tdx[0] = -s_sinx[0];
         s_Tdx[1] = s_cosx[0];
@@ -977,10 +979,22 @@ void load_Tb(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody =
    #endif
 }
 
+template <typename T>
+__host__ __device__ __forceinline__
+void load_Tbdt(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody){
+   // first load in Tb and dTb/dx because dTb/dt is dTb/dx*dx/dt
+   load_Tb(s_x,s_Tbody,d_Tbody,s_sinx,s_cosx,s_dTbody);
+   int start, delta; singleLoopVals(&start,&delta);
+   for (int i = start; i < 16*NUM_POS; i += delta){
+      int body = i / 16;
+      s_dTbody[i] = s_dTbody[i] * s_x[body+NUM_POS];
+   }
+}
+
 
 template <typename T>
 __host__ __device__ __forceinline__
-void compute_T_TA_J(T *s_Tbody, T *s_Tworld, T *s_TA = nullptr, T *s_J = nullptr){
+void compute_T_TA_J(T *s_Tbody, T *s_Tworld, T *s_TA = nullptr, T *s_J = nullptr, T *s_TbTdt = nullptr){
    int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
    int start, delta; singleLoopVals(&start,&delta);
    int TA_J_Flag = s_TA != nullptr && s_J != nullptr;
@@ -995,7 +1009,9 @@ void compute_T_TA_J(T *s_Tbody, T *s_Tworld, T *s_TA = nullptr, T *s_J = nullptr
          for (int kx = startx; kx < 4; kx += dx){
             // row kx of Tim1 * column ky of Tb unless body 0 then copy
             T val = 0.0;
-            if (body == 0){val = Tb[ky*4+kx];}
+            if (body == 0){
+                val = Tb[ky*4+kx];
+            }
             else {
                #pragma unroll
                for (int i = 0; i < 4; i++){val += Tim1[kx + 4 * i]*Tb[ky * 4 + i];}
@@ -1011,6 +1027,33 @@ void compute_T_TA_J(T *s_Tbody, T *s_Tworld, T *s_TA = nullptr, T *s_J = nullptr
       // inc the pointers
       Tim1 = Ti; Ti += 36; Tb += 36;
       hd__syncthreads();
+   }
+   // check if we need to compute s_Tdt
+   if (s_TbTdt != nullptr){
+      // dTb/dt is in first 16*NUM_POS of s_TbTdt so place dT/dt in second 16*NUM_POS
+      T *Tb_i = s_Tbody;     T *T_im1 = s_Tworld;     T *Tbdt_i = s_TbTdt;   T *Tdt_i = &s_TbTdt[16*NUM_POS];    T *Tdt_im1 = Tdt_i;
+      // dT/dt[i] = dT/dt[i-1]*Tb[i] + T[i-1]*dTb/dt[i]
+      #pragma unroll
+      for (int body = 0; body < NUM_POS; body++){
+         #pragma unroll
+         for (int ky = starty; ky < 4; ky += dy){
+            #pragma unroll
+            for (int kx = startx; kx < 4; kx += dx){
+               T val = 0.0;
+               if (body == 0){
+                  val = Tbdt_i[ky * 4 + kx];
+               }
+               else{
+                  #pragma unroll
+                  for (int i = 0; i < 4; i++){val += Tdt_im1[kx + 4 * i]*Tb[ky * 4 + i] + T_im1[kx + 4 * i]*Tbdt_i[ky * 4 + i];} 
+               }
+               Tdt_i[kx + 4 * ky] = val;
+            }
+         }
+         if (body != 0){Tdt_im1 = Tdt_i; T_im1 += 36;}
+         Tb_i += 36; Tbdt_i += 16; Tdt_i += 16;
+         hd__syncthreads();
+      }
    }
    if (!TA_J_Flag){return;}
    // compute adjoint transform of homogtransInv of T -> temp and of T but only 3rd column -> J (T in temp2 and T' stored in TL and BR of TA already)
@@ -2010,10 +2053,45 @@ void compute_eePos_scratch(T *x, T *eePos){
    initT<T>(Tbody);           load_Tb(x,s_Tb,Tbody,s_cosq,s_sinq);   
    compute_T_TA_J(s_Tb,s_T);  compute_eePos(s_T,eePos);
 }
+template <typename T>
+__host__ __device__ __forceinline__
+void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt){
+   int start, delta; singleLoopVals(&start,&delta);
+   #ifdef __CUDA_ARCH__
+      bool thread0Flag = threadIdx.x == 0 && threadIdx.y == 0;
+   #else
+      bool thread0Flag = 1;
+   #endif
+   T *Tee = &s_T[(NUM_POS-1)*36];
+   T *Tee_dt = &s_TbTdt[(2*NUM_POS-1)*16]; //First 16*NUM_POS is Tbdt then next 16*NUM_POS is Tdt
+   // get hand pos and factors for multiplication in one thread
+   if (thread0Flag){
+      // compute initial helper terms
+      T factor3 = Tee[6]*Tee[6] + Tee[10]*Tee[10];
+      T factor4 = Tee[2]*Tee[2] + factor3;
+      T factor5 = Tee[1]*Tee[1] + Tee[0]*Tee[0];
+      T sqrtf3 = sqrt(factor3);
+      T dsqrtTerm = (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])/sqrtf3;
+      // then compute ee_pos
+      s_eePos[0] = Tee[12];
+      s_eePos[1] = Tee[13];
+      s_eePos[2] = Tee[14];
+      s_eePos[3] = (T) atan2(Tee[6],Tee[10]);
+      s_eePos[4] = (T) atan2(-Tee[2],sqrtf3);
+      s_eePos[5] = (T) atan2(Tee[1],Tee[0]);
+      // and ee_vel
+      s_eePosdt[0] = Tee_dt[12];
+      s_eePosdt[1] = Tee_dt[13];
+      s_eePosdt[2] = Tee_dt[14];
+      s_eePosdt[3] = (-Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])/factor3;
+      s_eePosdt[4] = ( Tee[2]*dsqrtTerm  -  sqrtf3*Tee_dt[2])/factor4;
+      s_eePosdt[5] = (-Tee[1]*Tee_dt[0]  +  Tee[0]*Tee_dt[1])/factor5;
+   }
+}
 
 template <typename T>
 __host__ __device__ __forceinline__
-void dynamics(T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody, T *s_eePos = nullptr, int reps = 1){
+void dynamics(T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody, T *s_eePos = nullptr, int reps = 1, T *s_eeVel = nullptr){
    #ifdef __CUDA_ARCH__
       __shared__ T s_I[36*NUM_POS]; // standard inertias -->  world inertias
       __shared__ T s_Icrbs[36*NUM_POS]; // Icrbs inertias
@@ -2040,14 +2118,22 @@ void dynamics(T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody, T *s_eePos = nullptr
       T *s_uk = &s_u[NUM_POS*iter];
       T *s_qddk = &s_qdd[NUM_POS*iter];
       // load in I and Tbody (use W and F as temp mem)
-      load_Tb(s_xk,s_temp,d_Tbody,s_F,s_W);
+      // use I_crbs for dTb if need to compute s_eeVel
       load_I(s_I,d_I);
+      if (s_eeVel != nullptr){load_Tbdt(s_xk,s_temp,d_Tbody,s_F,s_W,s_Icrbs);}
+      else{load_Tb(s_xk,s_temp,d_Tbody,s_F,s_W);}
       hd__syncthreads();
-      // then compute Tbody -> T -> TA & J (T and Tbody in scratch mem) again F for temp mem
-      compute_T_TA_J(s_temp,s_temp2,s_TA,s_J);
-      hd__syncthreads();
-      // if we are asked for eePos then compute
-      if (s_eePos != nullptr){compute_eePos(s_temp2,s_eePos); hd__syncthreads();}
+      // then compute Tbody -> T -> TA & J (T and Tbody in scratch mem)
+      // use I_crbs for dTb and dT/dt if need to compute s_eeVel
+      if (s_eeVel != nullptr){
+        compute_T_TA_J(s_temp,s_temp2,s_TA,s_J,s_Icrbs); hd__syncthreads();
+        compute_eeVel(s_temp2,s_eePos,s_Icrbs,s_eeVel); hd__syncthreads();
+      }
+      else{
+        compute_T_TA_J(s_temp,s_temp2,s_TA,s_J); hd__syncthreads();
+        // if we are asked for just eePos then compute that
+        if (s_eePos != nullptr){compute_eePos(s_temp2,s_eePos); hd__syncthreads();}
+      }
       // then compute Iworld, Icrbs, twists (in W) and clear temp and TA for later
       compute_Iw_Icrbs_twist(s_I,s_Icrbs,s_W,s_TA,s_J,s_xk,s_temp);
       hd__syncthreads();

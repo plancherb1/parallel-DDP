@@ -46,6 +46,10 @@
 		#define Q_xHAND 0.0		//0.0//0.001//1.0
 		#define QF_xHAND 0.0		//0.0//1.0
 	#endif
+ 	#define Q_HANDV1 0
+	#define Q_HANDV2 0
+	#define QF_HANDV1 0
+	#define QF_HANDV2 0
 #else 
  	#define Q1 0.1 // q
 	#define Q2 0.001 // qd
@@ -56,15 +60,16 @@
  	#define USE_SMOOTH_ABS 1
  	#define SMOOTH_ABS_ALPHA 0.2
 	#if USE_SMOOTH_ABS
-		#define Q_HAND1 0.1		//2.0 // xyz
-		#define Q_HAND2 0.001		//2.0 // rpy
-		#define R_HAND 0.0001		//0.0001
-		#define QF_HAND1 1000000.0	//20000.0 // xyz
-		#define QF_HAND2 10000.0	//20000.0 // rpy
-		#define Q_xdHAND 0.1		//1.0//0.1
-		#define QF_xdHAND 10000.0	//10.0//100.0
-		#define Q_xHAND 0.0		//0.0//0.001//1.0
-		#define QF_xHAND 0.0		//0.0//1.0
+ 		// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
+		#define Q_HAND1 0.1
+		#define Q_HAND2 0
+		#define R_HAND 0.0001
+		#define QF_HAND1 1000.0
+		#define QF_HAND2 0
+		#define Q_xdHAND 1.0
+		#define QF_xdHAND 100.0
+		#define Q_xHAND 0.0
+		#define QF_xHAND 0.0
 	#else
 		#define Q_HAND1 0.1		//1.0 // xyz
 		#define Q_HAND2 0		//1.0 // rpy
@@ -76,6 +81,10 @@
 		#define Q_xHAND 0.0		//0.0//0.001//1.0
 		#define QF_xHAND 0.0		//0.0//1.0
  	#endif
+	#define Q_HANDV1 0
+	#define Q_HANDV2 0
+	#define QF_HANDV1 0
+	#define QF_HANDV2 0
 #endif
 
 // Also define limits on torque, pos, velocity and Q/Rs for those
@@ -136,22 +145,18 @@ void getLimitVars(T *s_x, T *s_u, T *qr, T *val, T *limit, int ind, int k){
 template <typename T, int dLevel>
 __host__ __device__ __forceinline__
 T limitCosts(T *s_x, T *s_u, int ind, int k){
-	T qr;	T val;	T limit;	T cost = 0.0;
-	getLimitVars(s_x,s_u,&qr,&val,&limit,ind,k);	cost += qr*pieceWiseQuadratic<T,dLevel>(val,limit);
-	#if dLevel == 0 // at level 0 we only call this once and want all 3 vs at higher levels we call it once per variable
-		getLimitVars(s_x,s_u,&qr,&val,&limit,ind+NUM_POS,k);	cost += qr*pieceWiseQuadratic<T,dLevel>(val,limit);
-		getLimitVars(s_x,s_u,&qr,&val,&limit,ind+STATE_SIZE,k);	cost += qr*pieceWiseQuadratic<T,dLevel>(val,limit);
-	#endif
-	return cost;
+	T qr;	T val;	T limit;	getLimitVars(s_x,s_u,&qr,&val,&limit,ind,k);
+	return qr*pieceWiseQuadratic<T,dLevel>(val,limit);
 }
 
 template <typename T>
 __host__ __device__ __forceinline__
-T eeCost(T *s_eePos, T *d_eeGoal, int k){
+T eeCost(T *s_eePos, T *d_eeGoal, int k, T *s_eeVel = nullptr){
 	T cost = 0.0;
  	for (int i = 0; i < 6; i ++){
     	T delta = s_eePos[i] - d_eeGoal[i];
     	cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*delta;
+    	if (s_eeVel != nullptr){cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
  	}
  	if (USE_SMOOTH_ABS){
     	cost = (T) sqrt(2*cost + SMOOTH_ABS_ALPHA*SMOOTH_ABS_ALPHA) - SMOOTH_ABS_ALPHA;
@@ -185,12 +190,12 @@ T deeCost(T *s_eePos, T *s_deePos, T *d_eeGoal, int k, int r){
 // eeCost Func to split shared mem
 template <typename T>
 __host__ __device__ __forceinline__
-void costFunc(T *s_cost, T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k){
+void costFunc(T *s_cost, T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr){
 	int start, delta; singleLoopVals(&start,&delta);
 	#pragma unroll
     for (int ind = start; ind < NUM_POS; ind += delta){
     	T cost = 0.0;
-    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k);} // compute in one thread for smooth abs
+    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel);} // compute in one thread for smooth abs
     	// in all cases add on u cost and state cost
       	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_HAND)*s_u[ind]*s_u[ind]; // add on input cost
       	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xHAND : Q_xHAND)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
@@ -198,6 +203,8 @@ void costFunc(T *s_cost, T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k){
       	// add on any limit costs if needed
       	#if USE_LIMITS_FLAG
       		cost += limitCosts<T,0>(s_x,s_u,ind,k);
+      		cost += limitCosts<T,0>(s_x,s_u,ind+NUM_POS,k);
+      		cost += limitCosts<T,0>(s_x,s_u,ind+STATE_SIZE,k);
   		#endif
       	s_cost[ind] += cost;
    	}
@@ -206,11 +213,11 @@ void costFunc(T *s_cost, T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k){
 // eeCost Func returns single val
 template <typename T>
 __host__ __device__ __forceinline__
-T costFunc(T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k){
+T costFunc(T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr){
 	T cost = 0.0;
 	#pragma unroll
     for (int ind = 0; ind < NUM_POS; ind ++){
-    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k);} // compute in one thread for smooth abs
+    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel);} // compute in one thread for smooth abs
     	// in all cases add on u cost and state cost
       	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_HAND)*s_u[ind]*s_u[ind]; // add on input cost
       	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xHAND : Q_xHAND)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
@@ -218,6 +225,8 @@ T costFunc(T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k){
       	// add on any limit costs if needed
       	#if USE_LIMITS_FLAG
       		cost += limitCosts<T,0>(s_x,s_u,ind,k);
+      		cost += limitCosts<T,0>(s_x,s_u,ind+NUM_POS,k);
+      		cost += limitCosts<T,0>(s_x,s_u,ind+STATE_SIZE,k);
   		#endif
    	}
    	return cost;
