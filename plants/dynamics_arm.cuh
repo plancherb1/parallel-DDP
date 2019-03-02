@@ -45,6 +45,10 @@
    #define GRAVITY 9.81 // in full iLQR sim we are trying to come up with something assuming no gravity comp or anything hardware related
 #endif
 /*** PLANT SPECIFIC RBDYN HELPERS ***/
+#define EE_ON_LINK_X 0
+#define EE_ON_LINK_Y 0
+#define EE_ON_LINK_Z 0
+
 template <typename T>
 __host__ __device__ 
 void initI(T *s_I){
@@ -991,6 +995,24 @@ void load_Tbdt(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody
    }
 }
 
+template <typename T>
+__host__ __device__ __forceinline__
+void load_Tbdtdx(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody_dx, T *s_dTbody_dt, T *s_dTbody_dtdx, T *d_xp, T dt){
+   // first load in Tb and dTb/dx because dTb/dt is dTb/dx*dx/dt
+   // then note that dTb/dtdx (because only sin and cos of x) ends up being dTb/dx*qdd - Tb*qd^2
+   // so we also need to compute instantaneous joint accelerations which we can simply euler approximate from previous timestep and dt
+   load_Tb(s_x,s_Tbody,d_Tbody,s_sinx,s_cosx,s_dTbody_dx);
+   int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
+   for (int body = starty; body < NUM_POS; body += dy){
+      T vel = s_x[body+NUM_POS];    T acc = (vel - d_xp[body+NUM_POS])/dt;
+      for (int ind = startx; ind < 16; ind += dx){
+         int i = body*16 + ind;     int i2 = body*36+ind;
+         s_dTbody_dt[i]   = s_dTbody_dx[i] * vel;
+         s_dTbody_dtdx[i] = s_dTbody_dx[i] * acc + s_Tbody[i2]*vel*vel;
+      }
+   }
+
+}
 
 template <typename T>
 __host__ __device__ __forceinline__
@@ -1187,6 +1209,76 @@ void compute_dT_dTA_dJ(T *s_Tbody, T *s_dTbody, T *s_T, T *s_dT, T *s_dTp, T *s_
       if (TA_J_Flag){TA += 36; phatTA += 36; phatJ += 36;}
       hd__syncthreads();
    }
+}
+
+// if you need the positional derivative of the time derivative of the transformation matricies (to see velocity gradients for points on body)
+template <typename T>
+__host__ __device__ __forceinline__
+void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s_T_dx, T *s_T_dt, T *s_T_dt_dx, T *s_T_dx_prev, T *s_T_dt_dx_prev){
+    int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
+    #pragma unroll
+    for (int bodyi = 0; bodyi < NUM_POS; bodyi++){
+        // compute d/dx[j] of dT/dt[i] = dT/dtdx[i,j] = dT/dtdx[i-1,j] * Tbody[i] + dT/dx[i-1,j]*dTbody/dt[i] + 
+        //                                              (i == j ? dT/dt[i-1]*dTbody/dx[j] + T[i-1]*dTbody/dtdx[j] : 0))
+        // Note1: We also need to compute T/dx[i,j] = T/dx[i-1,j]*Tbody[i] + (i == j ? T[i-1]*Tbody/dx[i] : 0))
+        // Note2: the i == j comes fromt he fact that dTb/dx = 0 if i != j because only sin/cos of i vars
+        
+        // The base case of body0 simplifies to just a copy or load 0
+        // T/dx[0,j] = i == j ? Tbody/dx[0] : 0 and T/dtdx[0,j] = i == j ? Tbody/dtdx[0] : 0
+        if (bodyi == 0){
+            T *Tb_dx  = &s_Tb_dx[16*bodyi];     T *Tb_dtdx = &s_Tb_dt_dx[16*bodyi];
+            #pragma unroll
+            for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
+                T *T_dx   = &s_T_dx[16*bodyj];  T *T_dtdx = &s_T_dt_dx[16*bodyj];
+                #pragma unroll
+                for (int ind = startx; ind < 16; ind += dx){
+                    if (bodyi == bodyj){T_dx[ind] = Tb_dx[ind];     T_dtdx[ind] = Tb_dtdx[ind];}
+                    else{               T_dx[ind] = 0;              T_dtdx[ind] = 0;}
+                }
+            }
+        }
+        else{
+            // else start by getting pointers to i variables
+            T *Tb    = &s_Tb[36*bodyi];        T *Tb_dt     = &s_Tb_dt[16*bodyi];
+            T *Tb_dx = &s_Tb_dx[16*bodyi];     T *Tb_dtdx   = &s_Tb_dt_dx[16*bodyi];
+            T *T_im1 = &s_T[36*(bodyi-1)];      T *T_im1_dt = &s_T_dt[16*(bodyi-1)];
+            #pragma unroll
+            for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
+                // then get pointers to ij variables
+                T *T_dx   = &s_T_dx[16*bodyj];      T *T_dx_p   = &s_T_dx_prev[16*bodyj];
+                T *T_dtdx = &s_T_dt_dx[16*bodyj];   T *T_dtdx_p = &s_T_dt_dx_prev[16*bodyj];
+                #pragma unroll
+                for (int ind = startx; ind < 16; ind += dx){
+                    // then do the matrix math
+                    int ky = ind / 4; int kx = ind % 4; T val = 0.0; T val_dt = 0.0;
+                    #pragma unroll
+                    for (int i = 0; i < 4; i++){
+                        // get inds for row*col of matricies
+                        int ind1 = kx + 4 * i;  int ind2 = ky * 4 + i;
+                        // index into appropriate matricies
+                        val    += T_dx_p[ind]    * Tb[ind2];
+                        val_dt += T_dtdx_p[ind1] * Tb[ind2] + T_dx_p[ind1] * Tb_dt[ind2];
+                        if (bodyi == bodyj){
+                            val    += T_im1[ind1]    * Tb_dx[ind2];
+                            val_dt += T_im1_dt[ind1] * Tb_dx[ind2] + T_im1[ind1] * Tb_dtdx[ind2];
+                        }
+                    }
+                    T_dx[ind]   = val;
+                    T_dtdx[ind] = val_dt;
+                }
+            }
+        }
+        hd__syncthreads();
+        // save down T_dt_dx and T_dx into T_dt_dx_prev and T_dx_prev
+        #pragma unroll
+        for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
+            T *T_dx   = &s_T_dx[16*bodyj];      T *T_dx_p   = &s_T_dx_prev[16*bodyj];
+            T *T_dtdx = &s_T_dt_dx[16*bodyj];   T *T_dtdx_p = &s_T_dt_dx_prev[16*bodyj];
+            #pragma unroll
+            for (int kx = startx; kx < 16; kx += dx){T_dx_p[kx] = T_dx[kx];  T_dtdx_p[kx] = T_dtdx[kx];}
+        }
+        hd__syncthreads();
+    }
 }
 
 // compute Iw, Icrbs, twsits, and dIw if needed uses TA,J,x, and temp space as well as dTA if dIw is needed
@@ -1980,9 +2072,9 @@ void compute_eePos(T *s_T, T *s_eePos, T *s_dT = nullptr, T *s_deePos = nullptr,
    T *Tee = &s_T[(NUM_POS-1)*36];
    // get hand pos and factors for multiplication in one thread
    if (thread0Flag){
-      s_eePos[0] = Tee[12];
-      s_eePos[1] = Tee[13];
-      s_eePos[2] = Tee[14];
+      s_eePos[0] = Tee[0]*EE_ON_LINK_X + Tee[4]*EE_ON_LINK_Y + Tee[8]*EE_ON_LINK_Z  + Tee[12];
+      s_eePos[1] = Tee[1]*EE_ON_LINK_X + Tee[5]*EE_ON_LINK_Y + Tee[9]*EE_ON_LINK_Z  + Tee[13];
+      s_eePos[2] = Tee[2]*EE_ON_LINK_X + Tee[6]*EE_ON_LINK_Y + Tee[10]*EE_ON_LINK_Z + Tee[14];
       s_eePos[3] = (T) atan2(Tee[6],Tee[10]);
       s_eePos[4] = (T) atan2(-Tee[2],sqrt(Tee[6]*Tee[6]+Tee[10]*Tee[10]));
       s_eePos[5] = (T) atan2(Tee[1],Tee[0]);
@@ -2007,11 +2099,10 @@ void compute_eePos(T *s_T, T *s_eePos, T *s_dT = nullptr, T *s_deePos = nullptr,
       // then compute all dk in parallel (note dqd is 0 so only dq needed)
       #pragma unroll
       for (int k = start; k < NUM_POS; k += delta){
-         //T *dT = &s_dT[36*(NUM_POS*(NUM_POS-1) + k)];
-         T *dT = &s_dT[36*k]; // looped variant only saves final dT[i]/dx but thats all we need
-         s_deePos[k*6] = dT[12];
-         s_deePos[k*6 + 1] = dT[13];
-         s_deePos[k*6 + 2] = dT[14];
+         T *dT = &s_dT[36*k]; // looped variant only saves final dT[i]/dx but thats all we need (which is why that is ok)
+         s_deePos[k*6]     = dT[0]*EE_ON_LINK_X + dT[4]*EE_ON_LINK_Y + dT[8]*EE_ON_LINK_Z  + dT[12];
+         s_deePos[k*6 + 1] = dT[1]*EE_ON_LINK_X + dT[5]*EE_ON_LINK_Y + dT[9]*EE_ON_LINK_Z  + dT[13];
+         s_deePos[k*6 + 2] = dT[2]*EE_ON_LINK_X + dT[6]*EE_ON_LINK_Y + dT[10]*EE_ON_LINK_Z + dT[14];
          s_deePos[k*6 + 3] = s_temp[0]*dT[10] + s_temp[1]*dT[6];
          s_deePos[k*6 + 4] = s_temp[2]*dT[6]  + s_temp[3]*dT[10] + s_temp[4]*dT[2];
          s_deePos[k*6 + 5] = s_temp[5]*dT[0]  + s_temp[6]*dT[1];
@@ -2055,38 +2146,110 @@ void compute_eePos_scratch(T *x, T *eePos){
 }
 template <typename T>
 __host__ __device__ __forceinline__
-void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt){
+void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nullptr, T *s_T_dt_dx = nullptr, T *s_eePosVeldx = nullptr){
    int start, delta; singleLoopVals(&start,&delta);
    #ifdef __CUDA_ARCH__
       bool thread0Flag = threadIdx.x == 0 && threadIdx.y == 0;
    #else
       bool thread0Flag = 1;
    #endif
+   bool derivFlag = s_T_dx != nullptr && s_T_dt_dx != nullptr && s_eePosVeldx != nullptr;
    T *Tee = &s_T[(NUM_POS-1)*36];
    T *Tee_dt = &s_TbTdt[(2*NUM_POS-1)*16]; //First 16*NUM_POS is Tbdt then next 16*NUM_POS is Tdt
-   // get hand pos and factors for multiplication in one thread
+   // compute initial helper terms
+   T factor3 = Tee[6]*Tee[6] + Tee[10]*Tee[10];
+   T factor4 = Tee[2]*Tee[2] + factor3;
+   T factor5 = Tee[1]*Tee[1] + Tee[0]*Tee[0];
+   T sqrtf3 = sqrt(factor3);
+   T invf3 = 1/factor3;
+   T invf4 = 1/factor4;
+   T invf5 = 1/factor5;
+   T dsqrtTerm = (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])/sqrtf3;
    if (thread0Flag){
-      // compute initial helper terms
-      T factor3 = Tee[6]*Tee[6] + Tee[10]*Tee[10];
-      T factor4 = Tee[2]*Tee[2] + factor3;
-      T factor5 = Tee[1]*Tee[1] + Tee[0]*Tee[0];
-      T sqrtf3 = sqrt(factor3);
-      T dsqrtTerm = (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])/sqrtf3;
       // then compute ee_pos
-      s_eePos[0] = Tee[12];
-      s_eePos[1] = Tee[13];
-      s_eePos[2] = Tee[14];
+      s_eePos[0] = Tee[0]*EE_ON_LINK_X + Tee[4]*EE_ON_LINK_Y + Tee[8]*EE_ON_LINK_Z  + Tee[12];
+      s_eePos[1] = Tee[1]*EE_ON_LINK_X + Tee[5]*EE_ON_LINK_Y + Tee[9]*EE_ON_LINK_Z  + Tee[13];
+      s_eePos[2] = Tee[2]*EE_ON_LINK_X + Tee[6]*EE_ON_LINK_Y + Tee[10]*EE_ON_LINK_Z + Tee[14];
       s_eePos[3] = (T) atan2(Tee[6],Tee[10]);
       s_eePos[4] = (T) atan2(-Tee[2],sqrtf3);
       s_eePos[5] = (T) atan2(Tee[1],Tee[0]);
       // and ee_vel
-      s_eePosdt[0] = Tee_dt[12];
-      s_eePosdt[1] = Tee_dt[13];
-      s_eePosdt[2] = Tee_dt[14];
-      s_eePosdt[3] = (-Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])/factor3;
-      s_eePosdt[4] = ( Tee[2]*dsqrtTerm  -  sqrtf3*Tee_dt[2])/factor4;
-      s_eePosdt[5] = (-Tee[1]*Tee_dt[0]  +  Tee[0]*Tee_dt[1])/factor5;
+      s_eePosdt[0] = Tee_dt[0]*EE_ON_LINK_X + Tee_dt[4]*EE_ON_LINK_Y + Tee_dt[8]*EE_ON_LINK_Z  + Tee_dt[12];
+      s_eePosdt[1] = Tee_dt[1]*EE_ON_LINK_X + Tee_dt[5]*EE_ON_LINK_Y + Tee_dt[9]*EE_ON_LINK_Z  + Tee_dt[13];
+      s_eePosdt[2] = Tee_dt[2]*EE_ON_LINK_X + Tee_dt[6]*EE_ON_LINK_Y + Tee_dt[10]*EE_ON_LINK_Z + Tee_dt[14];
+      s_eePosdt[3] = -Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6]; // don't divide by f3 for now as we will use for temp memeory in deriv comp
+      s_eePosdt[4] =  Tee[2]*dsqrtTerm  - sqrtf3*Tee_dt[2];  // don't divide by f4 for now as we will use for temp memeory in deriv comp
+      s_eePosdt[5] = -Tee[1]*Tee_dt[0]  + Tee[0]*Tee_dt[1];  // don't divide by f5 for now as we will use for temp memeory in deriv comp
    }
+   hd__syncthreads();
+   if (derivFlag){
+      // then compute all dk in parallel (note dqd is 0 so only dq needed)
+      #pragma unroll
+      for (int k = start; k < NUM_POS; k += delta){
+         T *T_dx = &s_T_dx[16*k];   T *T_dtdx = &s_T_dt_dx[16*k];
+         // first the positional derivs for xyz
+         s_eePosVeldx[k*12]      = T_dx[0]*EE_ON_LINK_X + T_dx[4]*EE_ON_LINK_Y + T_dx[8]*EE_ON_LINK_Z  + T_dx[12];
+         s_eePosVeldx[k*12 + 1]  = T_dx[1]*EE_ON_LINK_X + T_dx[5]*EE_ON_LINK_Y + T_dx[9]*EE_ON_LINK_Z  + T_dx[13];
+         s_eePosVeldx[k*12 + 2]  = T_dx[2]*EE_ON_LINK_X + T_dx[6]*EE_ON_LINK_Y + T_dx[10]*EE_ON_LINK_Z + T_dx[14];
+         // then the positional derivs for rpy
+         s_eePosVeldx[k*12 + 3]  = (-Tee[6]*T_dx[10] + Tee[10]*T_dx[6])*invf3;
+         T sqrtf3_dx = (Tee[6]*T_dx[6] + Tee[10]*T_dx[10])/sqrtf3;
+         s_eePosVeldx[k*12 + 4]  = (Tee[2]*sqrtf3_dx -  sqrtf3*T_dx[2])*invf4;
+         s_eePosVeldx[k*12 + 5]  = (-Tee[1]*T_dx[0]  +  Tee[0]*T_dx[1])*invf5;
+         // then the velcity derivs for xyz
+         s_eePosVeldx[k*12 + 6]  = T_dtdx[0]*EE_ON_LINK_X + T_dtdx[4]*EE_ON_LINK_Y + T_dtdx[8]*EE_ON_LINK_Z  + T_dtdx[12];
+         s_eePosVeldx[k*12 + 7]  = T_dtdx[1]*EE_ON_LINK_X + T_dtdx[5]*EE_ON_LINK_Y + T_dtdx[9]*EE_ON_LINK_Z  + T_dtdx[13];
+         s_eePosVeldx[k*12 + 8]  = T_dtdx[2]*EE_ON_LINK_X + T_dtdx[6]*EE_ON_LINK_Y + T_dtdx[10]*EE_ON_LINK_Z + T_dtdx[14];
+         // and final velocity for rpy
+         T r_1 = (-T_dx[6]*Tee_dt[10] - Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])*invf3;
+         T r_2 = s_eePosdt[3]*2*(Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf3*invf3;
+         T dsqrtTerm_dx = (T_dx[6]*Tee_dt[10] + Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])/sqrtf3 + 
+                          (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])*sqrtf3_dx;
+         T p_1 = (T_dx[2]*dsqrtTerm + Tee[2]*dsqrtTerm_dx - sqrtf3_dx*Tee_dt[2] - sqrtf3*T_dtdx[2])*invf4;
+         T p_2 = s_eePosdt[4]*2*(Tee[2]*T_dx[2] + Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf4*invf4;
+         T y_1 = (-T_dx[1]*Tee_dt[0] - Tee[1]*T_dtdx[0] + T_dx[0]*Tee_dt[1] + Tee[0]*T_dtdx[1])*invf5;
+         T y_2 = s_eePosdt[5]*2*(Tee[1]*T_dx[1] + Tee[0]*T_dx[0])*invf5*invf5;
+         s_eePosVeldx[k*12 + 9]  = r_1 - r_2;
+         s_eePosVeldx[k*12 + 10] = p_1 - p_2;
+         s_eePosVeldx[k*12 + 11] = y_1 - y_2;
+      }
+   }
+   hd__syncthreads();
+   // then finish off the vels now that we aren't using for temp memory
+   if (thread0Flag){
+      s_eePosdt[3] = s_eePosdt[3]*invf3;
+      s_eePosdt[4] = s_eePosdt[4]*invf4;
+      s_eePosdt[5] = s_eePosdt[5]*invf5;
+   }
+}
+
+// s_Tb is 36*NUM_POS (only stored in first 16 of each)
+// s_dTb_dx is 16*NUM_POS (2nd half is free) and use for s_T_dx_prev (16*NUM_POS)
+// s_dTbTdt is 16*NUM_POS + 16*NUM_POS
+// s_T is 36*NUM_POS (only stored in first 16 of each)
+// s_T_dx is 16*NUM_POS and s_T_dt_dx prev is 16*NUM_POS -> temp1
+// s_T_dt_dx is 16*NUM_POS and s_Tb_dt_dx is 16*NUM_POS -> temp 2
+// s_eePosVel_dx is 12*NUM_POS with Pos in first 6*NUM_POS and vel in second
+template <typename T>
+__host__ __device__ __forceinline__
+void compute_eePosVel_dx(T *s_x, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb_dx, T *s_TbTdt, T *s_T, 
+                         T *s_temp1, T *s_temp2, T *s_eePos, T *s_eeVel, T *s_eePosVel_dx){
+    // load in Tb, Tb_dx, Tb_dt
+    T *s_Tb_dt_dx = s_temp2[16*NUM_POS]; 
+    load_Tbdtdx(s_x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
+    hd__syncthreads();
+    // then compute Tbody -> T & T_dt
+    compute_T_TA_J(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
+    T *s_Tb_dt = s_TbTdt;   T *s_T_dt = s_TbTdt[16*NUM_POS];
+    hd__syncthreads();
+    // then computde T, dTbody -> dT
+    T *s_T_dx_prev = &s_Tb_dx[16*NUM_POS]; // use 2nd half for space savings
+    T *s_T_dx = s_temp1;  T *s_T_dt_dx_prev = &s_temp1[16*NUM_POS];
+    T *s_T_dt_dx = s_temp2;
+    compute_T_dtdx(s_Tb,s_Tb_dx,s_Tb_dt,s_Tb_dt_dx,s_T,s_T_dx,s_T_dt,s_T_dt_dx,s_T_dx_prev,s_T_dt_dx_prev);
+    hd__syncthreads();
+    //compute the hand position and velocity and its derivatives
+    compute_eeVel(s_T,s_eePos,s_TbTdt,s_eeVel,s_T_dx,s_T_dt_dx,s_eePosVel_dx);
 }
 
 template <typename T>
