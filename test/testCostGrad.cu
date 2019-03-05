@@ -7,7 +7,7 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 #include "../DDPHelpers.cuh"
 #include <random>
 #define NUM_REPS 1
-#define ERR_TOL 0.01
+#define ERR_TOL 0.0001
 #define RANDOM_MEAN 0
 #define RANDOM_STDEVq 2
 #define RANDOM_STDEVqd 5
@@ -17,10 +17,53 @@ std::normal_distribution<double> randDistqd(RANDOM_MEAN, RANDOM_STDEVqd); //mean
 
 template <typename T>
 __host__
+void finiteDiffT(T *x, T *grad, int ld_grad){
+	T s_x[2*STATE_SIZE];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
+	T s_Tb[36*NUM_POS];		T s_T[36*NUM_POS];		T s_T2[36*NUM_POS];
+	T d_Tb[36*NUM_POS];		initT<T>(d_Tb);
+	#pragma unroll
+	for (int diff_ind = 0; diff_ind < NUM_POS; diff_ind++){
+		T *gradc = &grad[ld_grad*diff_ind];
+		#pragma unroll
+		for (int i = 0; i < STATE_SIZE; i++){
+			T val = x[i];	
+			T adj = (diff_ind == i ? FINITE_DIFF_EPSILON : 0.0);
+			s_x[i] 				= val + adj;
+			s_x[i + STATE_SIZE] = val - adj;
+		}
+		// compute T
+		load_Tb(s_x,			 s_Tb,d_Tb,s_cosq,s_sinq);	compute_T_TA_J(s_Tb,s_T);
+		load_Tb(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq);	compute_T_TA_J(s_Tb,s_T2);
+		T *Tee = &s_T[36*(NUM_POS-1)];	T *Tee2 = &s_T2[36*(NUM_POS-1)];
+		// now do finite diff rule
+		#pragma unroll
+		for (int i = 0; i < 16; i++){
+			T delta  = Tee[i] - Tee2[i];
+			gradc[i] = delta / (2.0*FINITE_DIFF_EPSILON);
+		}
+	}
+}
+
+template <typename T>
+__host__
+void analyticalT(T *x, T *grad){
+	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];
+	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
+	T s_T[36*NUM_POS];			T s_dT[36*NUM_POS];			T s_dTb[36*NUM_POS];
+   	load_Tb(x,s_Tb,d_Tb,s_cosq,s_sinq,s_dTb);			
+   	compute_T_TA_J(s_Tb,s_T);								T *s_dTp = &s_dTb[16*NUM_POS];
+   	compute_dT_dTA_dJ(s_Tb,s_dTb,s_T,s_dT,s_dTp);
+   	for (int k = 0; k < NUM_POS; k++){
+		for (int i = 0; i < 16; i++){grad[16*k + i] = s_dT[36*k + i];}
+	}
+}
+
+template <typename T>
+__host__
 void finiteDiffPos(T *x, T *eePosGrad, int ld_grad){
 	T s_x[2*STATE_SIZE];	T eePos[2*6];
 	#pragma unroll
-	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
+	for (int diff_ind = 0; diff_ind < NUM_POS; diff_ind++){
 		T *eeGrad = &eePosGrad[ld_grad*diff_ind];
 		#pragma unroll
 		for (int i = 0; i < STATE_SIZE; i++){
@@ -29,14 +72,14 @@ void finiteDiffPos(T *x, T *eePosGrad, int ld_grad){
 			s_x[i] 				= val + adj;
 			s_x[i + STATE_SIZE] = val - adj;
 		}
-		// compute eePos and Vel
+		// compute eePos
 		compute_eePos_scratch<T>( s_x, 			    eePos);
 		compute_eePos_scratch<T>(&s_x[STATE_SIZE], &eePos[6]);
 		// now do finite diff rule
 		#pragma unroll
 		for (int i = 0; i < 6; i++){
 			T deltaPos = eePos[i] - eePos[i+6];
-			eeGrad[i]   = deltaPos / (2.0*FINITE_DIFF_EPSILON);
+			eeGrad[i]  = deltaPos / (2.0*FINITE_DIFF_EPSILON);
 		}
 	}
 }
@@ -90,10 +133,9 @@ void analyticalVel(T *x, T *eePosVelGrad, int ld_grad){
                            s_temp1, s_temp2, s_temp3, s_eePos, s_eeVel, eePosVelGrad, ld_grad);
 }
 
-
 template <typename T>
 __host__
-void loadAndClearPos(T *x, T *grad, T *grad2, int ld_grad){
+void loadAndClearPos(T *x, T *grad, T *grad2, int gradSize){
 	// load random state
 	#pragma unroll
 	for (int i=0; i < NUM_POS; i++){
@@ -101,28 +143,63 @@ void loadAndClearPos(T *x, T *grad, T *grad2, int ld_grad){
 		x[i+NUM_POS] = static_cast<T>(randDistqd(randEng));
 	}
 	// clear grads
-	for (int i=0; i < ld_grad*STATE_SIZE; i++){
+	for (int i=0; i < gradSize; i++){
 		grad[i] = 0;	grad2[i] = 0;
 	}
 }
 
 template <typename T>
 __host__
-void testPos(){
+void testT(){
 	// allocate
-	int ld_grad = 6;
-	T *x =     (T *)malloc(        STATE_SIZE*sizeof(T));
-	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
-	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
+	int ld_grad = 16;
+	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*NUM_POS*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*NUM_POS*sizeof(T));
 	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,ld_grad);
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*NUM_POS);
 		// compute
-		analyticalPos<T>(x,grad);
-		finiteDiffPos<T>(x,grad2,ld_grad);
+		analyticalT<T>(x,grad);
+		finiteDiffT<T>(x,grad2,ld_grad);
+		// compare
+		#pragma unroll
+		for (int c = 0; c < NUM_POS; c++){
+			#pragma unroll
+			for (int r = 0; r < 6; r++){
+				int ind = c*ld_grad + r;
+				T err = abs(grad[ind] - grad2[ind]);
+				if (err > ERR_TOL){
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+				}
+			}
+		}
+	}
+	//free
+	free(x); free(grad); free(grad2); free(Tbody);
+}
+
+template <typename T>
+__host__
+void testTdt(){
+	// allocate
+	int ld_grad = 16;
+	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*NUM_POS*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*NUM_POS*sizeof(T));
+	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
+
+	// compare for NUM_REPS
+	for (int rep = 0; rep < NUM_REPS; rep++){
+		// relod and clear
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE);
+		// compute
+		printf("Sorry not implemented yet\n");
+		// analyticalTdt<T>(x,grad);
+		// finiteDiffTdt<T>(x,grad2,ld_grad);
 		// compare
 		#pragma unroll
 		for (int c = 0; c < STATE_SIZE; c++){
@@ -142,10 +219,44 @@ void testPos(){
 
 template <typename T>
 __host__
+void testPos(){
+	// allocate
+	int ld_grad = 6;
+	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*NUM_POS*sizeof(T));
+	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
+
+	// compare for NUM_REPS
+	for (int rep = 0; rep < NUM_REPS; rep++){
+		// relod and clear
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*NUM_POS);
+		// compute
+		analyticalPos<T>(x,grad);
+		finiteDiffPos<T>(x,grad2,ld_grad);
+		// compare
+		#pragma unroll
+		for (int c = 0; c < NUM_POS; c++){
+			#pragma unroll
+			for (int r = 0; r < 6; r++){
+				int ind = c*ld_grad + r;
+				T err = abs(grad[ind] - grad2[ind]);
+				if (err > ERR_TOL){
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+				}
+			}
+		}
+	}
+	//free
+	free(x); free(grad); free(grad2); free(Tbody);
+}
+
+template <typename T>
+__host__
 void testVel(){
 	// allocate
 	int ld_grad = 12;
-	T *x =     (T *)malloc(        STATE_SIZE*sizeof(T));
+	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
 	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
@@ -153,7 +264,7 @@ void testVel(){
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,ld_grad);
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE);
 		// compute
 		analyticalVel<T>(x,grad,ld_grad);
 		finiteDiffVel<T>(x,grad2,ld_grad);
@@ -174,20 +285,35 @@ void testVel(){
 	free(x); free(grad); free(grad2); free(Tbody);
 }
 
+template <typename T>
+__host__
+void testCost(){
+	printf("Sorry not implemented yet\n");
+}
+
 int main(int argc, char *argv[])
 {
 	srand(time(NULL));
 	char mode = '?';
 	if (argc > 1){mode = argv[1][0];}
 	switch (mode){
+		case 'T':
+			testT<algType>();
+			break;
+		case 'd':
+			testTdt<algType>();
+			break;
 		case 'P':
 			testPos<algType>();
 			break;
 		case 'V':
 			testVel<algType>();
 			break;
+		case 'C':
+			testCost<algType>();
+			break;
 		default:
-			printf("Input is [P]os [V]el or full [C]ost\n");
+			printf("Input is [P]os, [V]el, [T]ransforms, Transform/[d]T or full [C]ost\n");
 			return 1;
 	}
 	return 0;
