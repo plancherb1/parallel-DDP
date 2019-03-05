@@ -84,10 +84,10 @@ void analyticalVel(T *x, T *eePosVelGrad, int ld_grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	T s_Tb[36*NUM_POS];
 	T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
 	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_T[36*NUM_POS];
-	T s_temp1[32*NUM_POS];	   	T s_temp2[32*NUM_POS];
+	T s_temp1[32*NUM_POS];	   	T s_temp2[32*NUM_POS];		T s_temp3[32*NUM_POS];
 	T s_eePos[6];				T s_eeVel[6];
  	compute_eePosVel_dx<T>(x, s_Tb, d_Tb, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_T, 
-                           s_temp1, s_temp2, s_eePos, s_eeVel, eePosVelGrad, ld_grad);
+                           s_temp1, s_temp2, s_temp3, s_eePos, s_eeVel, eePosVelGrad, ld_grad);
 }
 
 

@@ -1243,32 +1243,37 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
         else{
             // else start by getting pointers to i variables
             T *Tb    = &s_Tb[36*bodyi];         T *Tb_dt    = &s_Tb_dt[16*bodyi];
-            T *Tb_dx = &s_Tb_dx[16*bodyi];      T *Tb_dtdx  = &s_Tb_dt_dx[16*bodyi];
             T *T_im1 = &s_T[36*(bodyi-1)];      T *T_im1_dt = &s_T_dt[16*(bodyi-1)];
             #pragma unroll
             for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
-                // then get pointers to ij variables
+                // then get pointers to ij and j variables
+                T *Tb_dx  = &s_Tb_dx[16*bodyj];     T *Tb_dtdx  = &s_Tb_dt_dx[16*bodyj];
                 T *T_dx   = &s_T_dx[16*bodyj];      T *T_dx_p   = &s_T_dx_prev[16*bodyj];
                 T *T_dtdx = &s_T_dt_dx[16*bodyj];   T *T_dtdx_p = &s_T_dt_dx_prev[16*bodyj];
+                // and for the qd pointers as well
+                T *T_dtdx_qd =  &T_dtdx[16*NUM_POS];   T *T_dtdx_p_qd = &T_dtdx_p[16*NUM_POS];  T *Tb_dtdx_qd = &Tb_dtdx[16*NUM_POS];
                 #pragma unroll
                 for (int ind = startx; ind < 16; ind += dx){
                     // then do the matrix math
-                    int ky = ind / 4; int kx = ind % 4; T val = 0.0; T val_dt = 0.0;
+                    int ky = ind / 4; int kx = ind % 4; T val = 0.0; T val_dt = 0.0; T val_dt_qd = 0;
                     #pragma unroll
                     for (int i = 0; i < 4; i++){
                         // get inds for row*col of matricies
                         int ind1 = kx + 4 * i;  int ind2 = ky * 4 + i;
                         // index into appropriate matricies
-                        val    += T_dx_p[ind1]    * Tb[ind2];
-                        val_dt += T_dtdx_p[ind1] * Tb[ind2] + T_dx_p[ind1] * Tb_dt[ind2];
+                        val        += T_dx_p[ind1]      * Tb[ind2];
+                        val_dt     += T_dtdx_p[ind1]    * Tb[ind2] + T_dx_p[ind1] * Tb_dt[ind2];
+                        val_dt_qd  += T_dtdx_p_qd[ind1] * Tb[ind2];
                         if (bodyi == bodyj){
-                            val    += T_im1[ind1]    * Tb_dx[ind2];
-                            val_dt += T_im1_dt[ind1] * Tb_dx[ind2] + T_im1[ind1] * Tb_dtdx[ind2];
+                            val       += T_im1[ind1]    * Tb_dx[ind2];
+                            val_dt    += T_im1_dt[ind1] * Tb_dx[ind2] + T_im1[ind1] * Tb_dtdx[ind2];
+                            val_dt_qd += T_im1[ind1]    * Tb_dtdx_qd[ind2];
                         }
                         // printf("bodyij[%d|%d] kxkyi[%d|%d|%d] dTim1[%f]*Tb[%f] + flag[%d]*Tim1[%f]*dTb[%f] currVal[%f]\n",bodyi,bodyj,kx,ky,i,T_dx_p[ind1],Tb[ind2],bodyi==bodyj,T_im1[ind1],Tb_dx[ind2],val);
                     }
-                    T_dx[ind]   = val;
-                    T_dtdx[ind] = val_dt;
+                    T_dx[ind]      = val;
+                    T_dtdx[ind]    = val_dt;
+                    T_dtdx_qd[ind] = val_dt_qd;
                     // printf("bodyij[%d|%d] ind[%d] val[%f]\n",bodyi,bodyj,ind,val);
                 }
             }
@@ -1278,10 +1283,15 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
         // save down T_dt_dx and T_dx into T_dt_dx_prev and T_dx_prev
         #pragma unroll
         for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
-            T *T_dx   = &s_T_dx[16*bodyj];      T *T_dx_p   = &s_T_dx_prev[16*bodyj];
-            T *T_dtdx = &s_T_dt_dx[16*bodyj];   T *T_dtdx_p = &s_T_dt_dx_prev[16*bodyj];
+            T *T_dx      = &s_T_dx[16*bodyj];      T *T_dx_p      = &s_T_dx_prev[16*bodyj];
+            T *T_dtdx    = &s_T_dt_dx[16*bodyj];   T *T_dtdx_p    = &s_T_dt_dx_prev[16*bodyj];
+            T *T_dtdx_qd = &T_dtdx[16*NUM_POS];    T *T_dtdx_p_qd = &T_dtdx_p[16*NUM_POS];
             #pragma unroll
-            for (int kx = startx; kx < 16; kx += dx){T_dx_p[kx] = T_dx[kx];  T_dtdx_p[kx] = T_dtdx[kx];}
+            for (int kx = startx; kx < 16; kx += dx){
+               T_dx_p[kx]      = T_dx[kx];  
+               T_dtdx_p[kx]    = T_dtdx[kx];
+               T_dtdx_p_qd[kx] = T_dtdx_qd[kx];
+            }
                // printf("Bodyj = %d and ind = %d has val = %f\n",bodyj,kx,T_dx[kx]);}
         }
         hd__syncthreads();
@@ -2192,33 +2202,52 @@ void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nul
    if (derivFlag){
       // then compute all dk in parallel (note dqd is 0 so only dq needed)
       #pragma unroll
-      for (int k = start; k < NUM_POS; k += delta){
-         T *T_dx = &s_T_dx[16*k];   T *T_dtdx = &s_T_dt_dx[16*k];
-         // first the positional derivs for xyz
-         s_eePosVeldx[k*ld_grad]      = T_dx[0]*EE_ON_LINK_X + T_dx[4]*EE_ON_LINK_Y + T_dx[8]*EE_ON_LINK_Z  + T_dx[12];
-         s_eePosVeldx[k*ld_grad + 1]  = T_dx[1]*EE_ON_LINK_X + T_dx[5]*EE_ON_LINK_Y + T_dx[9]*EE_ON_LINK_Z  + T_dx[13];
-         s_eePosVeldx[k*ld_grad + 2]  = T_dx[2]*EE_ON_LINK_X + T_dx[6]*EE_ON_LINK_Y + T_dx[10]*EE_ON_LINK_Z + T_dx[14];
-         // then the positional derivs for rpy
-         s_eePosVeldx[k*ld_grad + 3]  = (-Tee[6]*T_dx[10] + Tee[10]*T_dx[6])*invf3;
-         T sqrtf3_dx = (Tee[6]*T_dx[6] + Tee[10]*T_dx[10])/sqrtf3;
-         s_eePosVeldx[k*ld_grad + 4]  = (Tee[2]*sqrtf3_dx -  sqrtf3*T_dx[2])*invf4;
-         s_eePosVeldx[k*ld_grad + 5]  = (-Tee[1]*T_dx[0]  +  Tee[0]*T_dx[1])*invf5;
-         // then the velcity derivs for xyz
-         s_eePosVeldx[k*ld_grad + 6]  = T_dtdx[0]*EE_ON_LINK_X + T_dtdx[4]*EE_ON_LINK_Y + T_dtdx[8]*EE_ON_LINK_Z  + T_dtdx[12];
-         s_eePosVeldx[k*ld_grad + 7]  = T_dtdx[1]*EE_ON_LINK_X + T_dtdx[5]*EE_ON_LINK_Y + T_dtdx[9]*EE_ON_LINK_Z  + T_dtdx[13];
-         s_eePosVeldx[k*ld_grad + 8]  = T_dtdx[2]*EE_ON_LINK_X + T_dtdx[6]*EE_ON_LINK_Y + T_dtdx[10]*EE_ON_LINK_Z + T_dtdx[14];
-         // and final velocity for rpy
-         T r_1 = (-T_dx[6]*Tee_dt[10] - Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])*invf3;
-         T r_2 = s_eePosdt[3]*2*(Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf3*invf3;
-         T dsqrtTerm_dx = (T_dx[6]*Tee_dt[10] + Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])/sqrtf3 + 
-                          (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])*sqrtf3_dx;
-         T p_1 = (T_dx[2]*dsqrtTerm + Tee[2]*dsqrtTerm_dx - sqrtf3_dx*Tee_dt[2] - sqrtf3*T_dtdx[2])*invf4;
-         T p_2 = s_eePosdt[4]*2*(Tee[2]*T_dx[2] + Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf4*invf4;
-         T y_1 = (-T_dx[1]*Tee_dt[0] - Tee[1]*T_dtdx[0] + T_dx[0]*Tee_dt[1] + Tee[0]*T_dtdx[1])*invf5;
-         T y_2 = s_eePosdt[5]*2*(Tee[1]*T_dx[1] + Tee[0]*T_dx[0])*invf5*invf5;
-         s_eePosVeldx[k*ld_grad + 9]  = r_1 - r_2;
-         s_eePosVeldx[k*ld_grad + 10] = p_1 - p_2;
-         s_eePosVeldx[k*ld_grad + 11] = y_1 - y_2;
+      for (int k = start; k < STATE_SIZE; k += delta){
+         T *T_dtdx = &s_T_dt_dx[16*k];
+         if (k < NUM_POS){
+            T *T_dx = &s_T_dx[16*k];
+            // first the positional derivs for xyz
+            s_eePosVeldx[k*ld_grad]      = T_dx[0]*EE_ON_LINK_X + T_dx[4]*EE_ON_LINK_Y + T_dx[8]*EE_ON_LINK_Z  + T_dx[12];
+            s_eePosVeldx[k*ld_grad + 1]  = T_dx[1]*EE_ON_LINK_X + T_dx[5]*EE_ON_LINK_Y + T_dx[9]*EE_ON_LINK_Z  + T_dx[13];
+            s_eePosVeldx[k*ld_grad + 2]  = T_dx[2]*EE_ON_LINK_X + T_dx[6]*EE_ON_LINK_Y + T_dx[10]*EE_ON_LINK_Z + T_dx[14];
+            // then the positional derivs for rpy
+            s_eePosVeldx[k*ld_grad + 3]  = (-Tee[6]*T_dx[10] + Tee[10]*T_dx[6])*invf3;
+            T sqrtf3_dx = (Tee[6]*T_dx[6] + Tee[10]*T_dx[10])/sqrtf3;
+            s_eePosVeldx[k*ld_grad + 4]  = (Tee[2]*sqrtf3_dx -  sqrtf3*T_dx[2])*invf4;
+            s_eePosVeldx[k*ld_grad + 5]  = (-Tee[1]*T_dx[0]  +  Tee[0]*T_dx[1])*invf5;
+            // then the velcity derivs for xyz
+            s_eePosVeldx[k*ld_grad + 6]  = T_dtdx[0]*EE_ON_LINK_X + T_dtdx[4]*EE_ON_LINK_Y + T_dtdx[8]*EE_ON_LINK_Z  + T_dtdx[12];
+            s_eePosVeldx[k*ld_grad + 7]  = T_dtdx[1]*EE_ON_LINK_X + T_dtdx[5]*EE_ON_LINK_Y + T_dtdx[9]*EE_ON_LINK_Z  + T_dtdx[13];
+            s_eePosVeldx[k*ld_grad + 8]  = T_dtdx[2]*EE_ON_LINK_X + T_dtdx[6]*EE_ON_LINK_Y + T_dtdx[10]*EE_ON_LINK_Z + T_dtdx[14];
+            // and final velocity for rpy
+            T r_1 = (-T_dx[6]*Tee_dt[10] - Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])*invf3;
+            T r_2 = s_eePosdt[3]*2*(Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf3*invf3;
+            T dsqrtTerm_dx = (T_dx[6]*Tee_dt[10] + Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])/sqrtf3 + 
+                             (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])*sqrtf3_dx;
+            T p_1 = (T_dx[2]*dsqrtTerm + Tee[2]*dsqrtTerm_dx - sqrtf3_dx*Tee_dt[2] - sqrtf3*T_dtdx[2])*invf4;
+            T p_2 = s_eePosdt[4]*2*(Tee[2]*T_dx[2] + Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf4*invf4;
+            T y_1 = (-T_dx[1]*Tee_dt[0] - Tee[1]*T_dtdx[0] + T_dx[0]*Tee_dt[1] + Tee[0]*T_dtdx[1])*invf5;
+            T y_2 = s_eePosdt[5]*2*(Tee[1]*T_dx[1] + Tee[0]*T_dx[0])*invf5*invf5;
+            s_eePosVeldx[k*ld_grad + 9]  = r_1 - r_2;
+            s_eePosVeldx[k*ld_grad + 10] = p_1 - p_2;
+            s_eePosVeldx[k*ld_grad + 11] = y_1 - y_2;
+         }
+         // for the pos gradient is zero wrt qd and T_dx is zero wrt qd as well
+         else{
+            s_eePosVeldx[k*ld_grad]      = 0;
+            s_eePosVeldx[k*ld_grad + 1]  = 0;
+            s_eePosVeldx[k*ld_grad + 2]  = 0;
+            s_eePosVeldx[k*ld_grad + 3]  = 0;
+            s_eePosVeldx[k*ld_grad + 4]  = 0;
+            s_eePosVeldx[k*ld_grad + 5]  = 0;
+            s_eePosVeldx[k*ld_grad + 6]  = T_dtdx[0]*EE_ON_LINK_X + T_dtdx[4]*EE_ON_LINK_Y + T_dtdx[8]*EE_ON_LINK_Z  + T_dtdx[12];
+            s_eePosVeldx[k*ld_grad + 7]  = T_dtdx[1]*EE_ON_LINK_X + T_dtdx[5]*EE_ON_LINK_Y + T_dtdx[9]*EE_ON_LINK_Z  + T_dtdx[13];
+            s_eePosVeldx[k*ld_grad + 8]  = T_dtdx[2]*EE_ON_LINK_X + T_dtdx[6]*EE_ON_LINK_Y + T_dtdx[10]*EE_ON_LINK_Z + T_dtdx[14];
+            s_eePosVeldx[k*ld_grad + 9]  = (-Tee[6]*T_dtdx[10] + Tee[10]*T_dtdx[6])*invf3;
+            T dsqrtTerm_dx = (Tee[6]*T_dtdx[10] + Tee[10]*T_dtdx[6])/sqrtf3;
+            s_eePosVeldx[k*ld_grad + 10] = (Tee[2]*dsqrtTerm_dx - sqrtf3*T_dtdx[2])*invf4;
+            s_eePosVeldx[k*ld_grad + 11] = (-Tee[1]*T_dtdx[0] + Tee[0]*T_dtdx[1])*invf5;
+         }
       }
    }
    hd__syncthreads();
@@ -2243,15 +2272,15 @@ void compute_eeVel_scratch(T *x, T *eePos, T *eeVel){
 // s_dTb_dx is 16*NUM_POS (2nd half is free) and use for s_T_dx_prev (16*NUM_POS)
 // s_dTbTdt is 16*NUM_POS + 16*NUM_POS
 // s_T is 36*NUM_POS (only stored in first 16 of each)
-// s_T_dx is 16*NUM_POS and s_T_dt_dx prev is 16*NUM_POS -> temp1
-// s_T_dt_dx is 16*NUM_POS and s_Tb_dt_dx is 16*NUM_POS -> temp 2
-// s_eePosVel_dx is 12*NUM_POS
+// s_T_dx is 16*NUM_POS and s_Tb_dt_dx is 16*NUM_POS -> temp1
+// s_T_dt_dx is 16*2*NUM_POS and s_T_dt_dx prev is 16*2*NUM_POS -> temp 2, temp 3 b/c each 32*NUM_POS
+// s_eePosVel_dx is 12*2*NUM_POS b/c q and qd
 template <typename T>
 __host__ __device__ __forceinline__
 void compute_eePosVel_dx(T *s_x, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb_dx, T *s_TbTdt, T *s_T, 
-                         T *s_temp1, T *s_temp2, T *s_eePos, T *s_eeVel, T *s_eePosVel_dx, int ld_grad){
+                         T *s_temp1, T *s_temp2, T *s_temp3, T *s_eePos, T *s_eeVel, T *s_eePosVel_dx, int ld_grad){
     // load in Tb, Tb_dx, Tb_dt
-    T *s_Tb_dt_dx = &s_temp2[16*NUM_POS]; 
+    T *s_Tb_dt_dx = &s_temp1[16*NUM_POS]; 
     load_Tbdtdx<T>(s_x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
     hd__syncthreads();
     // then compute Tbody -> T & T_dt
@@ -2260,8 +2289,7 @@ void compute_eePosVel_dx(T *s_x, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb
     hd__syncthreads();
     // then computde T, dTbody -> dT
     T *s_T_dx_prev = &s_Tb_dx[16*NUM_POS]; // use 2nd half for space savings
-    T *s_T_dx = s_temp1;  T *s_T_dt_dx_prev = &s_temp1[16*NUM_POS];
-    T *s_T_dt_dx = s_temp2;
+    T *s_T_dx = s_temp1;   T *s_T_dt_dx = s_temp2;    T *s_T_dt_dx_prev = s_temp3;
     compute_T_dtdx<T>(s_Tb,s_Tb_dx,s_Tb_dt,s_Tb_dt_dx,s_T,s_T_dx,s_T_dt,s_T_dt_dx,s_T_dx_prev,s_T_dt_dx_prev);
     hd__syncthreads();
     //compute the hand position and velocity and its derivatives
