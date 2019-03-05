@@ -7,7 +7,7 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 #include "../DDPHelpers.cuh"
 #include <random>
 #define NUM_REPS 1
-#define ERR_TOL 0
+#define ERR_TOL 0.01
 #define RANDOM_MEAN 0
 #define RANDOM_STDEVq 2
 #define RANDOM_STDEVqd 5
@@ -80,13 +80,13 @@ void finiteDiffVel(T *x, T *eePosVelGrad, int ld_grad){
 
 template <typename T>
 __host__
-void analyticalVel(T *x, T *xp, T dt, T *eePosVelGrad, int ld_grad){
+void analyticalVel(T *x, T *eePosVelGrad, int ld_grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	T s_Tb[36*NUM_POS];
 	T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
 	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_T[36*NUM_POS];
 	T s_temp1[32*NUM_POS];	   	T s_temp2[32*NUM_POS];
 	T s_eePos[6];				T s_eeVel[6];
- 	compute_eePosVel_dx<T>(x, xp, dt, s_Tb, d_Tb, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_T, 
+ 	compute_eePosVel_dx<T>(x, s_Tb, d_Tb, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_T, 
                            s_temp1, s_temp2, s_eePos, s_eeVel, eePosVelGrad, ld_grad);
 }
 
@@ -97,23 +97,13 @@ void loadAndClearPos(T *x, T *grad, T *grad2, int ld_grad){
 	// load random state
 	#pragma unroll
 	for (int i=0; i < NUM_POS; i++){
-		x[i] = 1;//static_cast<T>(randDistq(randEng));
-		x[i+NUM_POS] = 0;//static_cast<T>(randDistqd(randEng));
+		x[i] = static_cast<T>(randDistq(randEng));
+		x[i+NUM_POS] = static_cast<T>(randDistqd(randEng));
 	}
 	// clear grads
 	for (int i=0; i < ld_grad*STATE_SIZE; i++){
 		grad[i] = 0;	grad2[i] = 0;
 	}
-}
-
-template <typename T>
-__host__
-void loadAndClearVel(T *x, T *xp, T dt, T *grad, T *grad2, int ld_grad, T *Tbody, T *I){
-	// load random state (into prev state) and clear grads
-	loadAndClearPos(xp,grad,grad2,ld_grad);
-	// compute next state (as actual state)
-	T u[CONTROL_SIZE]; T qdd[NUM_POS]; for (int i=0; i < CONTROL_SIZE; i++){u[i] = 0;}
-	_integrator(x, xp, u, qdd, I, Tbody, dt);
 }
 
 template <typename T>
@@ -154,26 +144,24 @@ template <typename T>
 __host__
 void testVel(){
 	// allocate
-	int ld_grad = 12;	T dt = TIME_STEP;
+	int ld_grad = 12;
 	T *x =     (T *)malloc(        STATE_SIZE*sizeof(T));
-	T *xp =    (T *)malloc(        STATE_SIZE*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
 	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
-	T *I =     (T *)malloc(36*NUM_POS*sizeof(T));	initI<T>(I);
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearVel<T>(x,xp,dt,grad,grad2,ld_grad,Tbody,I);
+		loadAndClearPos<T>(x,grad,grad2,ld_grad);
 		// compute
-		analyticalVel<T>(x,xp,dt,grad,ld_grad);
+		analyticalVel<T>(x,grad,ld_grad);
 		finiteDiffVel<T>(x,grad2,ld_grad);
 		// compare
 		#pragma unroll
 		for (int c = 0; c < STATE_SIZE; c++){
 			#pragma unroll
-			for (int r = 0; r < 6; r++){//12; r++){
+			for (int r = 0; r < 12; r++){
 				int ind = c*ld_grad + r;
 				T err = abs(grad[ind] - grad2[ind]);
 				if (err > ERR_TOL){
@@ -183,7 +171,7 @@ void testVel(){
 		}
 	}
 	//free
-	free(x); free(xp); free(grad); free(grad2); free(Tbody); free(I);
+	free(x); free(grad); free(grad2); free(Tbody);
 }
 
 int main(int argc, char *argv[])

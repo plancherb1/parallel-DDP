@@ -997,18 +997,18 @@ void load_Tbdt(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody
 
 template <typename T>
 __host__ __device__ __forceinline__
-void load_Tbdtdx(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody_dx, T *s_dTbody_dt, T *s_dTbody_dtdx, T *d_xp, T dt){
+void load_Tbdtdx(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody_dx, T *s_dTbody_dt, T *s_dTbody_dtdx){
    // first load in Tb and dTb/dx because dTb/dt is dTb/dx*dx/dt
    // then note that dTb/dtdx (because only sin and cos of x) ends up being dTb/dx*qdd - Tb*qd^2
    // so we also need to compute instantaneous joint accelerations which we can simply euler approximate from previous timestep and dt
    load_Tb(s_x,s_Tbody,d_Tbody,s_sinx,s_cosx,s_dTbody_dx);
    int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
    for (int body = starty; body < NUM_POS; body += dy){
-      T vel = s_x[body+NUM_POS];    T acc = (vel - d_xp[body+NUM_POS])/dt;
+      T vel = s_x[body+NUM_POS];
       for (int ind = startx; ind < 16; ind += dx){
          int i = body*16 + ind;     int i2 = body*36+ind;
          s_dTbody_dt[i]   = s_dTbody_dx[i] * vel;
-         s_dTbody_dtdx[i] = s_dTbody_dx[i] * acc + s_Tbody[i2]*vel*vel;
+         s_dTbody_dtdx[i] = -s_Tbody[i2]*vel*vel;
       }
    }
 
@@ -1218,10 +1218,13 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
     int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
     #pragma unroll
     for (int bodyi = 0; bodyi < NUM_POS; bodyi++){
-        // compute d/dx[j] of dT/dt[i] = dT/dtdx[i,j] = dT/dtdx[i-1,j] * Tbody[i] + dT/dx[i-1,j]*dTbody/dt[i] + 
+        // compute d/dx[j] of dT/dt[i] = dT/dtdx[i,j] = dT/dtdx[i-1,j]*Tbody[i] + dT/dx[i-1,j]*dTbody/dt[i] + 
         //                                              (i == j ? dT/dt[i-1]*dTbody/dx[j] + T[i-1]*dTbody/dtdx[j] : 0))
         // Note1: We also need to compute T/dx[i,j] = T/dx[i-1,j]*Tbody[i] + (i == j ? T[i-1]*Tbody/dx[i] : 0))
-        // Note2: the i == j comes fromt he fact that dTb/dx = 0 if i != j because only sin/cos of i vars
+        // Note2: The i == j comes fromt he fact that dTb/dx = 0 if i != j because only sin/cos of i vars
+        // Note3: This all assumes that x[q,qd] and dqd = 0 but actually for the dqd part we still actually have something
+        //        but only in the final term so we get:
+        //        dT/dtdx[i,j] = dT/dtdx[i-1,j]*Tbody[i] + (i + NUM_POS == j ? T[i-1]*dTbody/dtdx[j] : 0))
         
         // The base case of body0 simplifies to just a copy or load 0
         // T/dx[0,j] = i == j ? Tbody/dx[0] : 0 and T/dtdx[0,j] = i == j ? Tbody/dtdx[0] : 0
@@ -2245,11 +2248,11 @@ void compute_eeVel_scratch(T *x, T *eePos, T *eeVel){
 // s_eePosVel_dx is 12*NUM_POS
 template <typename T>
 __host__ __device__ __forceinline__
-void compute_eePosVel_dx(T *s_x, T *s_xp, T dt, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb_dx, T *s_TbTdt, T *s_T, 
+void compute_eePosVel_dx(T *s_x, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb_dx, T *s_TbTdt, T *s_T, 
                          T *s_temp1, T *s_temp2, T *s_eePos, T *s_eeVel, T *s_eePosVel_dx, int ld_grad){
     // load in Tb, Tb_dx, Tb_dt
     T *s_Tb_dt_dx = &s_temp2[16*NUM_POS]; 
-    load_Tbdtdx<T>(s_x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx,s_xp,dt);
+    load_Tbdtdx<T>(s_x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
     hd__syncthreads();
     // then compute Tbody -> T & T_dt
     compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
