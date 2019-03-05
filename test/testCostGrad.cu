@@ -7,7 +7,7 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 #include "../DDPHelpers.cuh"
 #include <random>
 #define NUM_REPS 1
-#define ERR_TOL 0.00001
+#define ERR_TOL 0
 #define RANDOM_MEAN 0
 #define RANDOM_STDEVq 2
 #define RANDOM_STDEVqd 5
@@ -17,7 +17,42 @@ std::normal_distribution<double> randDistqd(RANDOM_MEAN, RANDOM_STDEVqd); //mean
 
 template <typename T>
 __host__
-void finiteDiff(T *x, T *eePosVelGrad, int ld_grad){
+void finiteDiffPos(T *x, T *eePosGrad, int ld_grad){
+	T s_x[2*STATE_SIZE];	T eePos[2*6];
+	#pragma unroll
+	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
+		T *eeGrad = &eePosGrad[ld_grad*diff_ind];
+		#pragma unroll
+		for (int i = 0; i < STATE_SIZE; i++){
+			T val = x[i];	
+			T adj = (diff_ind == i ? FINITE_DIFF_EPSILON : 0.0);
+			s_x[i] 				= val + adj;
+			s_x[i + STATE_SIZE] = val - adj;
+		}
+		// compute eePos and Vel
+		compute_eePos_scratch<T>( s_x, 			    eePos);
+		compute_eePos_scratch<T>(&s_x[STATE_SIZE], &eePos[6]);
+		// now do finite diff rule
+		#pragma unroll
+		for (int i = 0; i < 6; i++){
+			T deltaPos = eePos[i] - eePos[i+6];
+			eeGrad[i]   = deltaPos / (2.0*FINITE_DIFF_EPSILON);
+		}
+	}
+}
+
+template <typename T>
+__host__
+void analyticalPos(T *x, T *eePosGrad){
+	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	T s_eePos[6];
+	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
+	T s_T[36*NUM_POS];			T s_dT[36*NUM_POS];			T s_dTb[36*NUM_POS];
+	compute_eePos<T>(s_T,s_eePos,s_dT,eePosGrad,s_sinq,s_Tb,s_dTb,x,s_cosq,d_Tb);
+}
+
+template <typename T>
+__host__
+void finiteDiffVel(T *x, T *eePosVelGrad, int ld_grad){
 	T s_x[2*STATE_SIZE];	T eePos[2*6];	T eeVel[2*6];
 	#pragma unroll
 	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
@@ -43,14 +78,9 @@ void finiteDiff(T *x, T *eePosVelGrad, int ld_grad){
 	}
 }
 
-
-// s_T_dx is 16*NUM_POS and s_T_dt_dx prev is 16*NUM_POS -> temp1
-// s_T_dt_dx is 16*NUM_POS and s_Tb_dt_dx is 16*NUM_POS -> temp 2
-// s_eePosVel_dx is 12*NUM_POS with Pos in first 6*NUM_POS and vel in second
-
 template <typename T>
 __host__
-void analytical(T *x, T *xp, T dt, T *eePosVelGrad, int ld_grad){
+void analyticalVel(T *x, T *xp, T dt, T *eePosVelGrad, int ld_grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	T s_Tb[36*NUM_POS];
 	T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
 	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_T[36*NUM_POS];
@@ -63,16 +93,13 @@ void analytical(T *x, T *xp, T dt, T *eePosVelGrad, int ld_grad){
 
 template <typename T>
 __host__
-void loadAndClear(T *x, T *xp, T dt, T *grad, T *grad2, int ld_grad, T *Tbody, T *I){
+void loadAndClearPos(T *x, T *grad, T *grad2, int ld_grad){
 	// load random state
 	#pragma unroll
 	for (int i=0; i < NUM_POS; i++){
-		xp[i] = static_cast<T>(randDistq(randEng));
-		xp[i+NUM_POS] = static_cast<T>(randDistqd(randEng));
+		x[i] = 1;//static_cast<T>(randDistq(randEng));
+		x[i+NUM_POS] = 0;//static_cast<T>(randDistqd(randEng));
 	}
-	// compute next state
-	T u[CONTROL_SIZE]; T qdd[NUM_POS]; for (int i=0; i < CONTROL_SIZE; i++){u[i] = 0;}
-	_integrator(x, xp, u, qdd, I, Tbody, dt);
 	// clear grads
 	for (int i=0; i < ld_grad*STATE_SIZE; i++){
 		grad[i] = 0;	grad2[i] = 0;
@@ -81,7 +108,51 @@ void loadAndClear(T *x, T *xp, T dt, T *grad, T *grad2, int ld_grad, T *Tbody, T
 
 template <typename T>
 __host__
-void test(){
+void loadAndClearVel(T *x, T *xp, T dt, T *grad, T *grad2, int ld_grad, T *Tbody, T *I){
+	// load random state (into prev state) and clear grads
+	loadAndClearPos(xp,grad,grad2,ld_grad);
+	// compute next state (as actual state)
+	T u[CONTROL_SIZE]; T qdd[NUM_POS]; for (int i=0; i < CONTROL_SIZE; i++){u[i] = 0;}
+	_integrator(x, xp, u, qdd, I, Tbody, dt);
+}
+
+template <typename T>
+__host__
+void testPos(){
+	// allocate
+	int ld_grad = 6;
+	T *x =     (T *)malloc(        STATE_SIZE*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
+	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
+
+	// compare for NUM_REPS
+	for (int rep = 0; rep < NUM_REPS; rep++){
+		// relod and clear
+		loadAndClearPos<T>(x,grad,grad2,ld_grad);
+		// compute
+		analyticalPos<T>(x,grad);
+		finiteDiffPos<T>(x,grad2,ld_grad);
+		// compare
+		#pragma unroll
+		for (int c = 0; c < STATE_SIZE; c++){
+			#pragma unroll
+			for (int r = 0; r < 6; r++){
+				int ind = c*ld_grad + r;
+				T err = abs(grad[ind] - grad2[ind]);
+				if (err > ERR_TOL){
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+				}
+			}
+		}
+	}
+	//free
+	free(x); free(grad); free(grad2); free(Tbody);
+}
+
+template <typename T>
+__host__
+void testVel(){
 	// allocate
 	int ld_grad = 12;	T dt = TIME_STEP;
 	T *x =     (T *)malloc(        STATE_SIZE*sizeof(T));
@@ -94,24 +165,23 @@ void test(){
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClear<T>(x,xp,dt,grad,grad2,ld_grad,Tbody,I);
+		loadAndClearVel<T>(x,xp,dt,grad,grad2,ld_grad,Tbody,I);
 		// compute
-		analytical<T>(x,xp,dt,grad,ld_grad);
-		finiteDiff<T>(x,grad2,ld_grad);
+		analyticalVel<T>(x,xp,dt,grad,ld_grad);
+		finiteDiffVel<T>(x,grad2,ld_grad);
 		// compare
 		#pragma unroll
 		for (int c = 0; c < STATE_SIZE; c++){
 			#pragma unroll
-			for (int r = 0; r < 12; r++){
+			for (int r = 0; r < 6; r++){//12; r++){
 				int ind = c*ld_grad + r;
 				T err = abs(grad[ind] - grad2[ind]);
 				if (err > ERR_TOL){
-					printf("rep[%d] c,r[%d,%d]=ind[%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,c,r,ind,err,grad[ind],grad2[ind]);
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
 	}
-
 	//free
 	free(x); free(xp); free(grad); free(grad2); free(Tbody); free(I);
 }
@@ -119,6 +189,18 @@ void test(){
 int main(int argc, char *argv[])
 {
 	srand(time(NULL));
-	test<algType>();
+	char mode = '?';
+	if (argc > 1){mode = argv[1][0];}
+	switch (mode){
+		case 'P':
+			testPos<algType>();
+			break;
+		case 'V':
+			testVel<algType>();
+			break;
+		default:
+			printf("Input is [P]os [V]el or full [C]ost\n");
+			return 1;
+	}
 	return 0;
 }

@@ -1239,8 +1239,8 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
         }
         else{
             // else start by getting pointers to i variables
-            T *Tb    = &s_Tb[36*bodyi];        T *Tb_dt     = &s_Tb_dt[16*bodyi];
-            T *Tb_dx = &s_Tb_dx[16*bodyi];     T *Tb_dtdx   = &s_Tb_dt_dx[16*bodyi];
+            T *Tb    = &s_Tb[36*bodyi];         T *Tb_dt    = &s_Tb_dt[16*bodyi];
+            T *Tb_dx = &s_Tb_dx[16*bodyi];      T *Tb_dtdx  = &s_Tb_dt_dx[16*bodyi];
             T *T_im1 = &s_T[36*(bodyi-1)];      T *T_im1_dt = &s_T_dt[16*(bodyi-1)];
             #pragma unroll
             for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
@@ -1256,19 +1256,22 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
                         // get inds for row*col of matricies
                         int ind1 = kx + 4 * i;  int ind2 = ky * 4 + i;
                         // index into appropriate matricies
-                        val    += T_dx_p[ind]    * Tb[ind2];
+                        val    += T_dx_p[ind1]    * Tb[ind2];
                         val_dt += T_dtdx_p[ind1] * Tb[ind2] + T_dx_p[ind1] * Tb_dt[ind2];
                         if (bodyi == bodyj){
                             val    += T_im1[ind1]    * Tb_dx[ind2];
                             val_dt += T_im1_dt[ind1] * Tb_dx[ind2] + T_im1[ind1] * Tb_dtdx[ind2];
                         }
+                        // printf("bodyij[%d|%d] kxkyi[%d|%d|%d] dTim1[%f]*Tb[%f] + flag[%d]*Tim1[%f]*dTb[%f] currVal[%f]\n",bodyi,bodyj,kx,ky,i,T_dx_p[ind1],Tb[ind2],bodyi==bodyj,T_im1[ind1],Tb_dx[ind2],val);
                     }
                     T_dx[ind]   = val;
                     T_dtdx[ind] = val_dt;
+                    // printf("bodyij[%d|%d] ind[%d] val[%f]\n",bodyi,bodyj,ind,val);
                 }
             }
         }
         hd__syncthreads();
+        // printf("Bodyi = %d\n",bodyi);
         // save down T_dt_dx and T_dx into T_dt_dx_prev and T_dx_prev
         #pragma unroll
         for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
@@ -1276,6 +1279,7 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
             T *T_dtdx = &s_T_dt_dx[16*bodyj];   T *T_dtdx_p = &s_T_dt_dx_prev[16*bodyj];
             #pragma unroll
             for (int kx = startx; kx < 16; kx += dx){T_dx_p[kx] = T_dx[kx];  T_dtdx_p[kx] = T_dtdx[kx];}
+               // printf("Bodyj = %d and ind = %d has val = %f\n",bodyj,kx,T_dx[kx]);}
         }
         hd__syncthreads();
     }
