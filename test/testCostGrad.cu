@@ -7,7 +7,7 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 #include "../DDPHelpers.cuh"
 #include <random>
 #define NUM_REPS 1
-#define ERR_TOL 0.0001
+#define ERR_TOL 5 // in percent
 #define RANDOM_MEAN 0
 #define RANDOM_STDEVq 2
 #define RANDOM_STDEVqd 5
@@ -32,8 +32,8 @@ void finiteDiffT(T *x, T *grad, int ld_grad){
 			s_x[i + STATE_SIZE] = val - adj;
 		}
 		// compute T
-		load_Tb<T>(s_x,			 s_Tb,d_Tb,s_cosq,s_sinq);		compute_T_TA_J<T>(s_Tb,s_T);
-		load_Tb<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq);	compute_T_TA_J<T>(s_Tb,s_T2);
+		load_Tb<T>(s_x,			    s_Tb,d_Tb,s_cosq,s_sinq);		compute_T_TA_J<T>(s_Tb,s_T);
+		load_Tb<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq);		compute_T_TA_J<T>(s_Tb,s_T2);
 		T *Tee = &s_T[36*(NUM_POS-1)];	T *Tee2 = &s_T2[36*(NUM_POS-1)];
 		// now do finite diff rule
 		#pragma unroll
@@ -60,12 +60,12 @@ void analyticalT(T *x, T *grad){
 
 template <typename T>
 __host__
-void finiteDiffTdt(T *x, T *grad, int ld_grad){
+void finiteDiffTbdt(T *x, T *grad, int ld_grad){
 	T s_x[2*STATE_SIZE];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
-	T s_Tb[36*NUM_POS];		T s_TbTdt[36*NUM_POS];	T s_TbTdt2[36*NUM_POS];
-	T d_Tb[36*NUM_POS];		initT<T>(d_Tb);			T s_T[36*NUM_POS];
+	T s_Tb[36*NUM_POS];		T s_Tbdt[36*NUM_POS];	T s_Tbdt2[36*NUM_POS];
+	T d_Tb[36*NUM_POS];		initT<T>(d_Tb);
 	#pragma unroll
-	for (int diff_ind = 0; diff_ind < NUM_POS; diff_ind++){
+	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
 		T *gradc = &grad[ld_grad*diff_ind];
 		#pragma unroll
 		for (int i = 0; i < STATE_SIZE; i++){
@@ -75,10 +75,52 @@ void finiteDiffTdt(T *x, T *grad, int ld_grad){
 			s_x[i + STATE_SIZE] = val - adj;
 		}
 		// compute Tdt
-		load_Tbdt<T>(s_x,			   s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt);	compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
+		load_Tbdt<T>(s_x,			  s_Tb,d_Tb,s_cosq,s_sinq,s_Tbdt);
+		load_Tbdt<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq,s_Tbdt2);
+		int Tb_ind = diff_ind % NUM_POS;
+		T *Tbeedt = &s_Tbdt[16*Tb_ind];	T *Tbeedt2 = &s_Tbdt2[16*Tb_ind];
+		// now do finite diff rule
+		#pragma unroll
+		for (int i = 0; i < 16; i++){
+			T delta  = Tbeedt[i] - Tbeedt2[i];
+			gradc[i] = delta / (2.0*FINITE_DIFF_EPSILON);
+		}
+	}
+}
+  
+     
+template <typename T>
+__host__
+void analyticalTbdt(T *x, T *grad){
+	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	
+	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
+	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_Tb_dt_dx[16*2*NUM_POS];
+    load_Tbdtdx<T>(x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
+   	for (int k = 0; k < STATE_SIZE; k++){
+		for (int i = 0; i < 16; i++){grad[16*k + i] = s_Tb_dt_dx[16*k + i];}
+	}
+}
+
+template <typename T>
+__host__
+void finiteDiffTdt(T *x, T *grad, int ld_grad){
+	T s_x[2*STATE_SIZE];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
+	T s_Tb[36*NUM_POS];		T d_Tb[36*NUM_POS];		initT<T>(d_Tb);			
+	T s_TbTdt[36*NUM_POS];	T s_TbTdt2[36*NUM_POS];	T s_T[36*NUM_POS];
+	#pragma unroll
+	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
+		T *gradc = &grad[ld_grad*diff_ind];
+		#pragma unroll
+		for (int i = 0; i < STATE_SIZE; i++){
+			T val = x[i];	
+			T adj = (diff_ind == i ? FINITE_DIFF_EPSILON : 0.0);
+			s_x[i] 				= val + adj;
+			s_x[i + STATE_SIZE] = val - adj;
+		}
+		// compute Tdt
+		load_Tbdt<T>(s_x,			  s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt);		compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
 		load_Tbdt<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt2);	compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt2);
-		T *s_Tdt = &s_TbTdt[16*NUM_POS];	T *s_Tdt2 = &s_TbTdt2[16*NUM_POS];
-		T *Teedt = &s_Tdt[16*(NUM_POS-1)];	T *Teedt2 = &s_Tdt2[16*(NUM_POS-1)];
+		T *Teedt = &s_TbTdt[16*(2*NUM_POS-1)];	T *Teedt2 = &s_TbTdt2[16*(2*NUM_POS-1)];
 		// now do finite diff rule
 		#pragma unroll
 		for (int i = 0; i < 16; i++){
@@ -222,9 +264,45 @@ void testT(){
 			#pragma unroll
 			for (int r = 0; r < 6; r++){
 				int ind = c*ld_grad + r;
-				T err = abs(grad[ind] - grad2[ind]);
+				T delta = abs(grad[ind] - grad2[ind]);
+				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
 				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+				}
+			}
+		}
+	}
+	//free
+	free(x); free(grad); free(grad2); free(Tbody);
+}
+
+template <typename T>
+__host__
+void testTbdt(){
+	// allocate
+	int ld_grad = 16;
+	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
+	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
+
+	// compare for NUM_REPS
+	for (int rep = 0; rep < NUM_REPS; rep++){
+		// relod and clear
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE);
+		// compute
+		analyticalTbdt<T>(x,grad);
+		finiteDiffTbdt<T>(x,grad2,ld_grad);
+		// compare
+		#pragma unroll
+		for (int c = 0; c < STATE_SIZE; c++){
+			#pragma unroll
+			for (int r = 0; r < 6; r++){
+				int ind = c*ld_grad + r;
+				T delta = abs(grad[ind] - grad2[ind]);
+				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
+				if (err > ERR_TOL){
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -256,9 +334,10 @@ void testTdt(){
 			#pragma unroll
 			for (int r = 0; r < 6; r++){
 				int ind = c*ld_grad + r;
-				T err = abs(grad[ind] - grad2[ind]);
-				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+				T delta = abs(grad[ind] - grad2[ind]);
+				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
+				if (err > ERR_TOL || 1){
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -290,9 +369,10 @@ void testPos(){
 			#pragma unroll
 			for (int r = 0; r < 6; r++){
 				int ind = c*ld_grad + r;
-				T err = abs(grad[ind] - grad2[ind]);
+				T delta = abs(grad[ind] - grad2[ind]);
+				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
 				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -324,9 +404,10 @@ void testVel(){
 			#pragma unroll
 			for (int r = 0; r < 12; r++){
 				int ind = c*ld_grad + r;
-				T err = abs(grad[ind] - grad2[ind]);
+				T delta = abs(grad[ind] - grad2[ind]);
+				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
 				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -350,6 +431,9 @@ int main(int argc, char *argv[])
 		case 'T':
 			testT<algType>();
 			break;
+		case 'b':
+			testTbdt<algType>();
+			break;
 		case 'd':
 			testTdt<algType>();
 			break;
@@ -363,7 +447,7 @@ int main(int argc, char *argv[])
 			testCost<algType>();
 			break;
 		default:
-			printf("Input is [P]os, [V]el, [T]ransforms, Transform/[d]T or full [C]ost\n");
+			printf("Input is [P]os, [V]el, [T]ransforms, T[b]ody/dT, Transform/[d]T or full [C]ost\n");
 			return 1;
 	}
 	return 0;

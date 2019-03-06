@@ -569,55 +569,55 @@ void initT(T *s_T){
 
 template <typename T>
 __host__ __device__ 
-void updateT(T *s_T, T *s_cosx, T *s_sinx){
+void updateT(T *s_T, T *s_cosx, T *s_sinx, int ld = 36){
     #if USE_WAFR_URDF
         s_T[0] = s_cosx[0];
         s_T[1] = s_sinx[0];
         s_T[4] = -s_sinx[0];
         s_T[5] = s_cosx[0];
 
-        s_T[36] = 0.0000000000000000000000010127*s_sinx[1]-s_cosx[1];
-        s_T[37] = -0.00000000000020682*s_cosx[1]-0.0000000000048966*s_sinx[1];
-        s_T[38] = s_sinx[1];
-        s_T[40] = 0.0000000000000000000000010127*s_cosx[1]+s_sinx[1];
-        s_T[41] = 0.00000000000020682*s_sinx[1]-0.0000000000048966*s_cosx[1];
-        s_T[42] = s_cosx[1];
-        s_T[44] = -0.00000000000020682;
+        s_T[ld]   = 0.0000000000000000000000010127*s_sinx[1]-s_cosx[1];
+        s_T[ld+1] = -0.00000000000020682*s_cosx[1]-0.0000000000048966*s_sinx[1];
+        s_T[ld+2] = s_sinx[1];
+        s_T[ld+4] = 0.0000000000000000000000010127*s_cosx[1]+s_sinx[1];
+        s_T[ld+5] = 0.00000000000020682*s_sinx[1]-0.0000000000048966*s_cosx[1];
+        s_T[ld+6] = s_cosx[1];
+        s_T[ld+8] = -0.00000000000020682;
 
-        s_T[72] = 0.0000000000000000000000010127*s_sinx[2]-s_cosx[2];
-        s_T[73] = -0.00000000000020682*s_cosx[2]-0.0000000000048966*s_sinx[2];
-        s_T[74] = s_sinx[2];
-        s_T[76] = 0.0000000000000000000000010127*s_cosx[2]+s_sinx[2];
-        s_T[77] = 0.00000000000020682*s_sinx[2]-0.0000000000048966*s_cosx[2];
-        s_T[78] = s_cosx[2];
+        s_T[2*ld]   = 0.0000000000000000000000010127*s_sinx[2]-s_cosx[2];
+        s_T[2*ld+1] = -0.00000000000020682*s_cosx[2]-0.0000000000048966*s_sinx[2];
+        s_T[2*ld+2] = s_sinx[2];
+        s_T[2*ld+4] = 0.0000000000000000000000010127*s_cosx[2]+s_sinx[2];
+        s_T[2*ld+5] = 0.00000000000020682*s_sinx[2]-0.0000000000048966*s_cosx[2];
+        s_T[2*ld+6] = s_cosx[2];
 
-        s_T[108] = s_cosx[3];
-        s_T[109] = 0.0000000000048966*s_sinx[3];
-        s_T[110] = s_sinx[3];
-        s_T[112] = -s_sinx[3];
-        s_T[113] = 0.0000000000048966*s_cosx[3];
-        s_T[114] = s_cosx[3];
+        s_T[3*ld]   = s_cosx[3];
+        s_T[3*ld+1] = 0.0000000000048966*s_sinx[3];
+        s_T[3*ld+2] = s_sinx[3];
+        s_T[3*ld+4] = -s_sinx[3];
+        s_T[3*ld+5] = 0.0000000000048966*s_cosx[3];
+        s_T[3*ld+6] = s_cosx[3];
 
-        s_T[144] = 0.00000000000020682*s_sinx[4]-s_cosx[4];
-        s_T[145] = 0.0000000000048966*s_sinx[4];
-        s_T[146] = 0.00000000000020682*s_cosx[4]+s_sinx[4];
-        s_T[148] = 0.00000000000020682*s_cosx[4]+s_sinx[4];
-        s_T[149] = 0.0000000000048966*s_cosx[4];
-        s_T[150] = -0.00000000000020682*s_sinx[4]+s_cosx[4];
+        s_T[4*ld]   = 0.00000000000020682*s_sinx[4]-s_cosx[4];
+        s_T[4*ld+1] = 0.0000000000048966*s_sinx[4];
+        s_T[4*ld+2] = 0.00000000000020682*s_cosx[4]+s_sinx[4];
+        s_T[4*ld+4] = 0.00000000000020682*s_cosx[4]+s_sinx[4];
+        s_T[4*ld+5] = 0.0000000000048966*s_cosx[4];
+        s_T[4*ld+6] = -0.00000000000020682*s_sinx[4]+s_cosx[4];
 
-        s_T[180] = s_cosx[5];
-        s_T[181] = 0.0000000000048966*s_sinx[5];
-        s_T[182] = s_sinx[5];
-        s_T[184] = -s_sinx[5];
-        s_T[185] = 0.0000000000048966*s_cosx[5];
-        s_T[186] = s_cosx[5];
+        s_T[5*ld]   = s_cosx[5];
+        s_T[5*ld+1] = 0.0000000000048966*s_sinx[5];
+        s_T[5*ld+2] = s_sinx[5];
+        s_T[5*ld+4] = -s_sinx[5];
+        s_T[5*ld+5] = 0.0000000000048966*s_cosx[5];
+        s_T[5*ld+6] = s_cosx[5];
 
-        s_T[216] = 0.00000000000020682*s_sinx[6]-s_cosx[6];
-        s_T[217] = 0.0000000000048966*s_sinx[6];
-        s_T[218] = 0.00000000000020682*s_cosx[6]+s_sinx[6];
-        s_T[220] = 0.00000000000020682*s_cosx[6]+s_sinx[6];
-        s_T[221] = 0.0000000000048966*s_cosx[6];
-        s_T[222] = -0.00000000000020682*s_sinx[6]+s_cosx[6];
+        s_T[6*ld]   = 0.00000000000020682*s_sinx[6]-s_cosx[6];
+        s_T[6*ld+1] = 0.0000000000048966*s_sinx[6];
+        s_T[6*ld+2] = 0.00000000000020682*s_cosx[6]+s_sinx[6];
+        s_T[6*ld+4] = 0.00000000000020682*s_cosx[6]+s_sinx[6];
+        s_T[6*ld+5] = 0.0000000000048966*s_cosx[6];
+        s_T[6*ld+6] = -0.00000000000020682*s_sinx[6]+s_cosx[6];
     #else
         // s_T[0] =  s_cosx[0];
         // s_T[1] =  s_sinx[0];
@@ -669,42 +669,42 @@ void updateT(T *s_T, T *s_cosx, T *s_sinx){
         s_T[1] = s_sinx[0];
         s_T[4] = -1.0*s_sinx[0];
         s_T[5] = s_cosx[0];
-        s_T[36] = 0.000000000000000000000000000000046886444024566354179237414162174*s_sinx[1] - 1.0*s_cosx[1];
-        s_T[37] = 0.00000000000000012246467991473532071737640294584*s_cosx[1] + 0.0000000000000003828568698926949434848128216851*s_sinx[1];
-        s_T[38] = s_sinx[1];
-        s_T[40] = 0.000000000000000000000000000000046886444024566354179237414162174*s_cosx[1] + s_sinx[1];
-        s_T[41] = 0.0000000000000003828568698926949434848128216851*s_cosx[1] - 0.00000000000000012246467991473532071737640294584*s_sinx[1];
-        s_T[42] = s_cosx[1];
-        s_T[72] = 0.000000000000000000000000000000046886444024566354179237414162174*s_sinx[2] - 1.0*s_cosx[2];
-        s_T[73] = 0.00000000000000012246467991473532071737640294584*s_cosx[2] + 0.0000000000000003828568698926949434848128216851*s_sinx[2];
-        s_T[74] = s_sinx[2];
-        s_T[76] = 0.000000000000000000000000000000046886444024566354179237414162174*s_cosx[2] + s_sinx[2];
-        s_T[77] = 0.0000000000000003828568698926949434848128216851*s_cosx[2] - 0.00000000000000012246467991473532071737640294584*s_sinx[2];
-        s_T[78] = s_cosx[2];
-        s_T[108] = s_cosx[3];
-        s_T[109] = -0.0000000000000003828568698926949434848128216851*s_sinx[3];
-        s_T[110] = s_sinx[3];
-        s_T[112] = -1.0*s_sinx[3];
-        s_T[113] = -0.0000000000000003828568698926949434848128216851*s_cosx[3];
-        s_T[114] = s_cosx[3];
-        s_T[144] = - 1.0*s_cosx[4] - 0.00000000000000012246467991473532071737640294584*s_sinx[4];
-        s_T[145] = -0.0000000000000003828568698926949434848128216851*s_sinx[4];
-        s_T[146] = s_sinx[4] - 0.00000000000000012246467991473532071737640294584*s_cosx[4];
-        s_T[148] = s_sinx[4] - 0.00000000000000012246467991473532071737640294584*s_cosx[4];
-        s_T[149] = -0.0000000000000003828568698926949434848128216851*s_cosx[4];
-        s_T[150] = s_cosx[4] + 0.00000000000000012246467991473532071737640294584*s_sinx[4];
-        s_T[180] = s_cosx[5];
-        s_T[181] = -0.0000000000000003828568698926949434848128216851*s_sinx[5];
-        s_T[182] = s_sinx[5];
-        s_T[184] = -1.0*s_sinx[5];
-        s_T[185] = -0.0000000000000003828568698926949434848128216851*s_cosx[5];
-        s_T[186] = s_cosx[5];
-        s_T[216] = - 1.0*s_cosx[6] - 0.00000000000000012246467991473532071737640294584*s_sinx[6];
-        s_T[217] = -0.0000000000000003828568698926949434848128216851*s_sinx[6];
-        s_T[218] = s_sinx[6] - 0.00000000000000012246467991473532071737640294584*s_cosx[6];
-        s_T[220] = s_sinx[6] - 0.00000000000000012246467991473532071737640294584*s_cosx[6];
-        s_T[221] = -0.0000000000000003828568698926949434848128216851*s_cosx[6];
-        s_T[222] = s_cosx[6] + 0.00000000000000012246467991473532071737640294584*s_sinx[6];
+        s_T[ld] = 0.000000000000000000000000000000046886444024566354179237414162174*s_sinx[1] - 1.0*s_cosx[1];
+        s_T[ld+1] = 0.00000000000000012246467991473532071737640294584*s_cosx[1] + 0.0000000000000003828568698926949434848128216851*s_sinx[1];
+        s_T[ld+2] = s_sinx[1];
+        s_T[ld+4] = 0.000000000000000000000000000000046886444024566354179237414162174*s_cosx[1] + s_sinx[1];
+        s_T[ld+5] = 0.0000000000000003828568698926949434848128216851*s_cosx[1] - 0.00000000000000012246467991473532071737640294584*s_sinx[1];
+        s_T[ld+6] = s_cosx[1];
+        s_T[2*ld]   = 0.000000000000000000000000000000046886444024566354179237414162174*s_sinx[2] - 1.0*s_cosx[2];
+        s_T[2*ld+1] = 0.00000000000000012246467991473532071737640294584*s_cosx[2] + 0.0000000000000003828568698926949434848128216851*s_sinx[2];
+        s_T[2*ld+2] = s_sinx[2];
+        s_T[2*ld+4] = 0.000000000000000000000000000000046886444024566354179237414162174*s_cosx[2] + s_sinx[2];
+        s_T[2*ld+5] = 0.0000000000000003828568698926949434848128216851*s_cosx[2] - 0.00000000000000012246467991473532071737640294584*s_sinx[2];
+        s_T[2*ld+6] = s_cosx[2];
+        s_T[3*ld]   = s_cosx[3];
+        s_T[3*ld+1] = -0.0000000000000003828568698926949434848128216851*s_sinx[3];
+        s_T[3*ld+2] = s_sinx[3];
+        s_T[3*ld+4] = -1.0*s_sinx[3];
+        s_T[3*ld+5] = -0.0000000000000003828568698926949434848128216851*s_cosx[3];
+        s_T[3*ld+6] = s_cosx[3];
+        s_T[4*ld]   = - 1.0*s_cosx[4] - 0.00000000000000012246467991473532071737640294584*s_sinx[4];
+        s_T[4*ld+1] = -0.0000000000000003828568698926949434848128216851*s_sinx[4];
+        s_T[4*ld+2] = s_sinx[4] - 0.00000000000000012246467991473532071737640294584*s_cosx[4];
+        s_T[4*ld+4] = s_sinx[4] - 0.00000000000000012246467991473532071737640294584*s_cosx[4];
+        s_T[4*ld+5] = -0.0000000000000003828568698926949434848128216851*s_cosx[4];
+        s_T[4*ld+6] = s_cosx[4] + 0.00000000000000012246467991473532071737640294584*s_sinx[4];
+        s_T[5*ld]   = s_cosx[5];
+        s_T[5*ld+1] = -0.0000000000000003828568698926949434848128216851*s_sinx[5];
+        s_T[5*ld+2] = s_sinx[5];
+        s_T[5*ld+4] = -1.0*s_sinx[5];
+        s_T[5*ld+5] = -0.0000000000000003828568698926949434848128216851*s_cosx[5];
+        s_T[5*ld+6] = s_cosx[5];
+        s_T[6*ld]   = - 1.0*s_cosx[6] - 0.00000000000000012246467991473532071737640294584*s_sinx[6];
+        s_T[6*ld+1] = -0.0000000000000003828568698926949434848128216851*s_sinx[6];
+        s_T[6*ld+2] = s_sinx[6] - 0.00000000000000012246467991473532071737640294584*s_cosx[6];
+        s_T[6*ld+4] = s_sinx[6] - 0.00000000000000012246467991473532071737640294584*s_cosx[6];
+        s_T[6*ld+5] = -0.0000000000000003828568698926949434848128216851*s_cosx[6];
+        s_T[6*ld+6] = s_cosx[6] + 0.00000000000000012246467991473532071737640294584*s_sinx[6];
     #endif
 }
 
@@ -985,13 +985,18 @@ void load_Tb(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody =
 
 template <typename T>
 __host__ __device__ __forceinline__
-void load_Tbdt(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody){
+void load_Tbdt(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_Tbody_dt){
+   int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
    // first load in Tb and dTb/dx because dTb/dt is dTb/dx*dx/dt
-   load_Tb(s_x,s_Tbody,d_Tbody,s_sinx,s_cosx,s_dTbody);
-   int start, delta; singleLoopVals(&start,&delta);
-   for (int i = start; i < 16*NUM_POS; i += delta){
-      int body = i / 16;
-      s_dTbody[i] = s_dTbody[i] * s_x[body+NUM_POS];
+   load_Tb(s_x,s_Tbody,d_Tbody,s_sinx,s_cosx,s_Tbody_dt); // now dTb/dx is in s_Tbody_dt
+   // then multiply wiht dx/dt note here x is just q so we can multiply by qd where s_x = [q,qd]
+   #pragma unroll
+   for (int body = starty; body < NUM_POS; body += dy){
+      #pragma unroll
+      for (int ind = startx; ind < 16; ind += dx){
+         int i = body * 16 + ind;
+         s_Tbody_dt[i] = s_Tbody_dt[i] * s_x[body+NUM_POS];
+      }
    }
 }
 
@@ -999,16 +1004,43 @@ template <typename T>
 __host__ __device__ __forceinline__
 void load_Tbdtdx(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody_dx, T *s_dTbody_dt, T *s_dTbody_dtdx){
    // first load in Tb and dTb/dx because dTb/dt is dTb/dx*dx/dt
-   // then note that dTb/dtdx (because only sin and cos of x) ends up being dTb/dx*qdd - Tb*qd^2
-   // so we also need to compute instantaneous joint accelerations which we can simply euler approximate from previous timestep and dt
-   load_Tb(s_x,s_Tbody,d_Tbody,s_sinx,s_cosx,s_dTbody_dx);
+   // then note that dTb/dtdx (because only sin and cos of x) ends up being two things
+   // first dTb/dt/dq is just -Tb*qd^2 but dropping all constant terms!
+   // second dTb/dt/dqd is just dTb/dq = dTb/dx
    int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
+   int start, delta; singleLoopVals(&start,&delta);
+   // compute sin/cos in parallel as well as Tbase
+   #pragma unroll
+   for (int ind = start; ind < NUM_POS; ind += delta){
+         s_sinx[ind] = std::sin(s_x[ind]);    
+         s_cosx[ind] = std::cos(s_x[ind]);
+   }
+   // load in Tb_base and zero out dTb_dtdx
+   #pragma unroll
+   for (int ind = start; ind < 36*NUM_POS; ind += delta){
+      s_Tbody[ind] = d_Tbody[ind];
+      s_dTbody_dtdx[ind] = 0.0;
+   }
+   hd__syncthreads();
+   // load in different warps or serially if on CPU
+   #ifdef __CUDA_ARCH__
+      if(threadIdx.x == 0 && threadIdx.y == 0){updateT(s_Tbody,s_cosx,s_sinx);}
+      if(threadIdx.x == blockDim.x - 1 && threadIdx.y == blockDim.y - 1){loadTdx4(s_dTbody_dx,s_cosx,s_sinx);}
+      if(threadIdx.x == blockDim.x/2 - 1 && threadIdx.y == blockDim.y/2 - 1){updateT(s_dTbody_dtdx,s_cosx,s_sinx,16);}
+   #else
+      // load Tbody and dTbody serially
+      updateT(s_Tbody,s_cosx,s_sinx);
+      loadTdx4(s_dTbody_dx,s_cosx,s_sinx);
+      updateT(s_dTbody_dtdx,s_cosx,s_sinx,16); // first part of dtdx is just -Tb (non constant part)
+
+   #endif
    for (int body = starty; body < NUM_POS; body += dy){
       T vel = s_x[body+NUM_POS];
       for (int ind = startx; ind < 16; ind += dx){
-         int i = body*16 + ind;     int i2 = body*36+ind;
-         s_dTbody_dt[i]   = s_dTbody_dx[i] * vel;
-         s_dTbody_dtdx[i] = -s_Tbody[i2]*vel*vel;
+         int i = body*16 + ind;  int i2 = i + 16*NUM_POS; // for qd
+         s_dTbody_dt[i]    = s_dTbody_dx[i] * vel;
+         s_dTbody_dtdx[i]  = -s_dTbody_dtdx[i] * vel;
+         s_dTbody_dtdx[i2] = s_dTbody_dx[i];
       }
    }
 
