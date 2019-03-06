@@ -2262,10 +2262,10 @@ template <typename T>
 __host__ __forceinline__
 void compute_eeVel_scratch(T *x, T *eePos, T *eeVel){
    T s_cosq[NUM_POS];         T s_sinq[NUM_POS];      T s_Tb[36*NUM_POS];  
-   T s_T[36*NUM_POS];         T Tbody[36*NUM_POS];    T s_Tbdt[36*NUM_POS];
-   initT<T>(Tbody);           load_Tbdt(x,s_Tb,Tbody,s_cosq,s_sinq,s_Tbdt);
-   compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_Tbdt);
-   compute_eeVel<T>(s_T,eePos,s_Tbdt,eeVel);
+   T s_T[36*NUM_POS];         T Tbody[36*NUM_POS];    T s_TbTdt[36*NUM_POS];
+   initT<T>(Tbody);           load_Tbdt(x,s_Tb,Tbody,s_cosq,s_sinq,s_TbTdt);
+   compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
+   compute_eeVel<T>(s_T,eePos,s_TbTdt,eeVel);
 }
 // need to pass in s_x and then temp memory for the rest
 // s_Tb is 36*NUM_POS (only stored in first 16 of each)
