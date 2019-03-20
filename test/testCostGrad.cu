@@ -424,7 +424,7 @@ void testVel(){
 				int ind = c*ld_grad + r;
 				T delta = abs(grad[ind] - grad2[ind]);
 				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
-				if (err > ERR_TOL || 1){
+				if (err > ERR_TOL){
 					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
