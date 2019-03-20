@@ -60,6 +60,24 @@ void analyticalT(T *x, T *grad){
 
 template <typename T>
 __host__
+void analyticalT2(T *x, T *grad){
+	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      		T s_temp1[32*NUM_POS];
+	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   		initT<T>(d_Tb); 
+	T s_Tb_dx[16*NUM_POS];	   	T s_TbTdt[32*NUM_POS];			T s_T[36*NUM_POS];
+	T s_Tb_dt_dx[32*NUM_POS];	T s_T_dt_dx[32*NUM_POS];		T s_T_dt_dx_prev[32*NUM_POS];
+   	// load in Tb, Tb_dx, Tb_dt
+    load_Tbdtdx<T>(x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
+    compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
+    T *s_Tb_dt = s_TbTdt;   T *s_T_dt = &s_TbTdt[16*NUM_POS];
+    T *s_T_dx = s_temp1; 	T *s_T_dx_prev = &s_T_dx[16*NUM_POS];
+    compute_T_dtdx<T>(s_Tb,s_Tb_dx,s_Tb_dt,s_Tb_dt_dx,s_T,s_T_dx,s_T_dt,s_T_dt_dx,s_T_dx_prev,s_T_dt_dx_prev);
+   	for (int k = 0; k < NUM_POS; k++){
+		for (int i = 0; i < 16; i++){grad[16*k + i] = s_T_dx[16*k + i];}
+	}
+}
+
+template <typename T>
+__host__
 void finiteDiffTbdt(T *x, T *grad, int ld_grad){
 	T s_x[2*STATE_SIZE];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
 	T s_Tb[36*NUM_POS];		T s_Tbdt[36*NUM_POS];	T s_Tbdt2[36*NUM_POS];
@@ -120,7 +138,8 @@ void finiteDiffTdt(T *x, T *grad, int ld_grad){
 		// compute Tdt
 		load_Tbdt<T>(s_x,			  s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt);		compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
 		load_Tbdt<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt2);	compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt2);
-		T *Teedt = &s_TbTdt[16*(2*NUM_POS-1)];	T *Teedt2 = &s_TbTdt2[16*(2*NUM_POS-1)];
+		T *Teedt = &s_TbTdt[16*(NUM_POS*2-1)];
+		T *Teedt2 = &s_TbTdt2[16*(NUM_POS*2-1)];
 		// now do finite diff rule
 		#pragma unroll
 		for (int i = 0; i < 16; i++){
@@ -134,17 +153,15 @@ void finiteDiffTdt(T *x, T *grad, int ld_grad){
 template <typename T>
 __host__
 void analyticalTdt(T *x, T *grad){
-	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	
-	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
-	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_T[36*NUM_POS];
-	T s_temp1[32*NUM_POS];	   	T s_temp2[32*NUM_POS];		T s_temp3[32*NUM_POS];
+	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      		T s_temp1[32*NUM_POS];
+	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   		initT<T>(d_Tb); 
+	T s_Tb_dx[16*NUM_POS];	   	T s_TbTdt[32*NUM_POS];			T s_T[36*NUM_POS];
+	T s_Tb_dt_dx[32*NUM_POS];	T s_T_dt_dx[32*NUM_POS];		T s_T_dt_dx_prev[32*NUM_POS];
    	// load in Tb, Tb_dx, Tb_dt
-    T *s_Tb_dt_dx = &s_temp1[16*NUM_POS]; 
     load_Tbdtdx<T>(x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
     compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
     T *s_Tb_dt = s_TbTdt;   T *s_T_dt = &s_TbTdt[16*NUM_POS];
-    T *s_T_dx_prev = &s_Tb_dx[16*NUM_POS];
-    T *s_T_dx = s_temp1;   T *s_T_dt_dx = s_temp2;    T *s_T_dt_dx_prev = s_temp3;
+    T *s_T_dx = s_temp1; 	T *s_T_dx_prev = &s_T_dx[16*NUM_POS];
     compute_T_dtdx<T>(s_Tb,s_Tb_dx,s_Tb_dt,s_Tb_dt_dx,s_T,s_T_dx,s_T_dt,s_T_dt_dx,s_T_dx_prev,s_T_dt_dx_prev);
    	for (int k = 0; k < STATE_SIZE; k++){
 		for (int i = 0; i < 16; i++){grad[16*k + i] = s_T_dt_dx[16*k + i];}
@@ -218,11 +235,11 @@ template <typename T>
 __host__
 void analyticalVel(T *x, T *eePosVelGrad, int ld_grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	T s_Tb[36*NUM_POS];
-	T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
+	T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 			T s_Tb_dt_dx[16*NUM_POS];
 	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_T[36*NUM_POS];
 	T s_temp1[32*NUM_POS];	   	T s_temp2[32*NUM_POS];		T s_temp3[32*NUM_POS];
 	T s_eePos[6];				T s_eeVel[6];
- 	compute_eePosVel_dx<T>(x, s_Tb, d_Tb, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_T, 
+ 	compute_eePosVel_dx<T>(x, s_Tb, d_Tb, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
                            s_temp1, s_temp2, s_temp3, s_eePos, s_eeVel, eePosVelGrad, ld_grad);
 }
 
@@ -243,7 +260,7 @@ void loadAndClearPos(T *x, T *grad, T *grad2, int gradSize){
 
 template <typename T>
 __host__
-void testT(){
+void testT(int runv2 = 0){
 	// allocate
 	int ld_grad = 16;
 	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
@@ -256,18 +273,19 @@ void testT(){
 		// relod and clear
 		loadAndClearPos<T>(x,grad,grad2,ld_grad*NUM_POS);
 		// compute
-		analyticalT<T>(x,grad);
+		if (runv2){analyticalT2<T>(x,grad);}
+		else{analyticalT<T>(x,grad);}
 		finiteDiffT<T>(x,grad2,ld_grad);
 		// compare
 		#pragma unroll
 		for (int c = 0; c < NUM_POS; c++){
 			#pragma unroll
-			for (int r = 0; r < 6; r++){
+			for (int r = 0; r < 16; r++){
 				int ind = c*ld_grad + r;
 				T delta = abs(grad[ind] - grad2[ind]);
-				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
+				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
 				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -297,12 +315,12 @@ void testTbdt(){
 		#pragma unroll
 		for (int c = 0; c < STATE_SIZE; c++){
 			#pragma unroll
-			for (int r = 0; r < 6; r++){
+			for (int r = 0; r < 16; r++){
 				int ind = c*ld_grad + r;
 				T delta = abs(grad[ind] - grad2[ind]);
-				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
+				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
 				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -332,12 +350,12 @@ void testTdt(){
 		#pragma unroll
 		for (int c = 0; c < STATE_SIZE; c++){
 			#pragma unroll
-			for (int r = 0; r < 6; r++){
+			for (int r = 0; r < 16; r++){
 				int ind = c*ld_grad + r;
 				T delta = abs(grad[ind] - grad2[ind]);
-				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
-				if (err > ERR_TOL || 1){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
+				if (err > ERR_TOL){
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -370,9 +388,9 @@ void testPos(){
 			for (int r = 0; r < 6; r++){
 				int ind = c*ld_grad + r;
 				T delta = abs(grad[ind] - grad2[ind]);
-				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
+				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
 				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -405,9 +423,9 @@ void testVel(){
 			for (int r = 0; r < 12; r++){
 				int ind = c*ld_grad + r;
 				T delta = abs(grad[ind] - grad2[ind]);
-				T err = grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100;
-				if (err > ERR_TOL){
-					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.8f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
+				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
+				if (err > ERR_TOL || 1){
+					printf("rep[%d] ind[%d]=c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,c,r,err,grad[ind],grad2[ind]);
 				}
 			}
 		}
@@ -429,7 +447,7 @@ int main(int argc, char *argv[])
 	if (argc > 1){mode = argv[1][0];}
 	switch (mode){
 		case 'T':
-			testT<algType>();
+			testT<algType>(argv[1][1]);
 			break;
 		case 'b':
 			testTbdt<algType>();

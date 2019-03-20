@@ -1099,13 +1099,15 @@ void compute_T_TA_J(T *s_Tbody, T *s_Tworld, T *s_TA = nullptr, T *s_J = nullptr
                }
                else{
                   #pragma unroll
-                  for (int i = 0; i < 4; i++){val += Tdt_im1[kx + 4 * i]*Tb[ky * 4 + i] + T_im1[kx + 4 * i]*Tbdt_i[ky * 4 + i];} 
+                  for (int i = 0; i < 4; i++){
+                     val += Tdt_im1[kx + 4 * i]*Tb_i[ky * 4 + i] + T_im1[kx + 4 * i]*Tbdt_i[ky * 4 + i];
+                  } 
                }
                Tdt_i[kx + 4 * ky] = val;
             }
          }
-         if (body != 0){Tdt_im1 = Tdt_i; T_im1 += 36;}
-         Tb_i += 36; Tbdt_i += 16; Tdt_i += 16;
+         if (body != 0){T_im1 += 36;}
+         Tb_i += 36; Tbdt_i += 16; Tdt_im1 = Tdt_i; Tdt_i += 16;
          hd__syncthreads();
       }
    }
@@ -1267,7 +1269,7 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
                 T *T_dx   = &s_T_dx[16*bodyj];  T *T_dtdx = &s_T_dt_dx[16*bodyj];
                 #pragma unroll
                 for (int ind = startx; ind < 16; ind += dx){
-                    if (bodyi == bodyj){T_dx[ind] = Tb_dx[ind];     T_dtdx[ind] = Tb_dtdx[ind];}
+                    if (bodyi == bodyj){T_dx[ind] = Tb_dx[ind];     T_dtdx[ind] = Tb_dtdx[ind];    T_dtdx[ind+16*NUM_POS] = Tb_dtdx[ind+16*NUM_POS];}
                     else{               T_dx[ind] = 0;              T_dtdx[ind] = 0;}
                 }
             }
@@ -1301,17 +1303,14 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
                             val_dt    += T_im1_dt[ind1] * Tb_dx[ind2] + T_im1[ind1] * Tb_dtdx[ind2];
                             val_dt_qd += T_im1[ind1]    * Tb_dtdx_qd[ind2];
                         }
-                        // printf("bodyij[%d|%d] kxkyi[%d|%d|%d] dTim1[%f]*Tb[%f] + flag[%d]*Tim1[%f]*dTb[%f] currVal[%f]\n",bodyi,bodyj,kx,ky,i,T_dx_p[ind1],Tb[ind2],bodyi==bodyj,T_im1[ind1],Tb_dx[ind2],val);
                     }
                     T_dx[ind]      = val;
                     T_dtdx[ind]    = val_dt;
                     T_dtdx_qd[ind] = val_dt_qd;
-                    // printf("bodyij[%d|%d] ind[%d] val[%f]\n",bodyi,bodyj,ind,val);
                 }
             }
         }
         hd__syncthreads();
-        // printf("Bodyi = %d\n",bodyi);
         // save down T_dt_dx and T_dx into T_dt_dx_prev and T_dx_prev
         #pragma unroll
         for (int bodyj = starty; bodyj < NUM_POS; bodyj += dy){
@@ -1324,7 +1323,6 @@ void compute_T_dtdx(T *s_Tb, T *s_Tb_dx, T *s_Tb_dt, T *s_Tb_dt_dx, T *s_T, T *s
                T_dtdx_p[kx]    = T_dtdx[kx];
                T_dtdx_p_qd[kx] = T_dtdx_qd[kx];
             }
-               // printf("Bodyj = %d and ind = %d has val = %f\n",bodyj,kx,T_dx[kx]);}
         }
         hd__syncthreads();
     }
@@ -2309,10 +2307,9 @@ void compute_eeVel_scratch(T *x, T *eePos, T *eeVel){
 // s_eePosVel_dx is 12*2*NUM_POS b/c q and qd
 template <typename T>
 __host__ __device__ __forceinline__
-void compute_eePosVel_dx(T *s_x, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb_dx, T *s_TbTdt, T *s_T, 
-                         T *s_temp1, T *s_temp2, T *s_temp3, T *s_eePos, T *s_eeVel, T *s_eePosVel_dx, int ld_grad){
+void compute_eePosVel_dx(T *s_x, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb_dx, T *s_TbTdt, T *s_Tb_dt_dx, T *s_T, 
+                         T *s_T_dx, T *s_T_dt_dx, T *s_T_dt_dx_prev, T *s_eePos, T *s_eeVel, T *s_eePosVel_dx, int ld_grad){
     // load in Tb, Tb_dx, Tb_dt
-    T *s_Tb_dt_dx = &s_temp1[16*NUM_POS]; 
     load_Tbdtdx<T>(s_x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
     hd__syncthreads();
     // then compute Tbody -> T & T_dt
@@ -2321,7 +2318,6 @@ void compute_eePosVel_dx(T *s_x, T *s_Tb, T *d_Tb, T *s_cosq, T *s_sinq, T *s_Tb
     hd__syncthreads();
     // then computde T, dTbody -> dT
     T *s_T_dx_prev = &s_Tb_dx[16*NUM_POS]; // use 2nd half for space savings
-    T *s_T_dx = s_temp1;   T *s_T_dt_dx = s_temp2;    T *s_T_dt_dx_prev = s_temp3;
     compute_T_dtdx<T>(s_Tb,s_Tb_dx,s_Tb_dt,s_Tb_dt_dx,s_T,s_T_dx,s_T_dt,s_T_dt_dx,s_T_dx_prev,s_T_dt_dx_prev);
     hd__syncthreads();
     //compute the hand position and velocity and its derivatives
