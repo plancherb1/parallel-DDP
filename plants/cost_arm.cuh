@@ -122,13 +122,7 @@
 		#define QF_HANDV1 0
 		#define QF_HANDV2 0
 	#else 
-	 	#define Q1 0.1 // q
-		#define Q2 0.001 // qd
-		#define R  0.0001
-		#define QF1 1000.0 // q
-		#define QF2 1000.0 // qd
-
-	 	#define USE_SMOOTH_ABS 1
+	 	#define USE_SMOOTH_ABS 0
 	 	#define SMOOTH_ABS_ALPHA 0.2
 		#if USE_SMOOTH_ABS
 	 		// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
@@ -149,8 +143,8 @@
 			#define QF_HAND2 0		//5000.0 // rpy
 			#define Q_xdHAND 0.1		//1.0//0.1
 			#define QF_xdHAND 10.0	//10.0//100.0
-			#define Q_xHAND 0.0		//0.0//0.001//1.0
-			#define QF_xHAND 0.0		//0.0//1.0
+			#define Q_xHAND 0		//0.0//0.001//1.0
+			#define QF_xHAND 0		//0.0//1.0
 	 	#endif
 		#define Q_HANDV1 0
 		#define Q_HANDV2 0
