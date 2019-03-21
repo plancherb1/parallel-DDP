@@ -146,7 +146,7 @@
 			#define Q_xHAND 0		//0.0//0.001//1.0
 			#define QF_xHAND 0		//0.0//1.0
 	 	#endif
-		#define Q_HANDV1 0
+		#define Q_HANDV1 0.1
 		#define Q_HANDV2 0
 		#define QF_HANDV1 0
 		#define QF_HANDV2 0
@@ -240,8 +240,9 @@
 	 	for (int i = 0; i < 6; i++){
 	 		T delta = s_eePos[i]-d_eeGoal[i];
 	 		T deePos = s_deePos[r*6+i];
+	 		T deeVel = s_deeVel[r*12+i+6];
 	    	val += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*deePos;
-	    	if (s_eeVel != nullptr){val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_deeVel[i];}
+	    	if (s_eeVel != nullptr){val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*deeVel;}
 	 	}
 	 	if (USE_SMOOTH_ABS){
 			T val2 = 0.0;

@@ -336,7 +336,6 @@ void testT(int runv2 = 0){
 	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*NUM_POS*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*NUM_POS*sizeof(T));
-	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
@@ -361,7 +360,7 @@ void testT(int runv2 = 0){
 		}
 	}
 	//free
-	free(x); free(grad); free(grad2); free(Tbody);
+	free(x); free(grad); free(grad2);
 }
 
 template <typename T>
@@ -372,7 +371,6 @@ void testTbdt(){
 	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
-	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
@@ -396,7 +394,7 @@ void testTbdt(){
 		}
 	}
 	//free
-	free(x); free(grad); free(grad2); free(Tbody);
+	free(x); free(grad); free(grad2);
 }
 
 template <typename T>
@@ -407,7 +405,6 @@ void testTdt(){
 	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
-	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
@@ -431,7 +428,7 @@ void testTdt(){
 		}
 	}
 	//free
-	free(x); free(grad); free(grad2); free(Tbody);
+	free(x); free(grad); free(grad2);
 }
 
 template <typename T>
@@ -442,7 +439,6 @@ void testPos(){
 	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*NUM_POS*sizeof(T));
-	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
@@ -466,7 +462,7 @@ void testPos(){
 		}
 	}
 	//free
-	free(x); free(grad); free(grad2); free(Tbody);
+	free(x); free(grad); free(grad2);
 }
 
 template <typename T>
@@ -477,7 +473,6 @@ void testVel(){
 	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
-	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
@@ -501,7 +496,7 @@ void testVel(){
 		}
 	}
 	//free
-	free(x); free(grad); free(grad2); free(Tbody);
+	free(x); free(grad); free(grad2);
 }
 
 template <typename T>
@@ -512,7 +507,6 @@ void testCost(){
 	T *u =     (T *)malloc(CONTROL_SIZE*sizeof(T));
 	T *grad =  (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
 	T *grad2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
-	T *Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(Tbody);
 	T *goal;
 	#if EE_COST
 		goal =(T *)malloc(6*sizeof(T));
@@ -538,7 +532,7 @@ void testCost(){
 		}
 	}
 	//free
-	free(x); free(u); free(grad); free(grad2); free(Tbody); free(goal);
+	free(x); free(u); free(grad); free(grad2); free(goal);
 }
 
 int main(int argc, char *argv[])
