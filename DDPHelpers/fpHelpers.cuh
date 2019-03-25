@@ -126,72 +126,75 @@ T defectComp(T *d, int ld_d){
 	return maxD;
 }
 
-// cost kern using external costFunc
-template <typename T>
-__global__
-void costKern(T **d_x, T **d_u, T *d_JT, T *d_xg, int ld_x, int ld_u){
-   	auto s_J = shared_memory_proxy<T>();
-   	#pragma unroll
-   	for (int a = blockIdx.x; a < NUM_ALPHA; a += gridDim.x){
-   		// compute cost load into shared memory for reduction
-      	s_J[threadIdx.x] = 0.0; T *xa = d_x[a]; T *ua = d_u[a];
-      	#pragma unroll
-      	for (int k = threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x){
-      		T *xk = &xa[k*ld_x]; 	T *uk = &ua[k*ld_u];
-      		s_J[threadIdx.x] += costFunc(xk,uk,d_xg,k);
-      	}
-      	__syncthreads();
-   		// then sum it all up per alpha with a reduce pattern
-      	reduceSum<T>(s_J);
-      	__syncthreads();
-   		if (threadIdx.x == 0){d_JT[a] = s_J[0];}
-   		__syncthreads();
-   	}
-}
+#if !EE_COST
+	// cost kern using external costFunc
+	template <typename T>
+	__global__
+	void costKern(T **d_x, T **d_u, T *d_JT, T *d_xg, int ld_x, int ld_u){
+	   	auto s_J = shared_memory_proxy<T>();
+	   	#pragma unroll
+	   	for (int a = blockIdx.x; a < NUM_ALPHA; a += gridDim.x){
+	   		// compute cost load into shared memory for reduction
+	      	s_J[threadIdx.x] = 0.0; T *xa = d_x[a]; T *ua = d_u[a];
+	      	#pragma unroll
+	      	for (int k = threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x){
+	      		T *xk = &xa[k*ld_x]; 	T *uk = &ua[k*ld_u];
+	      		s_J[threadIdx.x] += costFunc(xk,uk,d_xg,k);
+	      	}
+	      	__syncthreads();
+	   		// then sum it all up per alpha with a reduce pattern
+	      	reduceSum<T>(s_J);
+	      	__syncthreads();
+	   		if (threadIdx.x == 0){d_JT[a] = s_J[0];}
+	   		__syncthreads();
+	   	}
+	}
 
-// cost kern just for summing over M_F or NUM_TIME_STEPS
-template <typename T, int MODE>
-__global__
-void costKern(T *d_JT){
-	auto s_JT = shared_memory_proxy<T>();
-	// mode 0 implies that we have computed the cost in the forward pass and need to sum
-	//        up per block across M_F shooting intervals (extern shared mem is size 0)
-	if (MODE == 0){
-		int alpha = threadIdx.x;
-		T J = 0;
-		#pragma unroll
-		for (int i=0; i<M_F; i++){J += d_JT[alpha*M_F + i];}
-		__syncthreads();
-		d_JT[alpha] = J;
+	template <typename T>
+	__host__
+	void costThreaded(threadDesc_t desc, T *x, T *u, T *JT, T *xg, int ld_x, int ld_u){
+		JT[desc.tid] = 0;
+		for (unsigned int i=0; i<desc.reps; i++){
+			int k = desc.tid + i*desc.dim;
+			T *xk = &x[k*ld_x]; 	T *uk = &u[k*ld_u];
+	  		JT[desc.tid] += costFunc(xk,uk,xg,k);
+	  	}
 	}
-	else if (MODE == 1){
-	// mode 1 implies that we have computed the cost in the gradient/Hessian comp and need
-	//        to sum up per block across all NUM_TIME_STEPS (must launch with extern shared mem)
-	//        note this also only happens in the init so only one alpha block
-		s_JT[threadIdx.x] = 0.0;
-		for (int k = threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x){s_JT[threadIdx.x] += d_JT[k];}
-		__syncthreads();
-		// sum it all up per alpha with a reduce pattern
-		reduceSum<T>(s_JT);
-		__syncthreads();
-		if (threadIdx.x == 0){d_JT[0] = s_JT[0];}
-	}
-	// else bad mode
-	else{
-		printf("ERROR: invalid mode for costKern_v2 usage is 0:M_F sum 1:NUM_TIME_STEPS sum 2:NUM_TIME_STEPS comp. Note: need extern shared mem for 1,2.");
-	}
-}
 
-template <typename T>
-__host__
-void costThreaded(threadDesc_t desc, T *x, T *u, T *JT, T *xg, int ld_x, int ld_u){
-	JT[desc.tid] = 0;
-	for (unsigned int i=0; i<desc.reps; i++){
-		int k = desc.tid + i*desc.dim;
-		T *xk = &x[k*ld_x]; 	T *uk = &u[k*ld_u];
-  		JT[desc.tid] += costFunc(xk,uk,xg,k);
-  	}
-}
+#else
+	// cost kern just for summing over M_F or NUM_TIME_STEPS
+	template <typename T, int MODE>
+	__global__
+	void costKern(T *d_JT){
+		auto s_JT = shared_memory_proxy<T>();
+		// mode 0 implies that we have computed the cost in the forward pass and need to sum
+		//        up per block across M_F shooting intervals (extern shared mem is size 0)
+		if (MODE == 0){
+			int alpha = threadIdx.x;
+			T J = 0;
+			#pragma unroll
+			for (int i=0; i<M_F; i++){J += d_JT[alpha*M_F + i];}
+			__syncthreads();
+			d_JT[alpha] = J;
+		}
+		else if (MODE == 1){
+		// mode 1 implies that we have computed the cost in the gradient/Hessian comp and need
+		//        to sum up per block across all NUM_TIME_STEPS (must launch with extern shared mem)
+		//        note this also only happens in the init so only one alpha block
+			s_JT[threadIdx.x] = 0.0;
+			for (int k = threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x){s_JT[threadIdx.x] += d_JT[k];}
+			__syncthreads();
+			// sum it all up per alpha with a reduce pattern
+			reduceSum<T>(s_JT);
+			__syncthreads();
+			if (threadIdx.x == 0){d_JT[0] = s_JT[0];}
+		}
+		// else bad mode
+		else{
+			printf("ERROR: invalid mode for costKern_v2 usage is 0:M_F sum 1:NUM_TIME_STEPS sum 2:NUM_TIME_STEPS comp. Note: need extern shared mem for 1,2.");
+		}
+	}
+#endif
 
 template <typename T>
 __host__ __device__ __forceinline__
@@ -375,7 +378,8 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 		cdJ = prevJ - J[i]; JFlag = cdJ >= 0.0 && cdJ > *dJ;
 		cz = cdJ / (alpha[i]*dJexp[0] + alpha[i]*alpha[i]/2.0*dJexp[1]); zFlag = USE_EXP_RED ? (EXP_RED_MIN < cz && cz < EXP_RED_MAX) : 1;
 		dFlag = M_F == 1 || *ignore_defect ? 1 :  d[i] < MAX_DEFECT_SIZE;
-		// printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]f[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
+		printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
+		// printf("             dJexp[%.12f][%.12f] eq0?[%d][%d]\n",dJexp[0],dJexp[1],abs(dJexp[0])<0.00000000001,abs(dJexp[1])<0.00000000001);
 		if(JFlag && zFlag && dFlag){
 			if (d[i] < USE_MAX_DEFECT){*ignore_defect = 0;} // update the ignore defect
 			*alphaIndex = i; *dJ = cdJ; *z = cz; // update current best index, dJ, z
@@ -431,7 +435,7 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
     *dJ = prevJ - *J; 											JFlag = *dJ >= 0.0;
 	*z = *dJ / (alpha*dJexp[0] + alpha*alpha/2.0*dJexp[1]); 	zFlag = !USE_EXP_RED || (EXP_RED_MIN < *z && *z < EXP_RED_MAX);
     if (M_F > 1){*maxd = defectComp(d,ld_d); dFlag = *maxd < MAX_DEFECT_SIZE;} else{dFlag = 1;}
-    // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]f[%d]\n",alpha,*J,*dJ,*z,*maxd,JFlag,zFlag,dFlag);
+    // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d]\n",alpha,*J,*dJ,*z,*maxd,JFlag,zFlag,dFlag);
     if(JFlag && zFlag && dFlag){
 		if (*ignore_defect && *maxd < USE_MAX_DEFECT){*ignore_defect = 0;}
 		return 0;

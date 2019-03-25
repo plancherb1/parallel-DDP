@@ -45,11 +45,14 @@ template <typename T>
 __global__
 void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, int ld_u, int ld_H, int ld_g, T *d_Tbody = nullptr, T *d_JT = nullptr){
 	#if EE_COST
-		__shared__ T s_x[STATE_SIZE];	__shared__ T s_u[NUM_POS];
-		__shared__ T s_sinq[NUM_POS];	__shared__ T s_cosq[NUM_POS];
-		__shared__ T s_Tb[36*NUM_POS]; 	__shared__ T s_dTb[36*NUM_POS];
-		__shared__ T s_T[36*NUM_POS]; 	__shared__ T s_dT[36*NUM_POS*NUM_POS];
-		__shared__ T s_eePos[6];		__shared__ T s_deePos[6*NUM_POS];
+		__shared__ T s_x[STATE_SIZE];		__shared__ T s_u[NUM_POS];
+		__shared__ T s_sinq[NUM_POS];		__shared__ T s_cosq[NUM_POS];
+		__shared__ T s_Tb[36*NUM_POS]; 		__shared__ T s_Tb_dx[36*NUM_POS];
+		__shared__ T s_T[36*NUM_POS]; 		__shared__ T s_T_dx[36*NUM_POS];
+		__shared__ T s_eePos[6];			__shared__ T s_deePos[6*NUM_POS];
+		__shared__ T s_TbTdt[32*NUM_POS]; 	__shared__ T s_Tb_dt_dx[16*NUM_POS];
+		__shared__ T s_eeVel[6];		  	__shared__ T s_deePosVel[12*NUM_POS];
+		__shared__ T s_T_dt_dx[32*NUM_POS]; __shared__ T s_T_dt_dx_p[32*NUM_POS];
 		for (int k = blockIdx.x; k < NUM_TIME_STEPS; k += gridDim.x){
 			T *xk = &d_x[k*ld_x];			T *uk = &d_u[k*ld_u];
 			T *Hk = &d_H[k*ld_H*DIM_H_c];	T *gk = &d_g[k*ld_g];
@@ -59,11 +62,14 @@ void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, 
 				s_x[ind] = xk[ind];		if (ind < NUM_POS){s_u[ind] = uk[ind];}
 			}
 			__syncthreads();
-			// then compute the end effector position and gradient
-			compute_eePos<T>(s_T,s_eePos,s_dT,s_deePos,s_sinq,s_Tb,s_dTb,s_x,s_cosq,d_Tbody);
+			// compute end effector position and velocity
+			compute_eePosVel_dx<T>(s_x, s_Tb, d_Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
+                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
+			// // or simply compute the end effector position and gradient
+			// compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,s_x,s_cosq,d_Tbody);
 			__syncthreads();
 			// then compute the cost grad
-			costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT);
+			costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT,-1,s_eeVel,s_deePosVel);
 		}
 	#else
 		#pragma unroll
@@ -79,10 +85,13 @@ template <typename T>
 __host__
 void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *xg, int ld_x, int ld_u, int ld_H, int ld_g, T *Tbody = nullptr, T *JT = nullptr){
 	#if EE_COST // need lots of temp mem space for the xfrm mats
-		T s_sinq[NUM_POS];		T s_cosq[NUM_POS];
-		T s_Tb[36*NUM_POS];		T s_dTb[36*NUM_POS];
-		T s_T[36*NUM_POS];		T s_dT[36*NUM_POS*NUM_POS];
-		T s_eePos[6];			T s_deePos[6*NUM_POS];
+		T s_sinq[NUM_POS];			T s_cosq[NUM_POS];
+		T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
+		T s_T[36*NUM_POS];			T s_T_dx[36*NUM_POS];
+		T s_eePos[6];				T s_deePos[6*NUM_POS];
+		T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
+		T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
+		T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
 		// if JT passed in then first zero the cost
        	if (JT != nullptr){JT[desc.tid] = 0.0;}
 	#endif
@@ -92,10 +101,13 @@ void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *x
       	T *xk = &x[kInd*ld_x];			T *uk = &u[kInd*ld_u];
       	T *Hk = &H[kInd*ld_H*DIM_H_c];	T *gk = &g[kInd*ld_g];
 		#if EE_COST 
-			// compute the end effector position and gradient
-			compute_eePos<T>(s_T,s_eePos,s_dT,s_deePos,s_sinq,s_Tb,s_dTb,xk,s_cosq,Tbody);
+			// compute end effector position and velocity
+			compute_eePosVel_dx<T>(xk, s_Tb, Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
+                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
+			// // or simply compute the end effector position and gradient
+			// compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,s_x,s_cosq,Tbody);
 			// then compute the cost gradient
-			costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid);
+			costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid,s_eeVel,s_deePosVel);
 		#else // simple
 			costGrad(Hk,gk,xk,uk,xg,kInd,ld_H);
     	#endif
@@ -342,13 +354,13 @@ void initAlgCPU(T *x, T *xp, T *xp2, T *u, T *up, T *AB, T *H, T *g, T *KT, T *d
     threadDesc_t desc;
     if (forwardRolloutFlag){alphaOut[0] = 0;}	else{alphaOut[0] = -1;}
     // compute the cost (if needed) and initial derivatives
-    if (!EE_COST){
+    #if !EE_COST
         desc.dim = COST_THREADS;
         for (unsigned int thread_i = 0; thread_i < COST_THREADS; thread_i++){
             desc.tid = thread_i; 	desc.reps = compute_reps(thread_i,COST_THREADS,NUM_TIME_STEPS);
             threads[thread_i] = std::thread(&costThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(JT), std::ref(xGoal), ld_x, ld_u);
         }
-    }
+    #endif
     desc.dim = COST_THREADS;
     for (unsigned int thread_i = 0; thread_i < COST_THREADS; thread_i++){
         desc.tid = thread_i; 	desc.reps = compute_reps(thread_i,COST_THREADS,NUM_TIME_STEPS);

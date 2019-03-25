@@ -130,8 +130,6 @@ void loadTraj(trajVars<T> *tvars, matDimms *dimms){
 		}
 		xk += (dimms->ld_x);	uk += (dimms->ld_u);
 	}
-	// memset(tvars->x, 0, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
-	// memset(tvars->u, 0, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
 	memset(tvars->KT, 0, (dimms->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
 }
 template <typename T>
@@ -259,7 +257,7 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 	// get the max iters per solve
 	int timeLimit = getTimeBudget(1000, 1); //note in ms
 	// get the total time for the trajectory
-	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));	double timePrint = 0;
+	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));	//double timePrint = 0;
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
 	if (hardware == 'G'){

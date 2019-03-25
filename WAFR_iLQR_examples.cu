@@ -1,9 +1,9 @@
 /***
 nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
-#define EE_COST 0
+#define EE_COST 1//0
 #define TOL_COST 0.0
-#define USE_WAFR_URDF 1
+#define USE_WAFR_URDF 0//1
 
 #include "DDPHelpers.cuh"
 #include <random>
@@ -32,14 +32,23 @@ nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu utils/cudaUtils.cu utils/threa
 #elif PLANT == 4 // arm
 	#define RANDOM_STDEV 0.001
  	#define PI 3.14159
-	#define GOAL_1 0
-	#define GOAL_2 0
-	#define GOAL_3 0
-	#define GOAL_4 -0.25*PI
-	#define GOAL_5 0
-	#define GOAL_6 0.25*PI
-	#define GOAL_7 0.5*PI
-	#define GOAL_O 0.0
+	#if EE_COST
+		#define GOAL_X 0.3638
+		#define GOAL_Y 0.0
+		#define GOAL_Z 1.0628
+		#define GOAL_r (0.5*PI)
+		#define GOAL_p 0.0
+		#define GOAL_y (0.5*PI)
+	#else
+		#define GOAL_1 0
+		#define GOAL_2 0
+		#define GOAL_3 0
+		#define GOAL_4 -0.25*PI
+		#define GOAL_5 0
+		#define GOAL_6 0.25*PI
+		#define GOAL_7 0.5*PI
+		#define GOAL_O 0.0
+	#endif
 #endif
 
 char errMsg[]  = "Error: Unkown code - usage is [C]PU or [G]PU with [CS] for serial line search\n";

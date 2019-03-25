@@ -136,19 +136,19 @@
 			#define Q_xHAND 0.0
 			#define QF_xHAND 0.0
 		#else
-			#define Q_HAND1 0.1		//1.0 // xyz
+			#define Q_HAND1 1.0	    //1.0 // xyz
 			#define Q_HAND2 0		//1.0 // rpy
-			#define R_HAND 0.0001		//0.001
-			#define QF_HAND1 1000.0		//5000.0 // xyz
+			#define R_HAND 0.0001	//0.001
+			#define QF_HAND1 10.0	//5000.0 // xyz
 			#define QF_HAND2 0		//5000.0 // rpy
-			#define Q_xdHAND 0.1		//1.0//0.1
-			#define QF_xdHAND 10.0	//10.0//100.0
+			#define Q_xdHAND 0		//1.0//0.1
+			#define QF_xdHAND 0		//10.0//100.0
 			#define Q_xHAND 0		//0.0//0.001//1.0
 			#define QF_xHAND 0		//0.0//1.0
 	 	#endif
 		#define Q_HANDV1 0.1
 		#define Q_HANDV2 0
-		#define QF_HANDV1 0
+		#define QF_HANDV1 1.0
 		#define QF_HANDV2 0
 	#endif
 
@@ -234,13 +234,13 @@
 
 	template <typename T>
 	__host__ __device__ __forceinline__
-	T deeCost(T *s_eePos, T *s_deePos, T *d_eeGoal, int k, int r, T *s_eeVel = nullptr, T *s_deeVel = nullptr){
-		T val = 0.0;
+	T deeCost(T *s_eePos, T *s_deePos, T *d_eeGoal, int k, int r, T *s_eeVel = nullptr, T *s_deePosVel = nullptr){
+		T val = 0.0;	T deePos, deeVel;
 	 	#pragma unroll
 	 	for (int i = 0; i < 6; i++){
 	 		T delta = s_eePos[i]-d_eeGoal[i];
-	 		T deePos = s_deePos[r*6+i];
-	 		T deeVel = s_deeVel[r*12+i+6];
+	 		if (s_eeVel != nullptr){deePos = s_deePosVel[r*12+i];	deeVel = s_deePosVel[r*12+i+6];}
+	 		else{deePos = s_deePos[r*6+i];}
 	    	val += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*deePos;
 	    	if (s_eeVel != nullptr){val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*deeVel;}
 	 	}
@@ -250,6 +250,7 @@
 	    	for (int i = 0; i < 6; i++){
 	    		T delta = s_eePos[i]-d_eeGoal[i];
 	       		val2 += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*delta;
+	       		if (s_eeVel != nullptr){val2 += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
 	    	}
 	    	val2 += SMOOTH_ABS_ALPHA*SMOOTH_ABS_ALPHA;
 	    	val /= sqrt(val2);
@@ -305,7 +306,7 @@
 	// eeCost Grad
 	template <typename T>
 	__host__ __device__ __forceinline__
-	void costGrad(T *Hk, T*gk, T *s_eePos, T *s_deePos, T *d_eeGoal, T *s_x, T *s_u, int k, int ld_H, T *d_JT = nullptr, int tid = -1, T *s_eeVel = nullptr, T *s_deeVel = nullptr){
+	void costGrad(T *Hk, T*gk, T *s_eePos, T *s_deePos, T *d_eeGoal, T *s_x, T *s_u, int k, int ld_H, T *d_JT = nullptr, int tid = -1, T *s_eeVel = nullptr, T *s_deePosVel = nullptr){
 		// then to get the gradient and Hessian we need to compute the following for the state block (and also standard control block)
 		// J = \sum_i Q_i*pow(hand_delta_i,2) + other stuff
 		// dJ/dx = g = \sum_i Q_i*hand_delta_i*dh_i/dx + other stuff
@@ -314,7 +315,7 @@
 		#pragma unroll
 		for (int r = start; r < DIM_g_r; r += delta){
 		  	T val = 0.0;
-		  	if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deeVel);}
+		  	if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deePosVel);}
 		  	// add on the joint level state cost (tend to zero regularizer) and control cost
 		  	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xHAND : Q_xHAND)*s_x[r];}
 		  	else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdHAND : Q_xdHAND)*s_x[r];}
@@ -337,8 +338,8 @@
 		     	if (c < NUM_POS && r < NUM_POS){
 		        	#pragma unroll
 		        	for (int j = 0; j < 6; j++){
-		           		val += s_deePos[r*6+j]*s_deePos[c*6+j];
-		           		if (s_deeVel != nullptr){val += s_deeVel[r*12+6+j]*s_deeVel[c*12+6+j];}
+		           		if (s_deePosVel != nullptr){val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j] + s_deePosVel[r*12+6+j]*s_deePosVel[c*12+6+j];}
+		           		else{val += s_deePos[r*6+j]*s_deePos[c*6+j];}
 		        	}
 		     	}
 			    // if applicable add on the joint level state cost (tend to zero regularizer) and control cost

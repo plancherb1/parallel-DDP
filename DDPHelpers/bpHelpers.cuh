@@ -327,7 +327,7 @@ void computeExpRed(T *s_dJ, T *s_H, T *s_g, T *s_du){
       		s_dJ[ind] 			 += val1;
       		s_dJ[DIM_du_r + ind] += val2;
   		#else
-  			s_dJ[0] += val1; 
+  			  s_dJ[0] += val1; 
       		s_dJ[1] += val2;
   		#endif
   	}

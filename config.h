@@ -164,48 +164,48 @@ typedef float algType;
 #endif
 
 // Matrix Dimms
-	#define DIM_x_r STATE_SIZE
-	#define DIM_x_c 1
-	#define DIM_u_r CONTROL_SIZE
-	#define DIM_u_c 1
-	#define DIM_d_r STATE_SIZE
-	#define DIM_d_c 1
-	#define DIM_AB_r STATE_SIZE
-	#define DIM_AB_c (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_ABT_r (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_ABT_c STATE_SIZE
-	#define DIM_A_r STATE_SIZE
-	#define DIM_A_c STATE_SIZE
-	#define DIM_H_r (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_H_c (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_Hxx_r STATE_SIZE
-	#define DIM_Hxx_c STATE_SIZE
-	#define DIM_Hux_r CONTROL_SIZE
-	#define DIM_Hux_c STATE_SIZE
-	#define DIM_Hxu_r STATE_SIZE
-	#define DIM_Hxu_c CONTROL_SIZE
-	#define DIM_Huu_r CONTROL_SIZE
-	#define DIM_Huu_c CONTROL_SIZE
-	#define DIM_g_r (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_g_c 1
-	#define DIM_gx_r STATE_SIZE
-	#define DIM_gx_c 1
-	#define DIM_gu_r CONTROL_SIZE
-	#define DIM_gu_c 1
-	#define DIM_P_r STATE_SIZE
-	#define DIM_P_c STATE_SIZE
-	#define DIM_p_r STATE_SIZE
-	#define DIM_p_c 1
-	#define DIM_K_r CONTROL_SIZE
-	#define DIM_K_c STATE_SIZE
-	#define DIM_KT_r DIM_K_c
-	#define DIM_KT_c DIM_K_r
-	#define DIM_du_r CONTROL_SIZE
-	#define DIM_du_c 1
-	#define OFFSET_HXU (DIM_x_r*(DIM_x_r+DIM_u_r))
-	#define OFFSET_HUU (OFFSET_HXU + DIM_x_r)
-	#define OFFSET_HUX_GU DIM_x_r
-	#define OFFSET_B (DIM_AB_r*DIM_x_r)
+#define DIM_x_r STATE_SIZE
+#define DIM_x_c 1
+#define DIM_u_r CONTROL_SIZE
+#define DIM_u_c 1
+#define DIM_d_r STATE_SIZE
+#define DIM_d_c 1
+#define DIM_AB_r STATE_SIZE
+#define DIM_AB_c (STATE_SIZE + CONTROL_SIZE)
+#define DIM_ABT_r (STATE_SIZE + CONTROL_SIZE)
+#define DIM_ABT_c STATE_SIZE
+#define DIM_A_r STATE_SIZE
+#define DIM_A_c STATE_SIZE
+#define DIM_H_r (STATE_SIZE + CONTROL_SIZE)
+#define DIM_H_c (STATE_SIZE + CONTROL_SIZE)
+#define DIM_Hxx_r STATE_SIZE
+#define DIM_Hxx_c STATE_SIZE
+#define DIM_Hux_r CONTROL_SIZE
+#define DIM_Hux_c STATE_SIZE
+#define DIM_Hxu_r STATE_SIZE
+#define DIM_Hxu_c CONTROL_SIZE
+#define DIM_Huu_r CONTROL_SIZE
+#define DIM_Huu_c CONTROL_SIZE
+#define DIM_g_r (STATE_SIZE + CONTROL_SIZE)
+#define DIM_g_c 1
+#define DIM_gx_r STATE_SIZE
+#define DIM_gx_c 1
+#define DIM_gu_r CONTROL_SIZE
+#define DIM_gu_c 1
+#define DIM_P_r STATE_SIZE
+#define DIM_P_c STATE_SIZE
+#define DIM_p_r STATE_SIZE
+#define DIM_p_c 1
+#define DIM_K_r CONTROL_SIZE
+#define DIM_K_c STATE_SIZE
+#define DIM_KT_r DIM_K_c
+#define DIM_KT_c DIM_K_r
+#define DIM_du_r CONTROL_SIZE
+#define DIM_du_c 1
+#define OFFSET_HXU (DIM_x_r*(DIM_x_r+DIM_u_r))
+#define OFFSET_HUU (OFFSET_HXU + DIM_x_r)
+#define OFFSET_HUX_GU DIM_x_r
+#define OFFSET_B (DIM_AB_r*DIM_x_r)
 // Matrix Dimms
 
 #endif
