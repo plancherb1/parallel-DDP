@@ -715,6 +715,7 @@
             //printf("dx[%f] for val[%f] vs prev[%f]\n",dx[ind],(ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]),val);
             if(ind < NUM_POS){q_out[ind] = val; if(!isfinite(q_out[ind])){q_out[ind] = 0;}}    //else{qd_out[ind-NUM_POS] = val;}
         }
+        hd__syncthreads();
         // printf("dx[%f %f %f %f %f %f %f][%f %f %f %f %f %f %f]\n",dx[0],dx[1],dx[2],dx[3],dx[4],dx[5],dx[6],dx[7],dx[8],dx[9],dx[10],dx[11],dx[12],dx[13]);
         // and formulate the control from that delta (and save out KT -> K)
         #pragma unroll

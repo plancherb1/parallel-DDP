@@ -151,6 +151,9 @@ typedef float algType;
 #ifndef EE_COST
 	#define EE_COST 0 // 1 for end effector based cost / goal and 0 for joint based
 #endif
+#ifndef USE_EE_VEL_COST
+	#define USE_EE_VEL_COST 0 // turn on or off the eeVel code path
+#endif
 #ifndef USE_LIMITS_FLAG
 	#define USE_LIMITS_FLAG 0 // use joint vel torque limits (quad pen)
 #endif

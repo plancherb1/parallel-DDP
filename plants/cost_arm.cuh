@@ -224,7 +224,7 @@
 	 	for (int i = 0; i < 6; i ++){
 	    	T delta = s_eePos[i] - d_eeGoal[i];
 	    	cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*delta;
-	    	if (s_eeVel != nullptr){cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
+    		if (USE_EE_VEL_COST && s_eeVel != nullptr){cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
 	 	}
 	 	if (USE_SMOOTH_ABS){
 	    	cost = (T) sqrt(2*cost + SMOOTH_ABS_ALPHA*SMOOTH_ABS_ALPHA) - SMOOTH_ABS_ALPHA;
@@ -239,10 +239,10 @@
 	 	#pragma unroll
 	 	for (int i = 0; i < 6; i++){
 	 		T delta = s_eePos[i]-d_eeGoal[i];
-	 		if (s_eeVel != nullptr){deePos = s_deePosVel[r*12+i];	deeVel = s_deePosVel[r*12+i+6];}
+	 		if (USE_EE_VEL_COST && s_eeVel != nullptr){deePos = s_deePosVel[r*12+i];	deeVel = s_deePosVel[r*12+i+6];}
 	 		else{deePos = s_deePos[r*6+i];}
 	    	val += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*deePos;
-	    	if (s_eeVel != nullptr){val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*deeVel;}
+    		if (USE_EE_VEL_COST && s_eeVel != nullptr){val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*deeVel;}
 	 	}
 	 	if (USE_SMOOTH_ABS){
 			T val2 = 0.0;
@@ -250,7 +250,7 @@
 	    	for (int i = 0; i < 6; i++){
 	    		T delta = s_eePos[i]-d_eeGoal[i];
 	       		val2 += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*delta;
-	       		if (s_eeVel != nullptr){val2 += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
+       			if (USE_EE_VEL_COST && s_eeVel != nullptr){val2 += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
 	    	}
 	    	val2 += SMOOTH_ABS_ALPHA*SMOOTH_ABS_ALPHA;
 	    	val /= sqrt(val2);
@@ -315,7 +315,8 @@
 		#pragma unroll
 		for (int r = start; r < DIM_g_r; r += delta){
 		  	T val = 0.0;
-		  	if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deePosVel);}
+		  	if (USE_EE_VEL_COST && s_deePosVel != nullptr && r < STATE_SIZE){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deePosVel);}
+		  	else if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r);}
 		  	// add on the joint level state cost (tend to zero regularizer) and control cost
 		  	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xHAND : Q_xHAND)*s_x[r];}
 		  	else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdHAND : Q_xdHAND)*s_x[r];}
@@ -334,27 +335,20 @@
 		  	#pragma unroll
 		  	for (int r= startx; r<DIM_H_r; r += dx){
 		     	T val = 0.0;
-		     	if (s_deePosVel != nullptr){
+		     	if (USE_EE_VEL_COST && s_deePosVel != nullptr && r < STATE_SIZE && c < STATE_SIZE){
 			     	#pragma unroll
-		        	for (int j = 0; j < 12; j++){val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j];}
+		        	for (int j = 0; j < 6; j++){//for (int j = 0; j < 12; j++){
+		        		//T factor = (k == NUM_TIME_STEPS - 1 ? (j < 3 ? QF_HAND1 : (j < 6 ? QF_HAND2 : (j < 9 ? QF_HANDV1 : QF_HANDV2))) : (j < 3 ? Q_HAND1 : (j < 6 ? Q_HAND2 : (j < 9 ? Q_HANDV1 : Q_HANDV2))));
+		        		val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j];//*factor;
+		        	}
         		}
-        		else{
+        		else if (r < NUM_POS && c < NUM_POS){
 	        		#pragma unroll
-		           	for (int j = 0; j < 6; j++){val += s_deePos[r*6+j]*s_deePos[c*6+j];}
+		           	for (int j = 0; j < 6; j++){
+		           		// T factor = (k == NUM_TIME_STEPS - 1 ? (j < 3 ? QF_HAND1 : QF_HAND2) : (j < 3 ? Q_HAND1 : Q_HAND2));
+		           		val += s_deePos[r*6+j]*s_deePos[c*6+j];//*factor;
+		           	}
 	           	}
-		     	// // multiply two columns for pseudo-Hessian (dropping d2q/dh2 term) for q
-		     	// if (c < NUM_POS && r < NUM_POS){
-				//   	#pragma unroll
-				//   	for (int j = 0; j < 6; j++){
-				//      		if (s_deePosVel != nullptr){val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j] + s_deePosVel[r*12+6+j]*s_deePosVel[c*12+6+j];}
-				//      		else {val += s_deePos[r*6+j]*s_deePos[c*6+j];}
-				//   	}
-		     	// }
-		     	// // then do it for qd
-		     	// else if (s_deePosVel != nullptr){
-		     	// 	#pragma unroll
-				//  for (int j = 0; j < 6; j++){val += s_deePosVel[r*12+6+j]*s_deePosVel[c*12+6+j];}
-		     	// }
 			    // if applicable add on the joint level state cost (tend to zero regularizer) and control cost
 			    if (r == c){
 		        	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xHAND : Q_xHAND);}
@@ -365,7 +359,7 @@
 	      				val += limitCosts<T,2>(s_x,s_u,r,k);
 	  				#endif
 		     	}
-		     	H[r] = val;//s_g[k]*s_g[i]; // before we multiplied gradient but that isn't correct
+		     	H[r] = val;
 		  	}
 		}
 		//if cost asked for compute it
@@ -373,10 +367,6 @@
 		#ifdef __CUDA_ARCH__
 			if(threadIdx.x != 0 || threadIdx.y != 0){flag = 0;}
 			if (flag){d_JT[ind] = costFunc(s_eePos,d_eeGoal,s_x,s_u,k);}
-				// printf("Cost for ind[%d] for k[%d] and eePos[%f %f %f %f %f %f] and goal[%f %f %f %f %f %f] with u[%f %f %f %f %f %f] and x[%f %f %f %f %f %f %f %f %f %f %f %f] is J[%f]\n",
-				// 	    ind,k,s_eePos[0],s_eePos[1],s_eePos[2],s_eePos[3],s_eePos[4],s_eePos[5],d_eeGoal[0],d_eeGoal[1],d_eeGoal[2],d_eeGoal[3],d_eeGoal[4],d_eeGoal[5],
-				// 	    s_u[0],s_u[1],s_u[2],s_u[3],s_u[4],s_u[5],s_u[6],
-				// 	    s_x[0],s_x[1],s_x[2],s_x[3],s_x[4],s_x[5],s_x[6],s_x[7],s_x[8],s_x[9],s_x[10],s_x[11],s_x[12],s_x[13],d_JT[ind]);}
 		#else
 			if (flag){d_JT[ind] += costFunc(s_eePos,d_eeGoal,s_x,s_u,k);}
 		#endif
