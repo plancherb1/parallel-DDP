@@ -4,6 +4,7 @@ nvcc -std=c++11 -o MPC.exe LCM_MPC_examples.cu utils/cudaUtils.cu utils/threadUt
 #define USE_WAFR_URDF 0
 #define EE_COST 1
 #define MPC_MODE 1
+#define USE_LCM 1
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
 #define PLANT 4

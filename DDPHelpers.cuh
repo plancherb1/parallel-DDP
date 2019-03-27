@@ -46,7 +46,12 @@
 	#include "DDPHelpers/DDPWrappers.cuh"
 #endif
 
-// 5: MPC Helpers and Wrappers//
+// 5: MPC Helpers and Wrappers
 #if defined(MPC_MODE) && MPC_MODE == 1
 	#include "DDPHelpers/MPCHelpers.cuh"       
+#endif
+
+// 6: LCM Helpers and Wrappers
+#if defined(USE_LCM) && USE_LCM == 1
+	#include "DDPHelpers/LCMHelpers.cuh"
 #endif

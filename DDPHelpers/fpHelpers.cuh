@@ -386,7 +386,7 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 			if (!ALPHA_BEST_SWITCH){break;} // pick first alpha strategy   
 		}
 	}
-	printf("dJ[%f] with z[%f]\n",*dJ,*z);
+	// printf("dJ[%f] with z[%f]\n",*dJ,*z);
 	// LINE SEARCH //
 }
 
