@@ -137,19 +137,19 @@
 			#define QF_xHAND 0.0
 		#else
 			#define Q_HAND1 0.1
-			#define Q_HAND2 0
+			#define Q_HAND2 0.0
 			#define R_HAND 0.0001
 			#define QF_HAND1 1000.0
-			#define QF_HAND2 0
-			#define Q_xdHAND 0
-			#define QF_xdHAND 10.0
+			#define QF_HAND2 0.0
+			#define Q_xdHAND 1.0
+			#define QF_xdHAND 100.0
 			#define Q_xHAND 0.0
 			#define QF_xHAND 0.0
 	 	#endif
-		#define Q_HANDV1 1000.0
-		#define Q_HANDV2 0
-		#define QF_HANDV1 1000.0
-		#define QF_HANDV2 0
+		#define Q_HANDV1 0//1000.0
+		#define Q_HANDV2 0.0
+		#define QF_HANDV1 0//1000.0
+		#define QF_HANDV2 0.0
 	#endif
 
 	// include vel and pos limits if desired

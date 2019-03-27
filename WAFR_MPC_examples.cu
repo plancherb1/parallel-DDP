@@ -1,7 +1,7 @@
 /***
-nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
-#define USE_WAFR_URDF 0
+#define USE_WAFR_URDF 1
 #define EE_COST 1
 #define MPC_MODE 1
 #define IGNORE_MAX_ROX_EXIT 0
@@ -278,16 +278,16 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 			gettimeofday(&start,NULL);
 			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
 			gettimeofday(&end,NULL);
-			double elapsedTime_us = time_delta_us(start,end);
+			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
 			tvars->t0_plant = 0; 	tActual_plant = static_cast<int>(std::floor(elapsedTime_us));
 			tvars->t0_sys = 0; 		tActual_sys = static_cast<int>(std::floor(elapsedTime_us));
       		error += simulateForward<T,150>(tvars,algvars->xActual,elapsedTime_us,goalTime,totalTime_us);
 			// print where are we ending up and eePos
-				// int timeStepsTaken = get_steps_us_f(elapsedTime_us);
-				// printf("[%d] With last successful at [%d]\nSim of %.4f is %d steps goes to:\n",counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
-				// printMat<T,1,STATE_SIZE>(algvars->xActual,1);
-				// printf(" With expected:\n");
-				// printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*(dimms->ld_x),1);
+				int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
+				printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
+				printMat<T,1,STATE_SIZE>(algvars->xActual,1);
+				printf(" With expected:\n");
+				printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*(dimms->ld_x),1);
       		// print the state we sim to
 				// T *xk = &(algvars->xActual[0]);
 				// printf("%f,%f,%f,%f,%f,%f,%f,%f\n",timePrint,xk[0],xk[1],xk[2],xk[3],xk[4],xk[5],xk[6]);
