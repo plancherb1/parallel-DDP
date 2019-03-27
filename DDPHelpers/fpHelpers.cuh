@@ -378,7 +378,7 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 		cdJ = prevJ - J[i]; JFlag = cdJ >= 0.0 && cdJ > *dJ;
 		cz = cdJ / (alpha[i]*dJexp[0] + alpha[i]*alpha[i]/2.0*dJexp[1]); zFlag = USE_EXP_RED ? (EXP_RED_MIN < cz && cz < EXP_RED_MAX) : 1;
 		dFlag = M_F == 1 || *ignore_defect ? 1 :  d[i] < MAX_DEFECT_SIZE;
-		printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
+		// printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
 		// printf("             dJexp[%.12f][%.12f] eq0?[%d][%d]\n",dJexp[0],dJexp[1],abs(dJexp[0])<0.00000000001,abs(dJexp[1])<0.00000000001);
 		if(JFlag && zFlag && dFlag){
 			if (d[i] < USE_MAX_DEFECT){*ignore_defect = 0;} // update the ignore defect
@@ -386,6 +386,7 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 			if (!ALPHA_BEST_SWITCH){break;} // pick first alpha strategy   
 		}
 	}
+	printf("dJ[%f] with z[%f]\n",*dJ,*z);
 	// LINE SEARCH //
 }
 

@@ -136,19 +136,19 @@
 			#define Q_xHAND 0.0
 			#define QF_xHAND 0.0
 		#else
-			#define Q_HAND1 1.0	    //1.0 // xyz
-			#define Q_HAND2 0		//1.0 // rpy
-			#define R_HAND 0.0001	//0.001
-			#define QF_HAND1 10.0	//5000.0 // xyz
-			#define QF_HAND2 0		//5000.0 // rpy
-			#define Q_xdHAND 0		//1.0//0.1
-			#define QF_xdHAND 0		//10.0//100.0
-			#define Q_xHAND 0		//0.0//0.001//1.0
-			#define QF_xHAND 0		//0.0//1.0
+			#define Q_HAND1 0.1
+			#define Q_HAND2 0
+			#define R_HAND 0.0001
+			#define QF_HAND1 1000.0
+			#define QF_HAND2 0
+			#define Q_xdHAND 0
+			#define QF_xdHAND 10.0
+			#define Q_xHAND 0.0
+			#define QF_xHAND 0.0
 	 	#endif
-		#define Q_HANDV1 0.1
+		#define Q_HANDV1 1000.0
 		#define Q_HANDV2 0
-		#define QF_HANDV1 1.0
+		#define QF_HANDV1 1000.0
 		#define QF_HANDV2 0
 	#endif
 
@@ -334,14 +334,27 @@
 		  	#pragma unroll
 		  	for (int r= startx; r<DIM_H_r; r += dx){
 		     	T val = 0.0;
-		     	// multiply two columns for pseudo-Hessian (dropping d2q/dh2 term)
-		     	if (c < NUM_POS && r < NUM_POS){
-		        	#pragma unroll
-		        	for (int j = 0; j < 6; j++){
-		           		if (s_deePosVel != nullptr){val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j] + s_deePosVel[r*12+6+j]*s_deePosVel[c*12+6+j];}
-		           		else{val += s_deePos[r*6+j]*s_deePos[c*6+j];}
-		        	}
-		     	}
+		     	if (s_deePosVel != nullptr){
+			     	#pragma unroll
+		        	for (int j = 0; j < 12; j++){val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j];}
+        		}
+        		else{
+	        		#pragma unroll
+		           	for (int j = 0; j < 6; j++){val += s_deePos[r*6+j]*s_deePos[c*6+j];}
+	           	}
+		     	// // multiply two columns for pseudo-Hessian (dropping d2q/dh2 term) for q
+		     	// if (c < NUM_POS && r < NUM_POS){
+				//   	#pragma unroll
+				//   	for (int j = 0; j < 6; j++){
+				//      		if (s_deePosVel != nullptr){val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j] + s_deePosVel[r*12+6+j]*s_deePosVel[c*12+6+j];}
+				//      		else {val += s_deePos[r*6+j]*s_deePos[c*6+j];}
+				//   	}
+		     	// }
+		     	// // then do it for qd
+		     	// else if (s_deePosVel != nullptr){
+		     	// 	#pragma unroll
+				//  for (int j = 0; j < 6; j++){val += s_deePosVel[r*12+6+j]*s_deePosVel[c*12+6+j];}
+		     	// }
 			    // if applicable add on the joint level state cost (tend to zero regularizer) and control cost
 			    if (r == c){
 		        	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xHAND : Q_xHAND);}
