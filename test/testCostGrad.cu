@@ -4,7 +4,9 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 
 #define PLANT 4
 #define EE_COST 1
+#define MPC_MODE 1
 #define USE_WAFR_URDF 0
+#define USE_EE_VEL_COST 1
 #include "../DDPHelpers.cuh"
 #include <random>
 #define NUM_REPS 1
@@ -535,6 +537,106 @@ void testCost(){
 	free(x); free(u); free(grad); free(grad2); free(goal);
 }
 
+
+template <typename T>
+__host__
+void compareEEPosdq(){
+	// allocate
+	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *grad =  (T *)malloc(12*STATE_SIZE*sizeof(T));	
+	T *grad2 = (T *)malloc(12*STATE_SIZE*sizeof(T));	
+
+	// compare for NUM_REPS
+	for (int rep = 0; rep < NUM_REPS; rep++){
+		// relod and clear
+		loadAndClearPos<T>(x,grad,grad2,12*STATE_SIZE);
+		// compute
+		analyticalPos<T>(x,grad);
+		analyticalVel<T>(x,grad2,12);
+		// compare
+		#pragma unroll
+		for (int c = 0; c < STATE_SIZE; c++){
+			#pragma unroll
+			for (int r = 0; r < 6; r++){
+				int ind_1 = c*6 + r;	int ind_2 = c*12 + r;
+				T delta = abs(grad[ind_1] - grad2[ind_2]);
+				T err = abs(grad2[ind_2] == 0 ? (grad[ind_1] == 0 ? 0 : delta/grad[ind_1]*100) : delta/grad2[ind_2]*100);
+				if (err > ERR_TOL){
+					printf("rep[%d] c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,c,r,err,grad[ind_1],grad2[ind_2]);
+				}
+			}
+		}
+	}
+	//free
+	free(x); free(grad); free(grad2);
+}
+
+template <typename T>
+__host__
+void compareCostdq(){
+	// allocate
+	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *u =     (T *)malloc(CONTROL_SIZE*sizeof(T));
+	T *grad =  (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
+	T *grad2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
+	T *goal;
+	#if EE_COST
+		goal =(T *)malloc(6*sizeof(T));
+	#else
+		goal =(T *)malloc(STATE_SIZE*sizeof(T));
+	#endif
+
+	int ld_H    = STATE_SIZE + CONTROL_SIZE;
+	T *Hessian  = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
+	T *Hessian2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
+	T Tbody[36*NUM_POS]; 	   	initT<T>(Tbody);
+
+	// compare for NUM_REPS
+	for (int rep = 0; rep < NUM_REPS; rep++){
+		// relod and clear
+		loadAndClearPos<T>(x,grad,grad2,STATE_SIZE+CONTROL_SIZE,u,goal);
+		// compute
+		T s_sinq[NUM_POS];			T s_cosq[NUM_POS];
+		T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
+		T s_T[36*NUM_POS];			T s_T_dx[36*NUM_POS];
+		T s_eePos[6];				T s_deePos[6*NUM_POS];
+		T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
+		T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
+		T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
+		
+		compute_eePosVel_dx<T>(x, s_Tb, Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
+                               s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
+		costGrad<T>(Hessian,grad,s_eePos,s_deePos,goal,x,u,0,ld_H,nullptr,0,s_eeVel,s_deePosVel);
+
+		compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,x,s_cosq,Tbody);
+		costGrad<T>(Hessian2,grad2,s_eePos,s_deePos,goal,x,u,0,ld_H);
+		
+		// compare
+		#pragma unroll
+		for (int ind = 0; ind < STATE_SIZE + CONTROL_SIZE; ind++){
+			T delta = abs(grad[ind] - grad2[ind]);
+			T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
+			if (err > ERR_TOL){
+				printf("rep[%d] Gradient ind[%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,err,grad[ind],grad2[ind]);
+			}
+		}
+		#pragma unroll
+		for (int c = 0; c < NUM_POS; c++){
+			#pragma unroll
+			for (int r = 0; r < NUM_POS; r++){
+				int ind = c*ld_H + r;
+				T delta = abs(Hessian[ind] - Hessian2[ind]);
+				T err = abs(Hessian2[ind] == 0 ? (Hessian[ind] == 0 ? 0 : delta/Hessian[ind]*100) : delta/Hessian2[ind]*100);
+				if (err > ERR_TOL){
+					printf("rep[%d] Hessian c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,c,r,err,Hessian[ind],Hessian2[ind]);
+				}
+			}
+		}
+	}
+	//free
+	free(x); free(u); free(grad); free(grad2); free(goal);
+}
+
 int main(int argc, char *argv[])
 {
 	srand(time(NULL));
@@ -559,8 +661,14 @@ int main(int argc, char *argv[])
 		case 'C':
 			testCost<algType>();
 			break;
+		case 'c':
+			compareEEPosdq<algType>();
+			break;
+		case 'm':
+			compareCostdq<algType>();
+			break;
 		default:
-			printf("Input is [P]os, [V]el, [T]ransforms, T[b]ody/dT, Transform/[d]T or full [C]ost\n");
+			printf("Input is [P]os, [V]el, [T]ransforms, T[b]ody/dT, Transform/[d]T, full [C]ost, or [c]ompare Pdq methods or costGrad [m]ethods\n");
 			return 1;
 	}
 	return 0;

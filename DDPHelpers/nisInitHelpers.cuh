@@ -50,9 +50,11 @@ void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, 
 		__shared__ T s_Tb[36*NUM_POS]; 		__shared__ T s_Tb_dx[36*NUM_POS];
 		__shared__ T s_T[36*NUM_POS]; 		__shared__ T s_T_dx[36*NUM_POS];
 		__shared__ T s_eePos[6];			__shared__ T s_deePos[6*NUM_POS];
-		__shared__ T s_TbTdt[32*NUM_POS]; 	__shared__ T s_Tb_dt_dx[16*NUM_POS];
-		__shared__ T s_eeVel[6];		  	__shared__ T s_deePosVel[12*NUM_POS];
-		__shared__ T s_T_dt_dx[32*NUM_POS]; __shared__ T s_T_dt_dx_p[32*NUM_POS];
+		#if USE_EE_VEL_COST
+			__shared__ T s_TbTdt[32*NUM_POS]; 	__shared__ T s_Tb_dt_dx[16*NUM_POS];
+			__shared__ T s_eeVel[6];		  	__shared__ T s_deePosVel[12*NUM_POS];
+			__shared__ T s_T_dt_dx[32*NUM_POS]; __shared__ T s_T_dt_dx_p[32*NUM_POS];
+		#endif
 		for (int k = blockIdx.x; k < NUM_TIME_STEPS; k += gridDim.x){
 			T *xk = &d_x[k*ld_x];			T *uk = &d_u[k*ld_u];
 			T *Hk = &d_H[k*ld_H*DIM_H_c];	T *gk = &d_g[k*ld_g];
@@ -62,14 +64,17 @@ void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, 
 				s_x[ind] = xk[ind];		if (ind < NUM_POS){s_u[ind] = uk[ind];}
 			}
 			__syncthreads();
-			// compute end effector position and velocity
-			compute_eePosVel_dx<T>(s_x, s_Tb, d_Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
-                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
-			// // or simply compute the end effector position and gradient
-			// compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,s_x,s_cosq,d_Tbody);
-			__syncthreads();
-			// then compute the cost grad
-			costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT,-1,s_eeVel,s_deePosVel);
+			// compute pos/vel of ee and then cost grad
+			#if USE_EE_VEL_COST
+				compute_eePosVel_dx<T>(s_x, s_Tb, d_Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
+	                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
+				__syncthreads();
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT,-1,s_eeVel,s_deePosVel);
+			#else
+				compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,s_x,s_cosq,d_Tbody);
+				__syncthreads();
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT);
+			#endif
 		}
 	#else
 		#pragma unroll
@@ -89,9 +94,11 @@ void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *x
 		T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
 		T s_T[36*NUM_POS];			T s_T_dx[36*NUM_POS];
 		T s_eePos[6];				T s_deePos[6*NUM_POS];
-		T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
-		T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
-		T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
+		#if USE_EE_VEL_COST
+			T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
+			T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
+			T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
+		#endif
 		// if JT passed in then first zero the cost
        	if (JT != nullptr){JT[desc.tid] = 0.0;}
 	#endif
@@ -101,13 +108,15 @@ void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *x
       	T *xk = &x[kInd*ld_x];			T *uk = &u[kInd*ld_u];
       	T *Hk = &H[kInd*ld_H*DIM_H_c];	T *gk = &g[kInd*ld_g];
 		#if EE_COST 
-			// compute end effector position and velocity
-			compute_eePosVel_dx<T>(xk, s_Tb, Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
-                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
-			// // or simply compute the end effector position and gradient
-			// compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,s_x,s_cosq,Tbody);
-			// then compute the cost gradient
-			costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid,s_eeVel,s_deePosVel);
+			// compute end effector pos/vel and then cost grad
+      		#if USE_EE_VEL_COST
+				compute_eePosVel_dx<T>(xk, s_Tb, Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
+	                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid,s_eeVel,s_deePosVel);
+			#else
+				compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,xk,s_cosq,Tbody);
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid);
+			#endif
 		#else // simple
 			costGrad(Hk,gk,xk,uk,xg,kInd,ld_H);
     	#endif
