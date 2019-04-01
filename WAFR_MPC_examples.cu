@@ -1,10 +1,10 @@
 /***
 nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
-#define USE_WAFR_URDF 1
+#define USE_WAFR_URDF 0
 #define EE_COST 1
 #define MPC_MODE 1
-#define USE_EE_VEL_COST 0
+#define USE_EE_VEL_COST 1
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
 #define PLANT 4
