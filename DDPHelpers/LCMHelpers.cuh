@@ -7,8 +7,6 @@
  *   
  *
  *****************************************************************/
-#error "LCM :-("
-
 #include <lcm/lcm-cpp.hpp>
 #include "../lcmtypes/drake/lcmt_iiwa_status.hpp"
 #include "../lcmtypes/drake/lcmt_iiwa_command.hpp"
@@ -19,9 +17,13 @@
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
 const char *ARM_TRAJ_CHANNEL    = "TRAJ_CHANNEL";
-const char *ARM_STATUS_CHANNEL  = "IIWA_STATUS"; // NEED TO INTERCEPT AND COMPUTE VELOCITY
-const char *ARM_STATUS_FILTERED = "IIWA_STATUS_FILTERED"; //"IIWA_STATUS" for no intercept
 const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
+const char *ARM_STATUS_CHANNEL  = "IIWA_STATUS";
+#if USE_VELOCITY_FILTER
+    const char *ARM_STATUS_FILTERED = "IIWA_STATUS_FILTERED";
+#else
+    const char *ARM_STATUS_FILTERED = "IIWA_STATUS";
+#endif
 // #define GOAL_PUBLISHER_RATE_MS 30
 // #define TEST_DELTA 0 // random small delta to keep things interesting (in ms) for tests
 
@@ -385,12 +387,13 @@ class LCM_Simulator_Handler {
                 #pragma unroll
                 for(int i = 0; i < STATE_SIZE; i++){currX[i] = nextX[i];}
             }
-
-            printf("%f:%f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
-                   simTime,
-                   currU[0],currU[1],currU[2],currU[3],currU[4],currU[5],currU[6],
-                   prevX[0],prevX[1],prevX[2],prevX[3],prevX[4],prevX[5],prevX[6],prevX[7],prevX[8],prevX[9],prevX[10],prevX[11],prevX[12],prevX[13],
-                   currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13]);
+            // double eePos[NUM_POS]; compute_eePos_scratch<double>(currX, &eePos[0]);
+            // printf("%f %f %f\n",eePos[0],eePos[1],eePos[2]);
+            // printf("%f:%f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+            //        simTime,
+            //        currU[0],currU[1],currU[2],currU[3],currU[4],currU[5],currU[6],
+            //        prevX[0],prevX[1],prevX[2],prevX[3],prevX[4],prevX[5],prevX[6],prevX[7],prevX[8],prevX[9],prevX[10],prevX[11],prevX[12],prevX[13],
+            //        currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13]);
         }
 
         // publish currX
@@ -425,7 +428,7 @@ class LCM_Simulator_Handler {
 
 
 __host__
-void runSimulator(int numSteps, double *xInit){
+void runLCMSimulator(int numSteps, double *xInit){
     lcm::LCM lcm_ptr;
     if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
     LCM_Simulator_Handler handler = LCM_Simulator_Handler(numSteps, xInit);
