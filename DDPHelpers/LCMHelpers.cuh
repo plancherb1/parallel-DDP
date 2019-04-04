@@ -13,6 +13,7 @@
 #include "../lcmtypes/drake/lcmt_trajectory_f.hpp"
 #include "../lcmtypes/drake/lcmt_trajectory_d.hpp"
 #include "../lcmtypes/kuka/lcmt_target_twist.hpp"
+ #include "../lcmtypes/kuka/lcmt_target_position.hpp"
 #include <type_traits>
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
@@ -180,9 +181,13 @@ class LCM_MPCLoop_Handler {
                             gvars = nullptr; mode = 0;}
         ~LCM_MPCLoop_Handler(){/*delete lcm_ptr;*/} // do nothing in the destructor
 
-        // lcm callback function for new arm goal
-        void handleGoal(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_target_twist *msg){
+        // lcm callback function for new arm goal (eePos)
+        void handleGoalEE(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_target_twist *msg){
             memcpy(gvars->xGoal,msg->position,3*sizeof(T));     memcpy(&(gvars->xGoal[3]),msg->velocity,3*sizeof(T));
+        }
+        // lcm callback function for new arm goal (q,qd)
+        void handleGoalqqd(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_target_position *msg){
+            memcpy(gvars->xGoal,msg->position,NUM_POS*sizeof(T));   memcpy(&(gvars->xGoal[NUM_POS]),msg->velocity,NUM_POS*sizeof(T));
         }
     
         // lcm callback function for new arm status
@@ -236,9 +241,11 @@ class LCM_MPCLoop_Handler {
 
 template <typename T>
 __host__
-void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler){
-    lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
-    lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoal, handler);
+void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler, int goalType){
+    lcm::Subscription *sub, *sub2;
+    sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
+    if(goalType == 0){sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalEE, handler);}
+    else{             sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalqqd, handler);}
     sub->setQueueCapacity(1);   sub2->setQueueCapacity(1);
     while(0 == lcm_ptr->handle());
 }

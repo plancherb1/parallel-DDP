@@ -1,0 +1,10 @@
+package kuka;
+struct lcmt_target_position
+{
+ // The timestamp in microseconds.
+ int64_t  utime;
+ 
+ // The joint position and velocity
+ float    position[7];
+ float    velocity[7];
+}
