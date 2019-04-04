@@ -1,11 +1,11 @@
 /***
-nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
 #define EE_COST 0
 #define TOL_COST 0.0
-#define USE_WAFR_URDF 0
+#define USE_WAFR_URDF 1
 
-#include "DDPHelpers.cuh"
+#include "../config.cuh"
 #include <random>
 #include <vector>
 #include <algorithm>

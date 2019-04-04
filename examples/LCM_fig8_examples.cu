@@ -1,50 +1,20 @@
 /***
-nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
 #define USE_WAFR_URDF 1
 #define EE_COST 1
 #define MPC_MODE 1
-#define USE_EE_VEL_COST 1
+#define USE_EE_VEL_COST 0
+#define USE_LCM 1
+#define USE_VELOCITY_FILTER 0
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
 #define PLANT 4
-#include "DDPHelpers.cuh"
+#include "../config.cuh"
 #include <random>
 #include <vector>
 #include <algorithm>
 #include <iostream>
-
-#define TEST_ITERS 1 // 100
-#define ROLLOUT_FLAG 0
-#define RANDOM_MEAN 0.0
-#define RANDOM_STDEV 0.001
-char errMsg[]  = "Error: Unkown code - usage is [C]PU or [G]PU with flag 1/0 for doFig8\n";
-char tot[]  = "  TOT";		char init[] = " INIT";	char fsim[]   = "  SIM";	
-char fsweep[]   = "SWEEP";	char bp[]   = "   BP";	char nis[]  = "  NIS";
-std::default_random_engine randEng(time(0)); //seed
-std::normal_distribution<double> randDist(RANDOM_MEAN, RANDOM_STDEV); //mean followed by stdiv
-
-#if PLANT == 1 // pend
-	#error "MPC example defined for KukaArm[4].\n"
-#elif PLANT == 2 // cart
-	#error "MPC example defined for KukaArm[4].\n"
-#elif PLANT == 3 // quad
- 	#error "MPC example defined for KukaArm[4].\n"
-#elif PLANT == 4 // arm
- 	#if EE_COST
-		#define PI 	   3.14159
-		#define GOAL_X 0.3638
-		#define GOAL_Y 0.0
-		#define GOAL_Z 1.0628
-		#define GOAL_r (0.5*PI)
-		#define GOAL_p 0.0
-		#define GOAL_y (0.5*PI)
-	#else  
-		#error "MPC example defined for KukaArm[4] with EE_COST.\n"
-	#endif
-#else
-	#error "MPC example defined for KukaArm[4].\n"
-#endif
 
 __host__ __forceinline__
 bool tryParse(std::string& input, int& output) {
@@ -68,7 +38,7 @@ int getInt(int maxInt, int minInt){
 }
 __host__ __forceinline__
 int getTrajTime(int maxInt, int minInt){
-   printf("How many seconds long should the tracked trajectory be? (q to exit)\n");
+   printf("How many seconds long should one figure eight of the tracked trajectory be? (q to exit)\n");
    return getInt(maxInt,minInt);
 }
 __host__ __forceinline__
@@ -85,46 +55,10 @@ __host__ __forceinline__
 void keyboardHold(){
    	printf("Press enter to continue\n");	std::string input;	getline(std::cin, input);
 }
-__host__
-void printStats(std::vector<double> v, char *type){
-	// sort gives us the median, max and min
-    std::sort(v.begin(),v.end());
-    int size = v.size();
-	double _median = size % 2 ? v[size / 2] : (v[size / 2 - 1] + v[size / 2]) / 2.0;	
-	double _max = v.back();		double _min = v.front();	double _stdev = 0.0;
-	// sum gives us the average
-	double sum = std::accumulate(v.begin(), v.end(), 0.0);	double _avg = sum / (double)size;	
-	// and then the std dev	
-	for(std::vector<double>::iterator it = v.begin(); it != v.end(); ++it){_stdev += pow(*it-_avg,2.0);}
-	_stdev = pow(_stdev / (double)size, 0.5);
-	printf("%s: Median[%f] Average[%f] StdDev[%f] max[%f] min[%f]\n",type,_median,_avg,_stdev,_max,_min);
-}
-template <typename T>
-__host__ 
-void printAllTimingStats(algTrace<T> *atrace){
-	printStats(atrace->tTime,tot);
-	printStats(atrace->initTime,init);
-	printStats(atrace->simTime,fsim);
-	printStats(atrace->sweepTime,fsweep);
-	printStats(atrace->bpTime,bp);
-	printStats(atrace->nisTime,nis);
-}
 template <typename T>
 __host__ __forceinline__
 void loadTraj(trajVars<T> *tvars, matDimms *dimms){
 	T *xk = tvars->x;	T *uk = tvars->u;
-	// for (int k=0; k<NUM_TIME_STEPS; k++){
-	// 	xk[0] = (T)-0.5*PI;	xk[1] = (T)0.25*PI;	xk[2] = (T)0.167*PI;
-	// 	xk[3] = (T)-0.167*PI;	xk[4] = (T)0.125*PI;	xk[5] = (T)0.167*PI;	xk[6] = (T)0.5*PI;
-	// 	xk[7] = (T)randDist(randEng);	xk[8] = (T)randDist(randEng);	xk[9] = (T)randDist(randEng);
-	// 	xk[10] = (T)randDist(randEng);	xk[11] = (T)randDist(randEng);	xk[12] = (T)randDist(randEng);	xk[13] = (T)randDist(randEng);
-	// 	if (k < NUM_TIME_STEPS - 1){
-	// 		uk[0] = 0.0;		uk[1] = -102.9832;	uk[2] = 11.1968;
-	// 		uk[3] = 47.0724;	uk[4] = 2.5993;		uk[5] = -7.0290;	uk[6] = -0.0907;
-	// 		//uk[0] = (T)0.01; uk[1] = (T)0.01; uk[2] = (T)0.01; uk[3] = (T)0.01; uk[4] = (T)0.01; uk[5] = (T)0.01; uk[6] = (T)0.01;
-	// 	}
-	// 	xk += (dimms->ld_x);	uk += (dimms->ld_u);
-	// }
 	for (int k=0; k<NUM_TIME_STEPS; k++){
 		for (int i = 0; i < STATE_SIZE; i++){
 			xk[i] = 0.0;	if (i < CONTROL_SIZE){uk[i] = 0.01;}
@@ -132,48 +66,6 @@ void loadTraj(trajVars<T> *tvars, matDimms *dimms){
 		xk += (dimms->ld_x);	uk += (dimms->ld_u);
 	}
 	memset(tvars->KT, 0, (dimms->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
-}
-template <typename T>
-__host__ __forceinline__
-void loadGoal(CPUVars<T> *algvars){
-	const T temp[] = {GOAL_X,GOAL_Y,GOAL_Z,GOAL_r,GOAL_p,GOAL_y};
-	for (int i=0; i < 6; i++){(algvars->xGoal)[i] = temp[i];}
-}
-template <typename T>
-__host__ __forceinline__
-void loadGoal(GPUVars<T> *algvars){
-	const T temp[] = {GOAL_X,GOAL_Y,GOAL_Z,GOAL_r,GOAL_p,GOAL_y};
-	for (int i=0; i < 6; i++){(algvars->xGoal)[i] = temp[i];}
-}
-template <typename T>
-__host__ __forceinline__
-int loadGoal(T *goal, T *xGoals, T *yGoals, T *zGoals, double time, double tstep, double totalTime){
-	int rep = 0;
-	while(time > totalTime){time -= totalTime; rep++;}
-	double delta = time/tstep;							double fraction = delta - std::floor(delta);
-	int rd = static_cast<int>(std::floor(delta));		int ru = static_cast<int>(std::ceil(delta));
-	goal[0] = (1-fraction)*xGoals[rd] + fraction*xGoals[ru];
-	goal[1] = (1-fraction)*yGoals[rd] + fraction*yGoals[ru];
-	goal[2] = (1-fraction)*zGoals[rd] + fraction*zGoals[ru];
-	return rep;
-}
-template <typename T>
-__host__ __forceinline__
-int loadGoal(CPUVars<T> *algvars, T *xGoals, T *yGoals, T *zGoals, double time, double tstep, double totalTime){
-	T goal[3];
-	int rep = loadGoal(&goal[0],xGoals,yGoals,zGoals,time,tstep,totalTime);
-	algvars->xGoal[0] = goal[0];	algvars->xGoal[1] = goal[1];	algvars->xGoal[2] = goal[2];
-	algvars->xGoal[3] = 0;			algvars->xGoal[4] = 0;			algvars->xGoal[5] = 0;
-	return rep;
-}
-template <typename T>
-__host__ __forceinline__
-int loadGoal(GPUVars<T> *algvars, T *xGoals, T *yGoals, T *zGoals, double time, double tstep, double totalTime){
-	T goal[3];
-	int rep = loadGoal(&goal[0],xGoals,yGoals,zGoals,time,tstep,totalTime);
-	algvars->xGoal[0] = goal[0];	algvars->xGoal[1] = goal[1];	algvars->xGoal[2] = goal[2];
-	algvars->xGoal[3] = 0;			algvars->xGoal[4] = 0;			algvars->xGoal[5] = 0;
-	return rep;
 }
 template <typename T>
 __host__ __forceinline__
@@ -204,109 +96,132 @@ int loadFig8Goal(GPUVars<T> *algvars, double time, double totalTime){
 	algvars->xGoal[0] = goal[0];	algvars->xGoal[1] = goal[1];	algvars->xGoal[2] = goal[2];
 	algvars->xGoal[3] = 0;			algvars->xGoal[4] = 0;			algvars->xGoal[5] = 0;
 	return rep;
-}	
+}
 template <typename T>
 __host__
-void evNorm(T *xActual, T *xGoal, T *eNorm, T *vNorm){
-	T eePos[NUM_POS];   compute_eePos_scratch<T>(xActual, &eePos[0]);
+void evNorm(T *xActual, T *xGoal, T *eNorm, T *vNorm, T *eePos){
+	compute_eePos_scratch<T>(xActual, &eePos[0]);
 	*eNorm = static_cast<T>(sqrt(pow(eePos[0]-xGoal[0],2) + pow(eePos[1]-xGoal[1],2) + pow(eePos[2]-xGoal[2],2)));
 	*vNorm = 0; for(int i=0;i<NUM_POS;i++){*vNorm+=(T)pow(xActual[NUM_POS+i],2);} *vNorm = static_cast<T>(sqrt(*vNorm));
 }
 template <typename T>
 __host__
 void evNorm(double *xActual, T *xGoal, T *eNorm, T *vNorm){
-	T xActual2[STATE_SIZE];
+	T xActual2[STATE_SIZE];		T eePos[NUM_POS];
 	for(int i=0; i < STATE_SIZE; i++){xActual2[i] = static_cast<T>(xActual[i]);}
-	evNorm<T>(xActual2,xGoal,eNorm,vNorm);
+	evNorm<T>(xActual2,xGoal,eNorm,vNorm,eePos);
 }
-template <typename T, int SUBSTEPS>
-__host__
-T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goalTime, double totalTime){
-	double I[36*NUM_POS]; double Tbody[36*NUM_POS]; initI<double>(I); initT<double>(Tbody);
-	// and break elapsed time into SUBSTEPS for accuracy
-	double qdes[NUM_POS], udes[CONTROL_SIZE], currX[STATE_SIZE], nextX[STATE_SIZE], qdd[NUM_POS];
-	double dt_us = elapsedTime/static_cast<double>(SUBSTEPS); double dt = dt_us / 1000000.0;
-	for(int j=0; j < STATE_SIZE; j++){currX[j] = static_cast<double>(xActual[j]);}
-	double t0 = static_cast<double>(tvars->t0_plant); double tk = t0;
-	T totalError = 0;	T goal[3];	T eNorm, vNorm;
-	for(int i = 0; i < SUBSTEPS; i++){
-		// get the goal and compute the error norm
-		loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX,goal,&eNorm,&vNorm);	totalError += eNorm;
-		// then get controls
-		int err = getHardwareControls<T>(&(qdes[0]), 	&(udes[0]), 		tvars->x, 	tvars->u, 	tvars->KT, 	t0, 
-                                         &(currX[0]),   &(currX[NUM_POS]),  tk, 
-                                         tvars->ld_x, 	tvars->ld_u, 		tvars->ld_KT);
-		if(err){printf("CRITICAL FAILURE ERROR ABORT MISSION\n");return 0;}
-		// apply them
-		_integrator<double>(&(nextX[0]),&(currX[0]),&(udes[0]),&(qdd[0]),&(I[0]),&(Tbody[0]),dt);
-		for(int j=0; j < STATE_SIZE; j++){currX[j] = nextX[j];}		tk += dt_us;
-	}
-	#pragma unroll
-	for(int j=0; j < STATE_SIZE; j++){xActual[j] = (T)currX[j];}
-	loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX,goal,&eNorm,&vNorm);	totalError += eNorm;
-	return (totalError / static_cast<T>(SUBSTEPS));
+
+template <typename T>
+class LCM_Fig8Goal_Handler {
+    public:
+    	double totalTime;	double zeroTime;	int inFig8;
+    	double eNormLim;	double vNormLim;
+    	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
+
+    	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim) : totalTime(tTime), eNormLim(eLim), vNormLim(vLim) {
+    		zeroTime = 0;	inFig8 = 0;		if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
+    	}
+    	~LCM_Fig8Goal_Handler(){}
+
+		// // update goal based on status
+		void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
+			// get current goal
+			T goal[3];	double time = inFig8 ? msg->utime - zeroTime : 0;	loadFig8Goal(goal,time,totalTime);
+			// compute the position error norm and velocity norm
+			T eNorm; T vNorm; T currX[STATE_SIZE]; T eePos[NUM_POS];
+			for(int i=0; i < STATE_SIZE; i++){
+				if(i < NUM_POS){currX[i] = static_cast<T>(msg->joint_position_measured[i]);}
+				else{			currX[i] = static_cast<T>(msg->joint_velocity_estimated[i-NUM_POS]);}
+			}
+			evNorm<T>(currX, goal, &eNorm, &vNorm, eePos);
+			// debug print
+			printf("[%f] eNorm[%f] vNorm[%f] for goal[%f %f %f] and Pos[%f %f %f]\n",static_cast<double>(msg->utime),eNorm,vNorm,goal[0],goal[1],goal[2],eePos[0],eePos[1],eePos[2]);
+			// then figure out if we are in the goal moving time
+			if(inFig8){
+				// then load in goal pos and zero out vel, orientation, angularVelocity (for now) -- note orientation is size 4 (quat)
+				kuka::lcmt_target_twist dataOut;               dataOut.utime = msg->utime;
+				for (int i = 0; i < 3; i++){dataOut.position[i] = goal[i];	dataOut.velocity[i] = 0;	
+											dataOut.orientation[i] = 0;		dataOut.angular_velocity[i] = 0;}
+				dataOut.orientation[3] = 0;
+				// and publish it to goal channel
+			    lcm_ptr.publish(ARM_GOAL_CHANNEL,&dataOut);
+			}
+			// else check to see if we should update goal next time
+			else if (eNorm < eNormLim && vNorm < vNormLim){zeroTime = msg->utime; inFig8 = 1;}
+			
+		}
+};
+template <typename T>
+void runFig8GoalLCM(double tTime, double eLim, double vLim){
+	lcm::LCM lcm_ptr;
+	LCM_Fig8Goal_Handler<T> handler = LCM_Fig8Goal_Handler<T>(tTime, eLim, vLim);
+	lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_Fig8Goal_Handler<T>::handleStatus, &handler);
+    sub->setQueueCapacity(1);
+    while(0 == lcm_ptr.handle());
 }
+
 template <typename T>
 __host__
-void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, char hardware, int doFig8){
-	// define the requirements for "conversion" to the first goal
-	T eNormLim = 0.05;	 T vNormLim = 0.05;	
-	// define local variables
-	double goalTime = 0; int initial_convergence_flag = 0; T eNorm, vNorm; T error = 0; int counter = 0; struct timeval start, end;
-	// get the max iters per solve
+void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, matDimms *dimms, char hardware){
+    // launch the simulator
+    printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");//, [F]ilter, [G]oal changer, and traj[R]unner are launched!!!\n");
+	// get the max iters and time per solve
 	int itersToDo = getMaxIters(1000, 1);
-	// get the max iters per solve
 	int timeLimit = getTimeBudget(1000, 1); //note in ms
-	// get the total time for the trajectory
-	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));	//double timePrint = 0;
+	// get the total traj time
+	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
-	if (hardware == 'G'){
-		GPUVars<T> *algvars = new GPUVars<T>;
-		allocateMemory_GPU_MPC<T>(algvars, dimms, tvars);
+    // allocate memory and construct the appropriate handlers and launch the threads
+    std::thread mpcThread;                  //lcm::Subscription *mpcSub = nullptr;  // pass in sub objects so we can unsubscribe later
+    CPUVars<T> *cvars = new CPUVars<T>;     LCM_MPCLoop_Handler<T> chandler = LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,itersToDo,timeLimit);
+    GPUVars<T> *gvars = new GPUVars<T>;     LCM_MPCLoop_Handler<T> ghandler = LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,itersToDo,timeLimit);
+    if (hardware == 'G'){
+		allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);
 		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(algvars,goalTime,totalTime_us);
+		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(gvars,0,1);
 		for (int i = 0; i < NUM_ALPHA; i++){
-			gpuErrchk(cudaMemcpy(algvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
-			gpuErrchk(cudaMemcpy(algvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
+			gpuErrchk(cudaMemcpy(gvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
+			gpuErrchk(cudaMemcpy(gvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
 		}
-		memcpy(algvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
+		memcpy(gvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
 		// note run to conversion with no time or iter limits
-		runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);
-		// then start a loop of run a couple steps simulate for X steps and repeat
-		while(1){
-			counter++;
-			gettimeofday(&start,NULL);
-			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
-			gettimeofday(&end,NULL);
-			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
-			tvars->t0_plant = 0; 	tActual_plant = static_cast<int>(std::floor(elapsedTime_us));
-			tvars->t0_sys = 0; 		tActual_sys = static_cast<int>(std::floor(elapsedTime_us));
-      		error += simulateForward<T,150>(tvars,algvars->xActual,elapsedTime_us,goalTime,totalTime_us);
-			// print where are we ending up and eePos
-				int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
-				printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
-				printMat<T,1,STATE_SIZE>(algvars->xActual,1);
-				printf(" With expected:\n");
-				printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*(dimms->ld_x),1);
-      		// print the state we sim to
-				// T *xk = &(algvars->xActual[0]);
-				// printf("%f,%f,%f,%f,%f,%f,%f,%f\n",timePrint,xk[0],xk[1],xk[2],xk[3],xk[4],xk[5],xk[6]);
-				// timePrint += elapsedTime_us;
-			// print the error and the end effector position
-				T eePos[NUM_POS];   compute_eePos_scratch<T>(&(algvars->xActual[0]), &eePos[0]);
-				evNorm(algvars->xActual, algvars->xGoal, &eNorm, &vNorm);
-				printf("[[%f,%f,%f],[%f,%f,%f],%f,%f,%f],\n",eePos[0],eePos[1],eePos[2],algvars->xGoal[0],algvars->xGoal[1],algvars->xGoal[2],eNorm,error/counter,vNorm);
-   			if (initial_convergence_flag){goalTime += elapsedTime_us;}
-   			if(loadFig8Goal<T>(algvars,goalTime,totalTime_us) > 1){break;};
-   			if (doFig8 && eNorm < eNormLim && vNorm < vNormLim){initial_convergence_flag = 1; error = 0; counter = 0;}
-		}
-		printf("\n\nAverage tracking error: [%f]\n",(error/counter));
-		printAllTimingStats(data);
-		freeMemory_GPU_MPC<T>(algvars);	delete algvars;
-	}
-	else{printf("CPU currently not implemented.\n");}
+		runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,tActual_sys,tActual_plant,1);
+		// then launch the MPC thread
+     	mpcThread  = std::thread(&runMPCHandler<T>, lcm_ptr, &ghandler);    
+     	// setCPUForThread(&mpcThread, 1);
+    }
+    else{
+		allocateMemory_CPU_MPC<T>(cvars, dimms, tvars);
+		// load in inital trajectory and goal
+		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(cvars,0,1);
+		memcpy(cvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
+		memcpy(cvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
+		memcpy(cvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
+		// note run to conversion with no time or iter limits
+		runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,tActual_sys,tActual_plant,1);
+		// then launch the MPC thread
+     	mpcThread = std::thread(&runMPCHandler<T>, lcm_ptr, &chandler);    
+     	// setCPUForThread(&mpcThread, 1);
+    }
+    // launch the trajRunner
+    std::thread trajThread = std::thread(&runTrajRunner<T>, dimms);
+    // launch the goal monitor
+    std::thread goalThread = std::thread(&runFig8GoalLCM<algType>, totalTime_us, 0.05, 0.05);
+    // launch the status filter if needed
+    #if USE_VELOCITY_FILTER
+    	std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<algType>);
+	#endif
+    printf("All threads launched -- check simulator output!\n");
+    mpcThread.join();	trajThread.join();	goalThread.join();
+    #if USE_VELOCITY_FILTER
+    	filterThread.join();
+    #endif
+    // printf("Threads Joined\n");
+    if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars);}  else{freeMemory_CPU_MPC<T>(cvars);}     delete gvars;   delete cvars;
 }
+
 int main(int argc, char *argv[])
 {
 	srand(time(NULL));
@@ -315,11 +230,46 @@ int main(int argc, char *argv[])
 	if (argc > 1){hardware = argv[1][0];}
 	trajVars<algType> *tvars = new trajVars<algType>;	algTrace<algType> *atrace = new algTrace<algType>;	matDimms *dimms = new matDimms;
 	if (hardware == 'C' || hardware == 'G'){
-		int flag = atoi(&argv[1][1]);
-		if (flag != 0 && flag != 1){printf("%s",errMsg); return 1;};
-		testMPC_lockstep<algType>(tvars,atrace,dimms,hardware,flag);
+		lcm::LCM lcm_ptr;	if(!lcm_ptr.good()){printf("LCM Failed to Init\n"); return 1;}
+		testMPC_LCM<algType>(&lcm_ptr,tvars,atrace,dimms,hardware);
 	}
-	else{printf("%s",errMsg); hardware = '?';}
+	// run the status filter
+	else if (hardware == 'F'){
+		run_IIWA_STATUS_filter<algType>();
+	}
+	// run the simulator
+	else if (hardware == 'S'){
+		double xInit[STATE_SIZE] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+		runLCMSimulator(xInit);
+	}
+	// various printers
+	else if (hardware == 'P'){
+		char type = argv[1][1];
+		lcm::LCM lcm_ptr;	if(!lcm_ptr.good()){printf("LCM Failed to Init\n"); return 1;} 
+		if(type == 'S'){
+			LCM_IIWA_STATUS_printer<algType> *shandler = new LCM_IIWA_STATUS_printer<algType>;
+			run_IIWA_STATUS_printer<algType>(&lcm_ptr,shandler);
+			delete shandler;	
+		}
+		else if(type == 'C'){
+			LCM_IIWA_COMMAND_printer<algType> *chandler = new LCM_IIWA_COMMAND_printer<algType>;
+			run_IIWA_COMMAND_printer<algType>(&lcm_ptr,chandler);
+			delete chandler;
+		}
+		else if(type == 'T'){
+			LCM_traj_printer<algType> *thandler = new LCM_traj_printer<algType>;
+			run_traj_printer<algType>(&lcm_ptr,thandler);
+			delete thandler;
+		}
+		else if(type == 'F'){
+			LCM_IIWA_STATUS_FILTERED_printer<algType> *fhandler = new LCM_IIWA_STATUS_FILTERED_printer<algType>;
+			run_IIWA_STATUS_FILTERED_printer<algType>(&lcm_ptr,fhandler);
+			delete fhandler;
+		}
+		else{printf("Invalid printer requested as second char [%c]. Currently supports: [S]tatus, [C]ommand, [T]rajectory, or [F]iltered Status\n",type);}
+	}
+	// else error
+	printf("Error: Unkown code - usage is: [C]PU or [G]PU MPC Algorithm, Debug [P]rinters, or Kuka [S]imulator\n"); hardware = '?';
 	// free the trajVars and the wrappers
 	freeTrajVars<algType>(tvars);	delete atrace;	delete tvars;	delete dimms;
 	return (hardware == '?');

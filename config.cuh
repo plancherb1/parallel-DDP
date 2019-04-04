@@ -2,7 +2,14 @@
 #define _DDP_CONFIG_
 
 /******************************************************************
- * User defined parameters
+ * Config.cuh
+ *
+ * User defined parameters for the MPC algorithms
+ *
+ * Also includes all helper files in order last due to dependencies
+ *
+ * Note: If you want to overide any defaults please set them in the
+ *       example file before including this file
  *******************************************************************/
 
 // load in utility functions and threading/cuda definitions
@@ -32,7 +39,7 @@
 	#define ALPHA_BASE 0.5
 	#define NUM_ALPHA 16
 	#define MAX_DEFECT_SIZE 1.0
-	#define RHO_INIT 1
+	#define RHO_INIT 1.0
 #elif PLANT == 4
 	#define NUM_POS 7
 	#define STATE_SIZE (2*NUM_POS)
@@ -44,9 +51,6 @@
 	#define MAX_DEFECT_SIZE 1.0
 	#define RHO_INIT 12.5
 	#define INTEGRATOR 1
-	#ifndef EE_COST
-		#define EE_COST 0 // 1 for end effector based cost / goal and 0 for joint based
-	#endif
 	#define USE_LIMITS_FLAG 0 // use joint vel torque limits (quad pen)
 #else
 	#error "Currently only supports Simple Pendulum[1], Inverted Pendulum[2], Quadrotor [3], or KukaArm[4].\n"
@@ -210,5 +214,47 @@ typedef float algType;
 #define OFFSET_HUX_GU DIM_x_r
 #define OFFSET_B (DIM_AB_r*DIM_x_r)
 // Matrix Dimms
+
+// include the correct set of cost and dynamics functions
+#if PLANT == 1
+	#include "plants/cost_pend.cuh"
+	#include "plants/dynamics_pend.cuh"
+#elif PLANT == 2
+	#include "plants/cost_cart.cuh"
+ 	#include "plants/dynamics_cart.cuh"
+#elif PLANT == 3
+	#include "plants/cost_quad.cuh"
+ 	#include "plants/dynamics_quad.cuh"
+#elif PLANT == 4
+	#include "plants/cost_arm.cuh"
+ 	#include "plants/dynamics_arm.cuh"
+#endif
+
+// include integrators for those dynamics
+#include "utils/integrators.cuh"
+
+// 1: Backward Pass Helpers
+#include "DDPHelpers/bpHelpers.cuh"
+
+// 2: Forward Pass Helpers
+#include "DDPHelpers/fpHelpers.cuh"
+
+// 3: Next Iteration Setup and Init Helpers
+#include "DDPHelpers/nisInitHelpers.cuh"
+
+// 4: DDP Algorithm Wrappers
+#if !defined(MPC_MODE) || MPC_MODE == 0
+	#include "DDPHelpers/DDPWrappers.cuh"
+#endif
+
+// 5: MPC Helpers and Wrappers
+#if defined(MPC_MODE) && MPC_MODE == 1
+	#include "DDPHelpers/MPCHelpers.cuh"       
+#endif
+
+// 6: LCM Helpers and Wrappers
+#if defined(USE_LCM) && USE_LCM == 1
+	#include "DDPHelpers/LCMHelpers.cuh"
+#endif
 
 #endif
