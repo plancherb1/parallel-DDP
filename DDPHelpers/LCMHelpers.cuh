@@ -241,11 +241,13 @@ class LCM_MPCLoop_Handler {
 
 template <typename T>
 __host__
-void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler, int goalType){
-    lcm::Subscription *sub, *sub2;
-    sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
-    if(goalType == 0){sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalEE, handler);}
-    else{             sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalqqd, handler);}
+void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler){
+    lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
+    #if defined EE_COST && EE_COST == 1
+        lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalEE, handler);
+    #else
+        lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalqqd, handler);
+    #endif
     sub->setQueueCapacity(1);   sub2->setQueueCapacity(1);
     while(0 == lcm_ptr->handle());
 }
@@ -359,13 +361,13 @@ class LCM_Simulator_Handler {
         int numSteps;               struct timeval start, end;   int64_t currTime;
         double nextX[STATE_SIZE];   double currX[STATE_SIZE];    double qdd[NUM_POS];
         double Tbody[36*NUM_POS];   double I[36*NUM_POS];        double torqueCom[CONTROL_SIZE]; 
-        lcm::LCM lcm_ptr;
+        lcm::LCM lcm_ptr;           int hertz, debug;            double dt;
 
-        LCM_Simulator_Handler(int _numSteps, double *xInit) : numSteps(_numSteps) {
+        LCM_Simulator_Handler(double *xInit, int _numSteps = 50, int _hertz = 1000, int _debug = 0) : numSteps(_numSteps), hertz(_hertz), debug(_debug) {
             for(int i=0; i < STATE_SIZE; i++){currX[i] = xInit[i];}
             for(int i=0; i < CONTROL_SIZE; i++){torqueCom[i] = 0;}
             if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
-            initI<double>(I);       initT<double>(Tbody);     gettimeofday(&start,NULL);    currTime = 0;
+            initI<double>(I);       initT<double>(Tbody);     gettimeofday(&start,NULL);    currTime = 0;       dt = 1.0/hertz;
         }
         ~LCM_Simulator_Handler(){}
 
@@ -394,13 +396,17 @@ class LCM_Simulator_Handler {
                 #pragma unroll
                 for(int i = 0; i < STATE_SIZE; i++){currX[i] = nextX[i];}
             }
-            // double eePos[NUM_POS]; compute_eePos_scratch<double>(currX, &eePos[0]);
-            // printf("%f %f %f\n",eePos[0],eePos[1],eePos[2]);
-            // printf("%f:%f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
-            //        simTime,
-            //        currU[0],currU[1],currU[2],currU[3],currU[4],currU[5],currU[6],
-            //        prevX[0],prevX[1],prevX[2],prevX[3],prevX[4],prevX[5],prevX[6],prevX[7],prevX[8],prevX[9],prevX[10],prevX[11],prevX[12],prevX[13],
-            //        currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13]);
+            if (debug == 1){
+                printf("%f:%f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+                   simTime,
+                   currU[0],currU[1],currU[2],currU[3],currU[4],currU[5],currU[6],
+                   prevX[0],prevX[1],prevX[2],prevX[3],prevX[4],prevX[5],prevX[6],prevX[7],prevX[8],prevX[9],prevX[10],prevX[11],prevX[12],prevX[13],
+                   currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13]);    
+            }
+            else if (debug == 2){
+                double eePos[NUM_POS]; compute_eePos_scratch<double>(currX, &eePos[0]);
+                printf("%f %f %f\n",eePos[0],eePos[1],eePos[2]); 
+            }
         }
 
         // publish currX
@@ -426,7 +432,7 @@ class LCM_Simulator_Handler {
             while(1){
                 gettimeofday(&end,NULL);
                 simTime = time_delta_s(start,end);
-                if (simTime >= 0.001){break;}
+                if (simTime >= dt){break;}
             } 
             gettimeofday(&start,NULL);
             simulate(simTime);          publish();
@@ -435,10 +441,10 @@ class LCM_Simulator_Handler {
 
 
 __host__
-void runLCMSimulator(int numSteps, double *xInit){
+void runLCMSimulator(double *xInit, int numSteps = 50, int hertz = 1000, int debug = 0){
     lcm::LCM lcm_ptr;
     if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
-    LCM_Simulator_Handler handler = LCM_Simulator_Handler(numSteps, xInit);
+    LCM_Simulator_Handler handler = LCM_Simulator_Handler(xInit, numSteps, hertz, debug);
     lcm::Subscription *sub = lcm_ptr.subscribe(ARM_COMMAND_CHANNEL, &LCM_Simulator_Handler::handleMessage, &handler);
     sub->setQueueCapacity(1);
     // poll the fd for updates
