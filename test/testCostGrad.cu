@@ -1,21 +1,22 @@
 /*******
-nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_52,code=sm_52 -rdc=true -O3
+nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 *******/
 
 #define PLANT 4
-#define EE_COST 1
+#define EE_COST 0
 #define MPC_MODE 1
 #define USE_WAFR_URDF 0
 #define USE_EE_VEL_COST 1
-#include "../DDPHelpers.cuh"
+#define USE_LIMITS_FLAG 1
+#include "../config.cuh"
 #include <random>
 #define NUM_REPS 1
-#define TEST_FINITE_DIFF_EPSILON 0.001
+#define TEST_FINITE_DIFF_EPSILON 0.01
 #define ERR_TOL 5 // in percent
 #define RANDOM_MEAN 0
 #define RANDOM_STDEVq 2
 #define RANDOM_STDEVqd 5
-#define RANDOM_STDEVu 50
+#define RANDOM_STDEVu 150
 #define RANDOM_STDEVg 2
 std::default_random_engine randEng(time(0)); //seed
 std::normal_distribution<double> randDistq(RANDOM_MEAN, RANDOM_STDEVq); //mean followed by stdiv
@@ -518,10 +519,13 @@ void testCost(){
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
+		printf("hi doing rep\n");
 		// relod and clear
 		loadAndClearPos<T>(x,grad,grad2,STATE_SIZE+CONTROL_SIZE,u,goal);
 		// compute
+		printf("analytical cost\n");
 		analyticalCost<T>(x,u,goal,grad);
+		printf("finite diff cost\n");
 		finiteDiffCost<T>(x,u,goal,grad2);
 		// compare
 		#pragma unroll
@@ -571,71 +575,73 @@ void compareEEPosdq(){
 	free(x); free(grad); free(grad2);
 }
 
-template <typename T>
-__host__
-void compareCostdq(){
-	// allocate
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
-	T *u =     (T *)malloc(CONTROL_SIZE*sizeof(T));
-	T *grad =  (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
-	T *grad2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
-	T *goal;
-	#if EE_COST
-		goal =(T *)malloc(6*sizeof(T));
-	#else
-		goal =(T *)malloc(STATE_SIZE*sizeof(T));
-	#endif
+#if EE_COST
+	template <typename T>
+	__host__
+	void compareCostdq(){
+		// allocate
+		T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+		T *u =     (T *)malloc(CONTROL_SIZE*sizeof(T));
+		T *grad =  (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
+		T *grad2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
+		T *goal;
+		#if EE_COST
+			goal =(T *)malloc(6*sizeof(T));
+		#else
+			goal =(T *)malloc(STATE_SIZE*sizeof(T));
+		#endif
 
-	int ld_H    = STATE_SIZE + CONTROL_SIZE;
-	T *Hessian  = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
-	T *Hessian2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
-	T Tbody[36*NUM_POS]; 	   	initT<T>(Tbody);
+		int ld_H    = STATE_SIZE + CONTROL_SIZE;
+		T *Hessian  = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
+		T *Hessian2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
+		T Tbody[36*NUM_POS]; 	   	initT<T>(Tbody);
 
-	// compare for NUM_REPS
-	for (int rep = 0; rep < NUM_REPS; rep++){
-		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,STATE_SIZE+CONTROL_SIZE,u,goal);
-		// compute
-		T s_sinq[NUM_POS];			T s_cosq[NUM_POS];
-		T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
-		T s_T[36*NUM_POS];			T s_T_dx[36*NUM_POS];
-		T s_eePos[6];				T s_deePos[6*NUM_POS];
-		T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
-		T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
-		T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
-		
-		compute_eePosVel_dx<T>(x, s_Tb, Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
-                               s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
-		costGrad<T>(Hessian,grad,s_eePos,s_deePos,goal,x,u,0,ld_H,nullptr,0,s_eeVel,s_deePosVel);
+		// compare for NUM_REPS
+		for (int rep = 0; rep < NUM_REPS; rep++){
+			// relod and clear
+			loadAndClearPos<T>(x,grad,grad2,STATE_SIZE+CONTROL_SIZE,u,goal);
+			// compute
+			T s_sinq[NUM_POS];			T s_cosq[NUM_POS];
+			T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
+			T s_T[36*NUM_POS];			T s_T_dx[36*NUM_POS];
+			T s_eePos[6];				T s_deePos[6*NUM_POS];
+			T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
+			T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
+			T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
+			
+			compute_eePosVel_dx<T>(x, s_Tb, Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
+	                               s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
+			costGrad<T>(Hessian,grad,s_eePos,s_deePos,goal,x,u,0,ld_H,nullptr,0,s_eeVel,s_deePosVel);
 
-		compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,x,s_cosq,Tbody);
-		costGrad<T>(Hessian2,grad2,s_eePos,s_deePos,goal,x,u,0,ld_H);
-		
-		// compare
-		#pragma unroll
-		for (int ind = 0; ind < STATE_SIZE + CONTROL_SIZE; ind++){
-			T delta = abs(grad[ind] - grad2[ind]);
-			T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
-			if (err > ERR_TOL){
-				printf("rep[%d] Gradient ind[%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,err,grad[ind],grad2[ind]);
-			}
-		}
-		#pragma unroll
-		for (int c = 0; c < NUM_POS; c++){
+			compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,x,s_cosq,Tbody);
+			costGrad<T>(Hessian2,grad2,s_eePos,s_deePos,goal,x,u,0,ld_H);
+			
+			// compare
 			#pragma unroll
-			for (int r = 0; r < NUM_POS; r++){
-				int ind = c*ld_H + r;
-				T delta = abs(Hessian[ind] - Hessian2[ind]);
-				T err = abs(Hessian2[ind] == 0 ? (Hessian[ind] == 0 ? 0 : delta/Hessian[ind]*100) : delta/Hessian2[ind]*100);
+			for (int ind = 0; ind < STATE_SIZE + CONTROL_SIZE; ind++){
+				T delta = abs(grad[ind] - grad2[ind]);
+				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
 				if (err > ERR_TOL){
-					printf("rep[%d] Hessian c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,c,r,err,Hessian[ind],Hessian2[ind]);
+					printf("rep[%d] Gradient ind[%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,ind,err,grad[ind],grad2[ind]);
+				}
+			}
+			#pragma unroll
+			for (int c = 0; c < NUM_POS; c++){
+				#pragma unroll
+				for (int r = 0; r < NUM_POS; r++){
+					int ind = c*ld_H + r;
+					T delta = abs(Hessian[ind] - Hessian2[ind]);
+					T err = abs(Hessian2[ind] == 0 ? (Hessian[ind] == 0 ? 0 : delta/Hessian[ind]*100) : delta/Hessian2[ind]*100);
+					if (err > ERR_TOL){
+						printf("rep[%d] Hessian c,r[%d,%d] has err[%.2f] percent for analytical[%.8f] vs finiteDiff[%.8f]\n",rep,c,r,err,Hessian[ind],Hessian2[ind]);
+					}
 				}
 			}
 		}
+		//free
+		free(x); free(u); free(grad); free(grad2); free(goal);
 	}
-	//free
-	free(x); free(u); free(grad); free(grad2); free(goal);
-}
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -665,10 +671,14 @@ int main(int argc, char *argv[])
 			compareEEPosdq<algType>();
 			break;
 		case 'm':
-			compareCostdq<algType>();
+			#if EE_COST
+				compareCostdq<algType>();
+			#else
+				printf("Method not defined for joint level cost\n");
+			#endif
 			break;
 		default:
-			printf("Input is [P]os, [V]el, [T]ransforms, T[b]ody/dT, Transform/[d]T, full [C]ost, or [c]ompare Pdq methods or costGrad [m]ethods\n");
+			printf("Input is [P]os, [V]el, [T]ransforms, T[b]ody/dT, Transform/[d]T, full [C]ost, or [c]ompare Pdq methods or EEcostGrad [m]ethods\n");
 			return 1;
 	}
 	return 0;

@@ -2,8 +2,9 @@
 nvcc -std=c++11 -o printDyn.exe printDyn.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
 #define EE_COST 1
+#define MPC_MODE 1
 #define PLANT 4
-#include "../DDPHelpers.cuh"
+#include "../config.cuh"
 #include <random>
 #include <vector>
 #include <algorithm>
@@ -74,6 +75,8 @@ int main(int argc, char *argv[]){
 	s_xk[11] = 0;
 	s_xk[12] = 0;
 	s_xk[13] = 0;
+	// #define PI 3.14159
+	// s_xk[0] = PI/2.0; 	s_xk[1] = -PI/6.0; 	s_xk[2] = -PI/3.0; 	s_xk[3] = -PI/2.0; 	s_xk[4] = 3.0*PI/4.0; 	s_xk[5] = -PI/4.0; 	s_xk[6] = 0.0;
 	printf("Balancing control for state:\n");
 	for (int j = 0; j < STATE_SIZE; j++){printf("%f ",s_xk[j]);} printf("\n");
 

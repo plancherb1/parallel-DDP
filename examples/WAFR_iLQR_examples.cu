@@ -4,6 +4,11 @@ nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils
 #define EE_COST 0
 #define TOL_COST 0.0
 #define USE_WAFR_URDF 1
+#define Q1 0.1 // q
+#define Q2 0.001 // qd
+#define R  0.0001
+#define QF1 1000.0 // q
+#define QF2 1000.0 // qd
 
 #include "../config.cuh"
 #include <random>

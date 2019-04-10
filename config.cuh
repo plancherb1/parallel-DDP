@@ -51,7 +51,6 @@
 	#define MAX_DEFECT_SIZE 1.0
 	#define RHO_INIT 12.5
 	#define INTEGRATOR 1
-	#define USE_LIMITS_FLAG 0 // use joint vel torque limits (quad pen)
 #else
 	#error "Currently only supports Simple Pendulum[1], Inverted Pendulum[2], Quadrotor [3], or KukaArm[4].\n"
 #endif

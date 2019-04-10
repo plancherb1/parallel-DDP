@@ -1,14 +1,22 @@
 /***
 nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
-#define USE_WAFR_URDF 1
 #define EE_COST 0
+#define USE_WAFR_URDF 1
+#define Q1 0.1 // q
+#define Q2 0.001 // qd
+#define R  0.0001
+#define QF1 1000.0 // q
+#define QF2 1000.0 // qd
+
 #define MPC_MODE 1
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
 #define PLANT 4
+
+#define PI 3.14159
 #include "../config.cuh"
 #include <random>
 #include <vector>
@@ -52,21 +60,24 @@ void keyboardHold(){
 }
 template <typename T>
 __host__ __forceinline__
-void loadTraj(trajVars<T> *tvars, matDimms *dimms){
-	T *xk = tvars->x;	T *uk = tvars->u;
+void loadX(T *xk){
+	xk[0] = PI/2.0; 	xk[1] = -PI/6.0; 	xk[2] = -PI/3.0; 	xk[3] = -PI/2.0; 	xk[4] = 3.0*PI/4.0; 	xk[5] = -PI/4.0; 	xk[6] = 0.0;
+	for(int i = NUM_POS; i < STATE_SIZE; i++){xk[i] = 0.0;}
+}
+template <typename T>
+__host__ __forceinline__
+void loadTraj(T *x, T *u, T *KT, int ld_x, int ld_u, int ld_KT){
+	T *xk = &x[0];	T *uk = &u[0];
 	for (int k=0; k<NUM_TIME_STEPS; k++){
-		for (int i = 0; i < STATE_SIZE; i++){
-			xk[i] = 0.0;	if (i < CONTROL_SIZE){uk[i] = 0.01;}
-		}
-		xk += (dimms->ld_x);	uk += (dimms->ld_u);
+		loadX<T>(xk);	for(int i = 0; i < CONTROL_SIZE; i++){uk[i] = 0.0;}	xk += ld_x;	uk += ld_u;
 	}
-	memset(tvars->KT, 0, (dimms->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
+	memset(KT, 0, ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
 }
 
 template <typename T>
 class LCM_PickAndPlaceGoal_Handler {
     public:
-    	#define NUM_GOALS 6
+    	#define NUM_GOALS 1
     	int goalNum;	double eNormLim;	T goals[NUM_POS*NUM_GOALS];
     	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
 
@@ -84,12 +95,13 @@ class LCM_PickAndPlaceGoal_Handler {
 
     	LCM_PickAndPlaceGoal_Handler(double eLim) : eNormLim(eLim) {
     		goalNum = 0;		if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
-			goals[0*NUM_POS + 0] = -1.04719666667;	goals[0*NUM_POS + 1] = 0.959930277778;	goals[0*NUM_POS + 2] = -0.436331944444;	goals[0*NUM_POS + 3] = -1.13446305556;	goals[0*NUM_POS + 4] = 0.0872663888889;	goals[0*NUM_POS + 5] = 1.04719666667;	goals[0*NUM_POS + 6] = 0.0;	
-			goals[1*NUM_POS + 0] = 1.13446305556;	goals[1*NUM_POS + 1] = 0.7853975;		goals[1*NUM_POS + 2] = -0.08726638889;	goals[1*NUM_POS + 3] = -1.39626222222;	goals[1*NUM_POS + 4] = 0.261799166667;	goals[1*NUM_POS + 5] = 0.523598333333;	goals[1*NUM_POS + 6] = 0.0;
-			goals[2*NUM_POS + 0] = -0.523598333333;	goals[2*NUM_POS + 1] = 0.872663888889;	goals[2*NUM_POS + 2] = -0.523598333333;	goals[2*NUM_POS + 3] = -1.39626222222;	goals[2*NUM_POS + 4] = 0.0;				goals[2*NUM_POS + 5] = 0.959930277778;	goals[2*NUM_POS + 6] = 0.0;	
-			goals[3*NUM_POS + 0] = 0.698131111111;	goals[3*NUM_POS + 1] = 1.04719666667;	goals[3*NUM_POS + 2] = 0.610864722222;	goals[3*NUM_POS + 3] = -1.39626222222;	goals[3*NUM_POS + 4] = -2.3561925;		goals[3*NUM_POS + 5] = 0.349065555556;	goals[3*NUM_POS + 6] = 0.0;
-			goals[4*NUM_POS + 0] = -0.959930277778;	goals[4*NUM_POS + 1] = 0.959930277778;	goals[4*NUM_POS + 2] = 0.349065555556;	goals[4*NUM_POS + 3] = -1.04719666667;	goals[4*NUM_POS + 4] = 0.349065555556;	goals[4*NUM_POS + 5] = 0.698131111111;	goals[4*NUM_POS + 6] = 0.0;	
-			goals[5*NUM_POS + 0] = 1.39626222222;	goals[5*NUM_POS + 1] = 0.959930277778;	goals[5*NUM_POS + 2] = -0.261799166667;	goals[5*NUM_POS + 3] = -1.13446305556;	goals[5*NUM_POS + 4] = 0.0;				goals[5*NUM_POS + 5] = 0.523598333333;	goals[5*NUM_POS + 6] = 0.0;
+    		goals[0] = PI/4.0; goals[1] = PI/3.0; goals[2] = PI/6.0; goals[3] = -PI/3.0; goals[4] = 0.0; goals[5] = PI/4; goals[6] = 0.0;
+			// goals[0*NUM_POS + 0] = 1.13446305556;	goals[0*NUM_POS + 1] = 0.7853975;		goals[0*NUM_POS + 2] = -0.08726638889;	goals[0*NUM_POS + 3] = -1.39626222222;	goals[0*NUM_POS + 4] = 0.261799166667;	goals[0*NUM_POS + 5] = 0.523598333333;	goals[0*NUM_POS + 6] = 0.0;
+			// goals[1*NUM_POS + 0] = -0.523598333333;	goals[1*NUM_POS + 1] = 0.872663888889;	goals[1*NUM_POS + 2] = -0.523598333333;	goals[1*NUM_POS + 3] = -1.39626222222;	goals[1*NUM_POS + 4] = 0.0;				goals[1*NUM_POS + 5] = 0.959930277778;	goals[1*NUM_POS + 6] = 0.0;	
+			// goals[2*NUM_POS + 0] = 0.698131111111;	goals[2*NUM_POS + 1] = 1.04719666667;	goals[2*NUM_POS + 2] = 0.610864722222;	goals[2*NUM_POS + 3] = -1.39626222222;	goals[2*NUM_POS + 4] = -2.3561925;		goals[2*NUM_POS + 5] = 0.349065555556;	goals[2*NUM_POS + 6] = 0.0;
+			// goals[3*NUM_POS + 0] = -0.959930277778;	goals[3*NUM_POS + 1] = 0.959930277778;	goals[3*NUM_POS + 2] = 0.349065555556;	goals[3*NUM_POS + 3] = -1.04719666667;	goals[3*NUM_POS + 4] = 0.349065555556;	goals[3*NUM_POS + 5] = 0.698131111111;	goals[3*NUM_POS + 6] = 0.0;	
+			// goals[4*NUM_POS + 0] = 1.39626222222;	goals[4*NUM_POS + 1] = 0.959930277778;	goals[4*NUM_POS + 2] = -0.261799166667;	goals[4*NUM_POS + 3] = -1.13446305556;	goals[4*NUM_POS + 4] = 0.0;				goals[4*NUM_POS + 5] = 0.523598333333;	goals[4*NUM_POS + 6] = 0.0;
+			// goals[5*NUM_POS + 0] = -1.04719666667;	goals[5*NUM_POS + 1] = 0.959930277778;	goals[5*NUM_POS + 2] = -0.436331944444;	goals[5*NUM_POS + 3] = -1.13446305556;	goals[5*NUM_POS + 4] = 0.0872663888889;	goals[5*NUM_POS + 5] = 1.04719666667;	goals[5*NUM_POS + 6] = 0.0;	
 			
     	}
     	~LCM_PickAndPlaceGoal_Handler(){}
@@ -100,9 +112,11 @@ class LCM_PickAndPlaceGoal_Handler {
 		// update goal based on status
 		void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
 			// compute the position error
-			T eNorm;	for (int i = 0; i < NUM_POS; i++){eNorm += static_cast<T>(msg->joint_position_measured[i]) - goals[goalNum*NUM_POS + i];}
+			T eNorm;	T *gk = &goals[goalNum*NUM_POS];		const double *qk = &(msg->joint_position_measured[0]);
+			for (int i = 0; i < NUM_POS; i++){eNorm += pow(static_cast<T>(qk[i]) - gk[i],2);}
 			// debug print
-			printf("[%f] eNorm[%f] for goalNum[%d]\n",static_cast<double>(msg->utime),eNorm,goalNum);
+			printf("[%ld] eNorm[%f] for goalNum[%d][%.3f %.3f %.3f %.3f %.3f %.3f %.3f] vs xk[%.3f %.3f %.3f %.3f %.3f %.3f %.3f]\n",
+						msg->utime,eNorm,goalNum,gk[0],gk[1],gk[2],gk[3],gk[4],gk[5],gk[6],qk[0],qk[1],qk[2],qk[3],qk[4],qk[5],qk[6]);
 			// then figure out if we are ready to change the goal
 			if(eNorm < eNormLim){
 				// then change goal and publish new goal
@@ -140,7 +154,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
     if (hardware == 'G'){
 		allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);
 		// load in inital trajectory and initial goal
-		loadTraj<T>(tvars, dimms);		goalhandler.loadInitialGoal(gvars->xGoal);
+		loadTraj<T>(tvars->x, tvars->u, tvars->KT, dimms->ld_x, dimms->ld_u, dimms->ld_KT);		goalhandler.loadInitialGoal(gvars->xGoal);
 		for (int i = 0; i < NUM_ALPHA; i++){
 			gpuErrchk(cudaMemcpy(gvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
 			gpuErrchk(cudaMemcpy(gvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
@@ -155,7 +169,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
     else{
 		allocateMemory_CPU_MPC<T>(cvars, dimms, tvars);
 		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		goalhandler.loadInitialGoal(cvars->xGoal);
+		loadTraj<T>(tvars->x, tvars->u, tvars->KT, dimms->ld_x, dimms->ld_u, dimms->ld_KT);		goalhandler.loadInitialGoal(cvars->xGoal);
 		memcpy(cvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(cvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(cvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
@@ -199,7 +213,7 @@ int main(int argc, char *argv[])
 	}
 	// run the simulator
 	else if (hardware == 'S'){
-		double xInit[STATE_SIZE] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+		double xInit[STATE_SIZE]; loadX<double>(xInit);
 		runLCMSimulator(xInit);
 	}
 	// various printers
