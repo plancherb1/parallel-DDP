@@ -4,22 +4,113 @@
  * TBD NEED TO ADD DOC HERE
  *****************************************************************/
 
+// Also define limits on torque, pos, velocity and Q/Rs for those
+#define SAFETY_FACTOR_P 0.8
+#define SAFETY_FACTOR_V 0.8
+#define SAFETY_FACTOR_T 0.8
+// From URDF
+#define TORQUE_LIMIT 50//(300.0 * SAFETY_FACTOR_T)
+#define R_TL 100.0//0.1
+#define POS_LIMIT_024 (2.96705972839 * SAFETY_FACTOR_P)
+#define POS_LIMIT_135 (2.09439510239 * SAFETY_FACTOR_P)
+#define POS_LIMIT_6   (3.05432619099 * SAFETY_FACTOR_P)
+#define Q_PL 0.0//100.0
+// From KukaSim
+#define VEL_LIMIT_01  (1.483529 * SAFETY_FACTOR_V) // 85°/s in rad/s
+#define VEL_LIMIT_2   (1.745329 * SAFETY_FACTOR_V) // 100°/s in rad/s
+#define VEL_LIMIT_3   (1.308996 * SAFETY_FACTOR_V) // 75°/s in rad/s
+#define VEL_LIMIT_4   (2.268928 * SAFETY_FACTOR_V) // 130°/s in rad/s
+#define VEL_LIMIT_56  (2.356194 * SAFETY_FACTOR_V) // 135°/s in rad/s
+#define Q_VL 0.0//100.0
+
+// include vel and pos limits if desired
+#if USE_LIMITS_FLAG
+	template <typename T>
+	__host__ __device__ __forceinline__
+	T getPosLimit(int ind){return (T)(ind == 6 ? POS_LIMIT_6 : (ind % 2 ? POS_LIMIT_135 : POS_LIMIT_024));}
+
+	template <typename T>
+	__host__ __device__ __forceinline__
+	T getVelLimit(int ind){return (T)(ind > 4 ? VEL_LIMIT_56 : (ind == 4 ? VEL_LIMIT_4 : (ind == 3 ? VEL_LIMIT_3 : (ind == 2 ? VEL_LIMIT_2 : VEL_LIMIT_01))));}
+
+	template <typename T>
+	__host__ __device__ __forceinline__
+	T getTorqueLimit(int ind){return (T)TORQUE_LIMIT;}
+
+	template <typename T, int dLevel>
+	__host__ __device__ __forceinline__
+	T pieceWiseQuadratic(T val, T qStart){
+		T delta = abs(val) - qStart; 	bool flag = delta > 0;
+		// if inside use linear regime else quadratic regime
+		if(flag){
+			#if dLevel == 0
+				return static_cast<T>(qStart + delta);
+			#elif dLevel == 1
+				return static_cast<T>(sgn(val));
+			#elif dLevel == 2
+				return static_cast<T>(0.0);
+			#else
+				#error "Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"
+			#endif
+		}
+		// 
+		else{
+			#if dLevel == 0
+				return static_cast<T>(qStart + 0.5*delta*delta);
+			#elif dLevel == 1
+				return 0.0;//static_cast<T>(sgn(val)*delta);
+			#elif dLevel == 2
+				return static_cast<T>(1);
+			#else
+				#error "Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"
+			#endif
+		}
+	}
+
+	template <typename T, int dLevel>
+	__host__ __device__ __forceinline__
+	T quadPen(T val, T absMax){
+		T delta = abs(val) - absMax;
+		if(delta < 0){return 0;}
+		else{
+			#if dLevel == 0
+				return static_cast<T>(0.5*delta*delta);
+			#elif dLevel == 1
+				return 0.0;//static_cast<T>(sgn(val)*delta);
+			#elif dLevel == 2
+				return static_cast<T>(1);
+			#else
+				#error "Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"
+			#endif
+		}
+	}
+
+	template <typename T>
+	__host__ __device__ __forceinline__
+	void getLimitVars(T *s_x, T *s_u, T *qr, T *val, T *limit, int ind, int k){
+		if (ind < NUM_POS){	         *qr = Q_PL;		*val = s_x[ind];				*limit = getPosLimit<T>(ind);}
+		else if (ind < STATE_SIZE){  *qr = Q_VL;		*val = s_x[ind];				*limit = getVelLimit<T>(ind-NUM_POS);}
+		else{                        *qr = R_TL;		*val = s_u[ind-STATE_SIZE]; 	*limit = getTorqueLimit<T>(ind-STATE_SIZE);}
+	}
+
+	template <typename T, int dLevel>
+	__host__ __device__ __forceinline__
+	T limitCosts(T *s_x, T *s_u, int ind, int k){
+		T qr;	T val;	T limit;	getLimitVars(s_x,s_u,&qr,&val,&limit,ind,k);
+		// return qr*pieceWiseQuadratic<T,dLevel>(val,limit);
+		return qr*quadPen<T,dLevel>(val,limit);
+	}
+#endif
+
 // joint level costs are simple
 #if !EE_COST
- 	#if USE_WAFR_URDF
+ 	#ifndef Q1
 	 	#define Q1 0.1 // q
-		#define Q2 0.001 // qd
-		#define R  0.0001
-		#define QF1 1000.0 // q
-		#define QF2 1000.0 // qd
-	#else 
-	 	#define Q1 0.1 // q
-		#define Q2 0.001 // qd
+		#define Q2 0.005 // qd
 		#define R  0.0001
 		#define QF1 1000.0 // q
 		#define QF2 1000.0 // qd
  	#endif
-
 	// joint level cost func returns single val
 	template <typename T>
 	__host__ __device__ __forceinline__
@@ -28,14 +119,24 @@
 		if (k == NUM_TIME_STEPS - 1){
 			#pragma unroll
 	    	for (int i=0; i<STATE_SIZE; i++){T delta = xk[i]-xgk[i]; cost += (T) (i < NUM_POS ? QF1 : QF2)*delta*delta;}
+    		cost = 0.5*cost; // multiply by 1/2 all at once to save cycles
+    		#if USE_LIMITS_FLAG
+	    		#pragma unroll
+    			for (int i=0; i<STATE_SIZE; i++){cost += limitCosts<T,0>(xk,uk,i,k);}
+    		#endif
 	    }
 	    else{
 	    	#pragma unroll
 	        for (int i=0; i<STATE_SIZE; i++){T delta = xk[i]-xgk[i]; cost += (T) (i < NUM_POS ? Q1 : Q2)*delta*delta;}
 	    	#pragma unroll
 	        for (int i=0; i<CONTROL_SIZE; i++){cost += (T) R*uk[i]*uk[i];}
+        	cost = 0.5*cost; // multiply by 1/2 all at once to save cycles
+        	#if USE_LIMITS_FLAG
+	        	#pragma unroll
+    			for (int i=0; i<STATE_SIZE+CONTROL_SIZE; i++){T val = limitCosts<T,0>(xk,uk,i,k); printf("c: %d %f\n",i,val); cost += val;}
+    		#endif
 		}
-		return 0.5*cost;
+		return cost;
 	}
 
 	// joint level cost grad
@@ -58,6 +159,11 @@
 	      	for (int i=0; i<CONTROL_SIZE; i++){
 	         	gk[i+STATE_SIZE] = 0.0;
 	      	}
+	      	// add on any limit costs if needed
+		  	#if USE_LIMITS_FLAG
+		    	#pragma unroll
+    			for (int i=0; i<STATE_SIZE; i++){gk[i] += limitCosts<T,1>(xk,uk,i,k);}
+	  		#endif
 	   	}
 	   	else{
 	      	#pragma unroll
@@ -75,147 +181,32 @@
 	      	for (int i=0; i<CONTROL_SIZE; i++){
 	         	gk[i+STATE_SIZE] = R*uk[i];
 	      	}
+	      	#if USE_LIMITS_FLAG
+		    	#pragma unroll
+    			for (int i=0; i<STATE_SIZE+CONTROL_SIZE; i++){T val = limitCosts<T,1>(xk,uk,i,k); printf("g: %d %f\n",i,val); gk[i] += val;}//gk[i] += limitCosts<T,1>(xk,uk,i,k);}
+	  		#endif
 	   	}
 	}
 
 // else need to consider multiple scenarios for end effector costs
 #else
-	#if USE_WAFR_URDF
-		#define USE_SMOOTH_ABS 0
+	#ifndef Q_HAND1
+	 	#define USE_SMOOTH_ABS 0
 		#define SMOOTH_ABS_ALPHA 0.2
-		
-		#ifndef MPC_MODE
-			#if USE_SMOOTH_ABS
-				#define Q_HAND1 0.1		//2.0 // xyz
-				#define Q_HAND2 0.001		//2.0 // rpy
-				#define R_HAND 0.0001		//0.0001
-				#define QF_HAND1 1000000.0	//20000.0 // xyz
-				#define QF_HAND2 10000.0	//20000.0 // rpy
-				#define Q_xdHAND 0.1		//1.0//0.1
-				#define QF_xdHAND 10000.0	//10.0//100.0
-				#define Q_xHAND 0.0		//0.0//0.001//1.0
-				#define QF_xHAND 0.0		//0.0//1.0
-			#else
-				#define Q_HAND1 0.1		//1.0 // xyz
-				#define Q_HAND2 0//0.001		//1.0 // rpy
-				#define R_HAND 0.0001		//0.001
-				#define QF_HAND1 1000.0		//5000.0 // xyz
-				#define QF_HAND2 0//10.0		//5000.0 // rpy
-				#define Q_xdHAND 0.1		//1.0//0.1
-				#define QF_xdHAND 1000.0	//10.0//100.0
-				#define Q_xHAND 0.0		//0.0//0.001//1.0
-				#define QF_xHAND 0.0		//0.0//1.0
-			#endif
-		#else
-			#define Q_HAND1 0.1		//1.0 // xyz
-			#define Q_HAND2 0		//1.0 // rpy
-			#define R_HAND 0.0001		//0.001
-			#define QF_HAND1 1000.0		//5000.0 // xyz
-			#define QF_HAND2 0		//5000.0 // rpy
-			#define Q_xdHAND 0.1		//1.0//0.1
-			#define QF_xdHAND 10.0	//10.0//100.0
-			#define Q_xHAND 0.0		//0.0//0.001//1.0
-			#define QF_xHAND 0.0		//0.0//1.0
-		#endif
-	 	#define Q_HANDV1 0
+		#define Q_HAND1 0.1		 // xyz
+		#define Q_HAND2 0		 // rpy
+		#define R_HAND 0.0001
+		#define QF_HAND1 1000.0
+		#define QF_HAND2 0
+		#define Q_xdHAND 0.1
+		#define QF_xdHAND 1000.0
+		#define Q_xHAND 0.0
+		#define QF_xHAND 0.0
+		#define Q_HANDV1 0
 		#define Q_HANDV2 0
 		#define QF_HANDV1 0
 		#define QF_HANDV2 0
-	#else 
-	 	#define USE_SMOOTH_ABS 0
-	 	#define SMOOTH_ABS_ALPHA 0.2
-		#if USE_SMOOTH_ABS
-	 		// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
-			#define Q_HAND1 0.1
-			#define Q_HAND2 0
-			#define R_HAND 0.0001
-			#define QF_HAND1 1000.0
-			#define QF_HAND2 0
-			#define Q_xdHAND 1.0
-			#define QF_xdHAND 100.0
-			#define Q_xHAND 0.0
-			#define QF_xHAND 0.0
-		#else
-			#define Q_HAND1 10.0
-			#define Q_HAND2 0.0
-			#define R_HAND 0.0001
-			#define QF_HAND1 1000.0
-			#define QF_HAND2 0.0
-			#define Q_xdHAND 1.0
-			#define QF_xdHAND 10.0
-			#define Q_xHAND 0.0
-			#define QF_xHAND 0.0
-	 	#endif
-		#define Q_HANDV1 1.0
-		#define Q_HANDV2 0.0
-		#define QF_HANDV1 1.0
-		#define QF_HANDV2 0.0
-	#endif
-
-	// include vel and pos limits if desired
-	#if USE_LIMITS_FLAG
-		// Also define limits on torque, pos, velocity and Q/Rs for those
-		#define SAFETY_FACTOR_P 0.8
-		#define SAFETY_FACTOR_V 0.8
-		#define SAFETY_FACTOR_T 0.8
-		// From URDF
-		#define TORQUE_LIMIT (300.0 * SAFETY_FACTOR_T)
-		#define R_TL 0.1
-		#define POS_LIMIT_024 (2.96705972839 * SAFETY_FACTOR_P)
-		#define POS_LIMIT_135 (2.09439510239 * SAFETY_FACTOR_P)
-		#define POS_LIMIT_6   (3.05432619099 * SAFETY_FACTOR_P)
-		#define Q_PL 100.0
-		// From KukaSim
-		#define VEL_LIMIT_01  (1.483529 * SAFETY_FACTOR_V) // 85°/s in rad/s
-		#define VEL_LIMIT_2   (1.745329 * SAFETY_FACTOR_V) // 100°/s in rad/s
-		#define VEL_LIMIT_3   (1.308996 * SAFETY_FACTOR_V) // 75°/s in rad/s
-		#define VEL_LIMIT_4   (2.268928 * SAFETY_FACTOR_V) // 130°/s in rad/s
-		#define VEL_LIMIT_56  (2.356194 * SAFETY_FACTOR_V) // 135°/s in rad/s
-		#define Q_VL 100.0
-
-		template <typename T>
-		__host__ __device__ __forceinline__
-		T getPosLimit(int ind){return (T)(ind == 6 ? POS_LIMIT_6 : (ind % 2 ? POS_LIMIT_135 : POS_LIMIT_024));}
-
-		template <typename T>
-		__host__ __device__ __forceinline__
-		T getVelLimit(int ind){return (T)(ind > 4 ? VEL_LIMIT_56 : (ind == 4 ? VEL_LIMIT_4 : (ind == 3 ? VEL_LIMIT_3 : (ind == 2 ? VEL_LIMIT_2 : VEL_LIMIT_01))));}
-
-		template <typename T>
-		__host__ __device__ __forceinline__
-		T getTorqueLimit(int ind){return (T)TORQUE_LIMIT;}
-
-		template <typename T, int dLevel>
-		__host__ __device__ __forceinline__
-		T pieceWiseQuadratic(T val, T qStart){
-			T delta = abs(val) - qStart; 	bool flag = delta > 0;
-			#if dLevel == 0
-				if (flag) {return ((T)0.5)*delta*delta;}
-			#elif dLevel == 1
-				if (flag) {return sgn(val)*delta;}
-			#elif dLevel == 2
-				if (flag) {return (T)1.0;}
-			#else
-				#error "Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"
-			#endif
-			return (T)0.0;
-		}
-
-		template <typename T>
-		__host__ __device__ __forceinline__
-		void getLimitVars(T *s_x, T *s_u, T *qr, T *val, T *limit, int ind, int k){
-			if (ind < NUM_POS){	         *qr = Q_PL;		*val = s_x[ind];				*limit = getPosLimit<T>(ind);}
-			else if (ind < STATE_SIZE){  *qr = Q_VL;		*val = s_x[ind];				*limit = getVelLimit<T>(ind-NUM_POS);}
-			else{                        *qr = R_TL;		*val = s_u[ind-STATE_SIZE]; 	*limit = getTorqueLimit<T>(ind-STATE_SIZE);}
-		}
-
-		template <typename T, int dLevel>
-		__host__ __device__ __forceinline__
-		T limitCosts(T *s_x, T *s_u, int ind, int k){
-			T qr;	T val;	T limit;	getLimitVars(s_x,s_u,&qr,&val,&limit,ind,k);
-			return qr*pieceWiseQuadratic<T,dLevel>(val,limit);
-		}
-	#endif
+ 	#endif
 
 	template <typename T>
 	__host__ __device__ __forceinline__

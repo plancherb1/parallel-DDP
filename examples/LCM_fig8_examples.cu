@@ -1,8 +1,37 @@
 /***
 nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
-#define USE_WAFR_URDF 1
+#define USE_WAFR_URDF 0
 #define EE_COST 1
+#define USE_SMOOTH_ABS 0
+#define SMOOTH_ABS_ALPHA 0.2
+#if USE_SMOOTH_ABS
+	// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
+	#define Q_HAND1 0.1
+	#define Q_HAND2 0
+	#define R_HAND 0.0001
+	#define QF_HAND1 1000.0
+	#define QF_HAND2 0
+	#define Q_xdHAND 1.0
+	#define QF_xdHAND 100.0
+	#define Q_xHAND 0.0
+	#define QF_xHAND 0.0
+#else
+	#define Q_HAND1 10.0
+	#define Q_HAND2 0.0
+	#define R_HAND 0.0001
+	#define QF_HAND1 1000.0
+	#define QF_HAND2 0.0
+	#define Q_xdHAND 1.0
+	#define QF_xdHAND 100.0
+	#define Q_xHAND 0.0
+	#define QF_xHAND 0.0
+	#endif
+#define Q_HANDV1 0.0
+#define Q_HANDV2 0.0
+#define QF_HANDV1 0.0
+#define QF_HANDV2 0.0
+
 #define MPC_MODE 1
 #define USE_EE_VEL_COST 0
 #define USE_LCM 1

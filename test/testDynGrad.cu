@@ -4,7 +4,7 @@ nvcc -std=c++11 -o testDynGrad.exe testDynGrad.cu ../utils/cudaUtils.cu ../utils
 
 #define PLANT 4
 #define EE_COST 0
-#include "../DDPHelpers.cuh"
+#include "../config.cuh"
 #include <random>
 #define ERR_TOL 0.00001
 #define RANDOM_MEAN 0

@@ -407,6 +407,9 @@ class LCM_Simulator_Handler {
                 double eePos[NUM_POS]; compute_eePos_scratch<double>(currX, &eePos[0]);
                 printf("%f %f %f\n",eePos[0],eePos[1],eePos[2]); 
             }
+            else if (debug == 3){
+                printf("%f %f %f %f %f %f %f | %f %f %f %f %f %f %f\n",currX[0],currX[1],currX[2],currX[3],currX[4],currX[5],currX[6],currX[7],currX[8],currX[9],currX[10],currX[11],currX[12],currX[13]);
+            }
         }
 
         // publish currX
@@ -426,16 +429,19 @@ class LCM_Simulator_Handler {
             lcm_ptr.publish(ARM_STATUS_CHANNEL,&dataOut);
         }
 
-        // run the simulator for ellapsed time
+        // run the simulator for dt
         void runSim(){
+            simulate(dt);
             double simTime;
             while(1){
                 gettimeofday(&end,NULL);
                 simTime = time_delta_s(start,end);
-                if (simTime >= dt){break;}
+                if (simTime >= dt){
+                    gettimeofday(&start,NULL);
+                    publish();
+                    break;
+                }
             } 
-            gettimeofday(&start,NULL);
-            simulate(simTime);          publish();
         }
 };
 
