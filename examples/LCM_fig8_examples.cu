@@ -32,6 +32,11 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define QF_HANDV1 0.0
 #define QF_HANDV2 0.0
 
+#define USE_LIMITS_FLAG 1
+#define R_TL 0.0
+#define Q_PL 0.0
+#define Q_VL 0.0
+
 #define MPC_MODE 1
 #define USE_EE_VEL_COST 0
 #define USE_LCM 1
@@ -39,6 +44,7 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
 #define PLANT 4
+#define PI 3.14159
 #include "../config.cuh"
 #include <random>
 #include <vector>
@@ -86,12 +92,19 @@ void keyboardHold(){
 }
 template <typename T>
 __host__ __forceinline__
+void loadX(T *xk){
+	xk[0] = PI/2.0; 	xk[1] = -PI/6.0; 	xk[2] = -PI/3.0; 	xk[3] = -PI/2.0; 	xk[4] = 3.0*PI/4.0; 	xk[5] = -PI/4.0; 	xk[6] = 0.0;
+	for(int i = NUM_POS; i < STATE_SIZE; i++){xk[i] = 0.0;}
+}
+template <typename T>
+__host__ __forceinline__
 void loadTraj(trajVars<T> *tvars, matDimms *dimms){
 	T *xk = tvars->x;	T *uk = tvars->u;
 	for (int k=0; k<NUM_TIME_STEPS; k++){
 		for (int i = 0; i < STATE_SIZE; i++){
-			xk[i] = 0.0;	if (i < CONTROL_SIZE){uk[i] = 0.01;}
+			xk[i] = 0.0;	if (i < CONTROL_SIZE){uk[i] = 0.001;}
 		}
+		// loadX(xk);
 		xk += (dimms->ld_x);	uk += (dimms->ld_u);
 	}
 	memset(tvars->KT, 0, (dimms->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
@@ -269,6 +282,7 @@ int main(int argc, char *argv[])
 	// run the simulator
 	else if (hardware == 'S'){
 		double xInit[STATE_SIZE] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+		xInit[0] = PI/2.0; 	xInit[1] = -PI/6.0; 	xInit[2] = -PI/3.0; 	xInit[3] = -PI/2.0; 	xInit[4] = 3.0*PI/4.0; 	xInit[5] = -PI/4.0; 	xInit[6] = 0.0;
 		runLCMSimulator(xInit);
 	}
 	// various printers
