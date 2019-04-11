@@ -5,13 +5,14 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 #define PLANT 4
 #define EE_COST 0
 #define MPC_MODE 1
-#define USE_WAFR_URDF 0
+#define USE_WAFR_URDF 1
 #define USE_EE_VEL_COST 1
 #define USE_LIMITS_FLAG 1
 #include "../config.cuh"
 #include <random>
 #define NUM_REPS 1
-#define TEST_FINITE_DIFF_EPSILON 0.01
+#define TEST_FINITE_DIFF_EPSILON 0.00001
+#define COST_TIME_STEP (NUM_TIME_STEPS - 1)
 #define ERR_TOL 5 // in percent
 #define RANDOM_MEAN 0
 #define RANDOM_STDEVq 2
@@ -279,11 +280,11 @@ void finiteDiffCost(T *x, T *u, T *goal, T *grad){
 			compute_eeVel_scratch<T>(s_x, 			   eePos, 	  eeVel);
 			compute_eeVel_scratch<T>(&s_x[STATE_SIZE], &eePos[6], &eeVel[6]);
 			// then compute costs
-			cost = costFunc(  eePos,    goal,  s_x, 			   s_u, 			  0, eeVel);
-			cost2 = costFunc(&eePos[6], goal, &s_x[STATE_SIZE], &s_u[CONTROL_SIZE], 0, &eeVel[6]);
+			cost = costFunc(  eePos,    goal,  s_x, 			   s_u, 			COST_TIME_STEP, eeVel);
+			cost2 = costFunc(&eePos[6], goal, &s_x[STATE_SIZE], &s_u[CONTROL_SIZE], COST_TIME_STEP, &eeVel[6]);
 		#else
-			cost = costFunc(  s_x, 				s_u, 			   goal, 0);
-			cost2 = costFunc(&s_x[STATE_SIZE], &s_u[CONTROL_SIZE], goal, 0);
+			cost = costFunc(  s_x, 				s_u, 			   goal, COST_TIME_STEP);
+			cost2 = costFunc(&s_x[STATE_SIZE], &s_u[CONTROL_SIZE], goal, COST_TIME_STEP);
 		#endif
 		// now do finite diff rule
 		grad[diff_ind] = (cost - cost2) / (2.0*TEST_FINITE_DIFF_EPSILON);
@@ -301,9 +302,9 @@ void analyticalCost(T *x, T *u, T *goal, T *grad){
 		compute_eeVel_scratch<T>(x,s_eePos,s_eeVel);	
 		analyticalPos<T>(x,s_deePos);	analyticalVel<T>(x,s_deeVel,12);
 		T *JT = nullptr;
-		costGrad<T>(Hk,grad,s_eePos,s_deePos,goal,x,u,0,ld_H,JT,-1,s_eeVel,s_deeVel);
+		costGrad<T>(Hk,grad,s_eePos,s_deePos,goal,x,u,COST_TIME_STEP,ld_H,JT,-1,s_eeVel,s_deeVel);
 	#else
-		costGrad(Hk,grad,x,u,goal,0,ld_H);
+		costGrad(Hk,grad,x,u,goal,COST_TIME_STEP,ld_H);
 	#endif
 }
 
@@ -519,13 +520,10 @@ void testCost(){
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
-		printf("hi doing rep\n");
 		// relod and clear
 		loadAndClearPos<T>(x,grad,grad2,STATE_SIZE+CONTROL_SIZE,u,goal);
 		// compute
-		printf("analytical cost\n");
 		analyticalCost<T>(x,u,goal,grad);
-		printf("finite diff cost\n");
 		finiteDiffCost<T>(x,u,goal,grad2);
 		// compare
 		#pragma unroll

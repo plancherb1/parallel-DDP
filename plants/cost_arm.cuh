@@ -10,18 +10,20 @@
 #define SAFETY_FACTOR_T 0.8
 // From URDF
 #define TORQUE_LIMIT 50//(300.0 * SAFETY_FACTOR_T)
-#define R_TL 100.0//0.1
 #define POS_LIMIT_024 (2.96705972839 * SAFETY_FACTOR_P)
 #define POS_LIMIT_135 (2.09439510239 * SAFETY_FACTOR_P)
 #define POS_LIMIT_6   (3.05432619099 * SAFETY_FACTOR_P)
-#define Q_PL 0.0//100.0
 // From KukaSim
 #define VEL_LIMIT_01  (1.483529 * SAFETY_FACTOR_V) // 85°/s in rad/s
 #define VEL_LIMIT_2   (1.745329 * SAFETY_FACTOR_V) // 100°/s in rad/s
 #define VEL_LIMIT_3   (1.308996 * SAFETY_FACTOR_V) // 75°/s in rad/s
 #define VEL_LIMIT_4   (2.268928 * SAFETY_FACTOR_V) // 130°/s in rad/s
 #define VEL_LIMIT_56  (2.356194 * SAFETY_FACTOR_V) // 135°/s in rad/s
-#define Q_VL 0.0//100.0
+#ifndef R_TL
+	#define R_TL 100.0
+	#define Q_PL 100.0
+	#define Q_VL 100.0
+#endif
 
 // include vel and pos limits if desired
 #if USE_LIMITS_FLAG
@@ -41,29 +43,19 @@
 	__host__ __device__ __forceinline__
 	T pieceWiseQuadratic(T val, T qStart){
 		T delta = abs(val) - qStart; 	bool flag = delta > 0;
-		// if inside use linear regime else quadratic regime
+		// if inside use linear regime
 		if(flag){
-			#if dLevel == 0
-				return static_cast<T>(qStart + delta);
-			#elif dLevel == 1
-				return static_cast<T>(sgn(val));
-			#elif dLevel == 2
-				return static_cast<T>(0.0);
-			#else
-				#error "Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"
-			#endif
+			if      (dLevel == 0){return static_cast<T>(abs(val));}
+			else if (dLevel == 1){return static_cast<T>((val < 0 ? -1 : 1));}
+			else if (dLevel == 2){return static_cast<T>(0);}
+			else{printf("Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"); return 0;}
 		}
-		// 
+		// else quadratic regime
 		else{
-			#if dLevel == 0
-				return static_cast<T>(qStart + 0.5*delta*delta);
-			#elif dLevel == 1
-				return 0.0;//static_cast<T>(sgn(val)*delta);
-			#elif dLevel == 2
-				return static_cast<T>(1);
-			#else
-				#error "Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"
-			#endif
+			if      (dLevel == 0){return static_cast<T>(qStart + 0.5*delta*delta);}
+			else if (dLevel == 1){return static_cast<T>((val < 0 ? -delta : delta));}
+			else if (dLevel == 2){return static_cast<T>(1);}
+			else{printf("Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"); return 0;}
 		}
 	}
 
@@ -73,15 +65,10 @@
 		T delta = abs(val) - absMax;
 		if(delta < 0){return 0;}
 		else{
-			#if dLevel == 0
-				return static_cast<T>(0.5*delta*delta);
-			#elif dLevel == 1
-				return 0.0;//static_cast<T>(sgn(val)*delta);
-			#elif dLevel == 2
-				return static_cast<T>(1);
-			#else
-				#error "Derivative of pieceWiseQuadratic is not implemented beyond level 2\n"
-			#endif
+			if      (dLevel == 0){return static_cast<T>(0.5*delta*delta);}
+			else if (dLevel == 1){return static_cast<T>((val < 0 ? -delta : delta));}
+			else if (dLevel == 2){return static_cast<T>(1);}
+			else{printf("Derivative of quadPen is not implemented beyond level 2\n"); return 0;}
 		}
 	}
 
@@ -106,7 +93,7 @@
 #if !EE_COST
  	#ifndef Q1
 	 	#define Q1 0.1 // q
-		#define Q2 0.005 // qd
+		#define Q2 0.001 // qd
 		#define R  0.0001
 		#define QF1 1000.0 // q
 		#define QF2 1000.0 // qd
@@ -133,7 +120,7 @@
         	cost = 0.5*cost; // multiply by 1/2 all at once to save cycles
         	#if USE_LIMITS_FLAG
 	        	#pragma unroll
-    			for (int i=0; i<STATE_SIZE+CONTROL_SIZE; i++){T val = limitCosts<T,0>(xk,uk,i,k); printf("c: %d %f\n",i,val); cost += val;}
+    			for (int i=0; i<STATE_SIZE+CONTROL_SIZE; i++){cost += limitCosts<T,0>(xk,uk,i,k);}
     		#endif
 		}
 		return cost;
@@ -183,7 +170,7 @@
 	      	}
 	      	#if USE_LIMITS_FLAG
 		    	#pragma unroll
-    			for (int i=0; i<STATE_SIZE+CONTROL_SIZE; i++){T val = limitCosts<T,1>(xk,uk,i,k); printf("g: %d %f\n",i,val); gk[i] += val;}//gk[i] += limitCosts<T,1>(xk,uk,i,k);}
+    			for (int i=0; i<STATE_SIZE+CONTROL_SIZE; i++){gk[i] += limitCosts<T,1>(xk,uk,i,k);}
 	  		#endif
 	   	}
 	}
