@@ -10,8 +10,8 @@ nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.
 #define QF2 1000.0 // qd
 
 #define USE_LIMITS_FLAG 1
-#define R_TL 100000.0
-#define Q_PL 100000.0
+#define R_TL 100.0
+#define Q_PL 100.0
 #define Q_VL 100.0
 
 #define MPC_MODE 1
@@ -74,11 +74,10 @@ __host__ __forceinline__
 void loadTraj(T *x, T *u, T *KT, int ld_x, int ld_u, int ld_KT){
 	T *xk = &x[0];	T *uk = &u[0];
 	for (int k=0; k<NUM_TIME_STEPS; k++){
-		loadX<T>(xk);	for(int i = 0; i < CONTROL_SIZE; i++){uk[i] = 0.0;}	xk += ld_x;	uk += ld_u;
+		loadX<T>(xk);	for(int i = 0; i < CONTROL_SIZE; i++){uk[i] = 0.001;}	xk += ld_x;	uk += ld_u;
 	}
 	memset(KT, 0, ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
 }
-
 template <typename T>
 class LCM_PickAndPlaceGoal_Handler {
     public:
