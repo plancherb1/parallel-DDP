@@ -9,6 +9,11 @@ nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.
 #define QF1 1000.0 // q
 #define QF2 1000.0 // qd
 
+#define USE_LIMITS_FLAG 1
+#define R_TL 100000.0
+#define Q_PL 100000.0
+#define Q_VL 100.0
+
 #define MPC_MODE 1
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
