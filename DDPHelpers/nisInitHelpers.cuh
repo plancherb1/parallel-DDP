@@ -95,7 +95,7 @@ void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *x
 		T s_T[36*NUM_POS];			T s_T_dx[36*NUM_POS];
 		T s_eePos[6];				T s_deePos[6*NUM_POS];
 		#if USE_EE_VEL_COST
-			T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
+			T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[36*NUM_POS];
 			T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
 			T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
 		#endif

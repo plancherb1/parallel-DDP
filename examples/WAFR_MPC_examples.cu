@@ -33,7 +33,7 @@ nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu ../utils/cudaUtils.cu ../utils/t
 #define QF_HANDV2 0
 
 #define MPC_MODE 1
-#define USE_EE_VEL_COST 1
+#define USE_EE_VEL_COST 0
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
 #define PLANT 4
@@ -213,25 +213,9 @@ int loadFig8Goal(T *goal, double time, double totalTime){
 	int numGoals = 200; 	double tstep = totalTime/(numGoals-1);	double goalNum = time/tstep;
 	double fraction = goalNum - std::floor(goalNum);				int rep = static_cast<int>(std::floor(goalNum)) / numGoals;
 	int rd = static_cast<int>(std::floor(goalNum)) % numGoals;		int ru = static_cast<int>(std::ceil(goalNum)) % numGoals;
-	goal[0] = (1-fraction)*xGoals[rd] + fraction*xGoals[ru];
-	goal[1] = (1-fraction)*yGoals[rd] + fraction*yGoals[ru];
-	goal[2] = (1-fraction)*zGoals[rd] + fraction*zGoals[ru];
-	return rep;
-}
-template <typename T>
-__host__ __forceinline__
-int loadFig8Goal(CPUVars<T> *algvars, double time, double totalTime){
-	T goal[3];		int rep = loadFig8Goal(&goal[0],time,totalTime);
-	algvars->xGoal[0] = goal[0];	algvars->xGoal[1] = goal[1];	algvars->xGoal[2] = goal[2];
-	algvars->xGoal[3] = 0;			algvars->xGoal[4] = 0;			algvars->xGoal[5] = 0;
-	return rep;
-}
-template <typename T>
-__host__ __forceinline__
-int loadFig8Goal(GPUVars<T> *algvars, double time, double totalTime){
-	T goal[3];		int rep = loadFig8Goal(&goal[0],time,totalTime);
-	algvars->xGoal[0] = goal[0];	algvars->xGoal[1] = goal[1];	algvars->xGoal[2] = goal[2];
-	algvars->xGoal[3] = 0;			algvars->xGoal[4] = 0;			algvars->xGoal[5] = 0;
+	goal[0] = (1-fraction)*xGoals[rd] + fraction*xGoals[ru];		goal[3] = 0.0;
+	goal[1] = (1-fraction)*yGoals[rd] + fraction*yGoals[ru];		goal[4] = 0.0;
+	goal[2] = (1-fraction)*zGoals[rd] + fraction*zGoals[ru];		goal[5] = 0.0;
 	return rep;
 }	
 template <typename T>
@@ -277,7 +261,43 @@ T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goa
 }
 template <typename T>
 __host__
-void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, char hardware, int doFig8){
+int fig8Simulate(T *xActual, T *xGoal, trajVars<T> *tvars, T *error, double *goalTime, double *timePrint, int *counter, int *initial_convergence_flag,
+	              double elapsedTime_us, double totalTime_us, T eNormLim, T vNormLim, int ld_x, int doFig8, int debugMode = 1){
+	tvars->t0_plant = 0; 	int tActual_plant = static_cast<int>(std::floor(elapsedTime_us));
+	tvars->t0_sys = 0; 		int tActual_sys = static_cast<int>(std::floor(elapsedTime_us));
+	*error += simulateForward<T,150>(tvars,xActual,elapsedTime_us,(*goalTime),totalTime_us);
+	// print where are we ending up and expected
+	if(debugMode == 2){
+		int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
+		printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",*counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
+		printMat<T,1,STATE_SIZE>(xActual,1);
+		printf(" With expected:\n");
+		printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*ld_x,1);
+	}
+	// print the state we sim to
+	if (debugMode == 3){
+		printf("%f,%f,%f,%f,%f,%f,%f,%f\n",*timePrint,xActual[0],xActual[1],xActual[2],xActual[3],xActual[4],xActual[5],xActual[6]);
+		*timePrint += elapsedTime_us;
+	}
+	// compute eePos error if computing Fig 8 or debugMode 1
+	if(doFig8 || debugMode == 1){
+		T eePos[NUM_POS];   compute_eePos_scratch<T>(&(xActual[0]), &eePos[0]);
+		T eNorm = 0; 		T vNorm = 0; 		evNorm<T>(xActual, xGoal, &eNorm, &vNorm);
+		// debug print eePos if needed
+		if (debugMode == 1){printf("[[%f,%f,%f],[%f,%f,%f],%f,%f,%f],\n",eePos[0],eePos[1],eePos[2],xGoal[0],xGoal[1],xGoal[2],eNorm,(*error)/(*counter),vNorm);}
+		// update goals if doing figure 8
+		if (doFig8){
+			// if in figure 8 increment goalTime and see if we are ready to exit
+			if(*initial_convergence_flag){*goalTime += elapsedTime_us;	if(loadFig8Goal<T>(xGoal,*goalTime,totalTime_us) > 1){return 1;}}
+			// else see if we are ready to start the figure 8
+			else if(eNorm < eNormLim && vNorm < vNormLim){*initial_convergence_flag = 1; *error = 0; *counter = 0;}
+		}
+	}
+	return 0;
+}
+template <typename T>
+__host__
+void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, char hardware, int doFig8, int debugMode = 0){
 	// define the requirements for "conversion" to the first goal
 	T eNormLim = 0.05;	 T vNormLim = 0.05;	
 	// define local variables
@@ -287,14 +307,14 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 	// get the max iters per solve
 	int timeLimit = getTimeBudget(1000, 1); //note in ms
 	// get the total time for the trajectory
-	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));	//double timePrint = 0;
+	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1)); double timePrint = 0;
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
 	if (hardware == 'G'){
 		GPUVars<T> *algvars = new GPUVars<T>;
 		allocateMemory_GPU_MPC<T>(algvars, dimms, tvars);
 		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(algvars,goalTime,totalTime_us);
+		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
 		for (int i = 0; i < NUM_ALPHA; i++){
 			gpuErrchk(cudaMemcpy(algvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
 			gpuErrchk(cudaMemcpy(algvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
@@ -312,12 +332,12 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 			tvars->t0_plant = 0; 	tActual_plant = static_cast<int>(std::floor(elapsedTime_us));
 			tvars->t0_sys = 0; 		tActual_sys = static_cast<int>(std::floor(elapsedTime_us));
       		error += simulateForward<T,150>(tvars,algvars->xActual,elapsedTime_us,goalTime,totalTime_us);
-			// print where are we ending up and eePos
-				int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
-				printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
-				printMat<T,1,STATE_SIZE>(algvars->xActual,1);
-				printf(" With expected:\n");
-				printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*(dimms->ld_x),1);
+			// print where are we ending up and expected
+				// int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
+				// printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
+				// printMat<T,1,STATE_SIZE>(algvars->xActual,1);
+				// printf(" With expected:\n");
+				// printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*(dimms->ld_x),1);
       		// print the state we sim to
 				// T *xk = &(algvars->xActual[0]);
 				// printf("%f,%f,%f,%f,%f,%f,%f,%f\n",timePrint,xk[0],xk[1],xk[2],xk[3],xk[4],xk[5],xk[6]);
@@ -327,14 +347,39 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 				evNorm(algvars->xActual, algvars->xGoal, &eNorm, &vNorm);
 				printf("[[%f,%f,%f],[%f,%f,%f],%f,%f,%f],\n",eePos[0],eePos[1],eePos[2],algvars->xGoal[0],algvars->xGoal[1],algvars->xGoal[2],eNorm,error/counter,vNorm);
    			if (initial_convergence_flag){goalTime += elapsedTime_us;}
-   			if(loadFig8Goal<T>(algvars,goalTime,totalTime_us) > 1){break;};
+   			if(loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us) > 1){break;};
    			if (doFig8 && eNorm < eNormLim && vNorm < vNormLim){initial_convergence_flag = 1; error = 0; counter = 0;}
 		}
 		printf("\n\nAverage tracking error: [%f]\n",(error/counter));
 		printAllTimingStats(data);
 		freeMemory_GPU_MPC<T>(algvars);	delete algvars;
 	}
-	else{printf("CPU currently not implemented.\n");}
+	else{
+		CPUVars<T> *algvars = new CPUVars<T>;
+		allocateMemory_CPU_MPC<T>(algvars, dimms, tvars);
+		// load in inital trajectory and goal
+		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
+		for (int i = 0; i < NUM_ALPHA; i++){
+			memcpy(algvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
+			memcpy(algvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
+		}
+		memcpy(algvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
+		// note run to conversion with no time or iter limits
+		runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);
+		// then start a loop of run a couple steps simulate for X steps and repeat
+		while(1){
+			counter++;
+			gettimeofday(&start,NULL);
+			runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
+			gettimeofday(&end,NULL);
+			double elapsedTime_us = TIME_STEP*1000000;// time_delta_us(start,end); // TIME_STEP*1000000;//
+			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
+							elapsedTime_us,totalTime_us,eNormLim,vNormLim,dimms->ld_x,doFig8)){break;}
+		}
+		printf("\n\nAverage tracking error: [%f]\n",(error/counter));
+		printAllTimingStats(data);
+		freeMemory_CPU_MPC<T>(algvars);	delete algvars;
+	}
 }
 int main(int argc, char *argv[])
 {

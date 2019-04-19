@@ -76,7 +76,7 @@ typedef float algType;
 #endif
 
 // parallelization options
-#define M 4
+#define M 1
 #define M_B M // how many time steps to do in parallel on back pass
 #define M_F M // how many multiple shooting intervals to use in the forward pass
 #define N_B (NUM_TIME_STEPS/M_B)

@@ -264,11 +264,20 @@ class LCM_IIWA_STATUS_printer {
             //     msg->joint_velocity_estimated[0],msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],
             //     msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],msg->joint_velocity_estimated[5],
             //     msg->joint_velocity_estimated[6]);
-            printf("%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+            // printf("%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+            //     msg->joint_position_measured[0],msg->joint_position_measured[1],msg->joint_position_measured[2],msg->joint_position_measured[3],
+            //     msg->joint_position_measured[4],msg->joint_position_measured[5],msg->joint_position_measured[6],msg->joint_velocity_estimated[0],
+            //     msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],
+            //     msg->joint_velocity_estimated[5],msg->joint_velocity_estimated[6]);
+            printf("%ld | %f %f %f %f %f %f %f | %f %f %f %f %f %f %f | %f %f %f %f %f %f %f | %f %f %f %f %f %f %f\n",msg->utime,
                 msg->joint_position_measured[0],msg->joint_position_measured[1],msg->joint_position_measured[2],msg->joint_position_measured[3],
-                msg->joint_position_measured[4],msg->joint_position_measured[5],msg->joint_position_measured[6],msg->joint_velocity_estimated[0],
-                msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],msg->joint_velocity_estimated[3],msg->joint_velocity_estimated[4],
-                msg->joint_velocity_estimated[5],msg->joint_velocity_estimated[6]);
+                msg->joint_position_measured[4],msg->joint_position_measured[5],msg->joint_position_measured[6],
+                msg->joint_velocity_estimated[0],msg->joint_velocity_estimated[1],msg->joint_velocity_estimated[2],msg->joint_velocity_estimated[3],
+                msg->joint_velocity_estimated[4],msg->joint_velocity_estimated[5],msg->joint_velocity_estimated[6],
+                msg->joint_torque_commanded[0],msg->joint_torque_commanded[1],msg->joint_torque_commanded[2],msg->joint_torque_commanded[3],
+                msg->joint_torque_commanded[4],msg->joint_torque_commanded[5],msg->joint_torque_commanded[6],
+                msg->joint_torque_measured[0],msg->joint_torque_measured[1],msg->joint_torque_measured[2],msg->joint_torque_measured[3],
+                msg->joint_torque_measured[4],msg->joint_torque_measured[5],msg->joint_torque_measured[6]);
         }
 };
 
