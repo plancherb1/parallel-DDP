@@ -20,4 +20,8 @@ This repository holds the code supporting "[A Performance Analysis of Differenti
 * Small float rounding differences need to be investigated further (probably benign)
 * GPU RBDYN for Kuka only works in Euler mode -- need to introduce loops and reduce shared memory for Midpoint and RK3 (or use a brand new GPU which has double the shared memory)
 * LCM infrastructure for multi-computer / hardware MPC only partially developed (and currenlty commented out)
-* Need to catch up the CPU MPC to GPU MPC implementation
+* Need to catch up the CPU MPC for multi-threaded line search
+
+### Instalation Tips for CUDA
+https://askubuntu.com/questions/1077061/how-do-i-install-nvidia-and-cuda-drivers-into-ubuntu
+https://www.tensorflow.org/install/gpu
