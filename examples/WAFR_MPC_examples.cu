@@ -17,15 +17,24 @@ nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu ../utils/cudaUtils.cu ../utils/t
 	#define Q_xHAND 0.0		//0.0//0.001//1.0
 	#define QF_xHAND 0.0		//0.0//1.0
 #else
-	#define Q_HAND1 0.1		//1.0 // xyz
-	#define Q_HAND2 0//0.001		//1.0 // rpy
-	#define R_HAND 0.0001		//0.001
-	#define QF_HAND1 1000.0		//5000.0 // xyz
-	#define QF_HAND2 0//10.0		//5000.0 // rpy
-	#define Q_xdHAND 0.1		//1.0//0.1
-	#define QF_xdHAND 1000.0	//10.0//100.0
-	#define Q_xHAND 0.0		//0.0//0.001//1.0
-	#define QF_xHAND 0.0		//0.0//1.0
+	// #define Q_HAND1 0.1		//1.0 // xyz
+	// #define Q_HAND2 0//0.001		//1.0 // rpy
+	// #define R_HAND 0.0001		//0.001
+	// #define QF_HAND1 1000.0		//5000.0 // xyz
+	// #define QF_HAND2 0//10.0		//5000.0 // rpy
+	// #define Q_xdHAND 0.1		//1.0//0.1
+	// #define QF_xdHAND 1000.0	//10.0//100.0
+	// #define Q_xHAND 0.0		//0.0//0.001//1.0
+	// #define QF_xHAND 0.0		//0.0//1.0
+	#define Q_HAND1 10.0
+	#define Q_HAND2 0
+	#define R_HAND 0.01
+	#define QF_HAND1 50.0
+	#define QF_HAND2 0
+	#define Q_xdHAND 1.0
+	#define QF_xdHAND 5.0
+	#define Q_xHAND 0.0
+	#define QF_xHAND 0.0
 #endif
 #define Q_HANDV1 0
 #define Q_HANDV2 0
@@ -266,7 +275,7 @@ int fig8Simulate(T *xActual, T *xGoal, trajVars<T> *tvars, T *error, double *goa
 	tvars->t0_sys = 0; 		int tActual_sys = static_cast<int>(std::floor(elapsedTime_us));
 	*error += simulateForward<T,150>(tvars,xActual,elapsedTime_us,(*goalTime),totalTime_us);
 	// print where are we ending up and expected
-	if(debugMode == 2){
+	if(debugMode == 2 || 1){
 		int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
 		printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",*counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
 		printMat<T,1,STATE_SIZE>(xActual,1);
