@@ -75,7 +75,7 @@
         T *xGoal;   T *xActual;
         std::thread *threads;
         std::mutex *lock;
-        T *xs;      T *us;  T *ds;  T *JTs;
+        T **xs;     T **us; T **ds; T **JTs;
     };
 
     template <typename T>
@@ -563,7 +563,7 @@
     __host__ __forceinline__
     void loadVarsGPU_MPC(T *x_old, T *u_old, T *KT_old, T **h_d_x, T *d_xp, T **h_d_u, T *d_up, T **h_d_d, T *d_KT, T *d_xGoal, T *xGoal, T *d_xActual, T *xActual,
                          T *d_P, T *d_Pp, T *d_p, T *d_pp, T *d_du, T *d_AB, T *d_H, T *d_dT, int *d_err, int *alphaIndex, T dt, cudaStream_t *streams, dim3 dynDimms,
-                         int shiftAmount, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
+                         int shiftAmount, int last_successful_solve, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
                          T *d_I = nullptr, T *d_Tbody = nullptr){
         // note since we assume that we will reach the desired states to start later blocks the
         // control will remain the same as will the states outside of the first block
@@ -573,13 +573,23 @@
         gpuErrchk(cudaMemcpyAsync(d_xGoal, xGoal, goalSize*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
         gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice, streams[1]));
         shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[2]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
-        shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
         shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[4]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
-        shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[5]>>>(d_KT,shiftAmount,ld_KT);
-        shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_P,shiftAmount,ld_P);
-        shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[7]>>>(d_p,shiftAmount,ld_p);
-        shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_Pp,shiftAmount,ld_P);
-        shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[7]>>>(d_pp,shiftAmount,ld_p);     
+        if (last_successful_solve <= 10){
+            shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
+            shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[5]>>>(d_KT,shiftAmount,ld_KT);
+            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_P,shiftAmount,ld_P);
+            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[7]>>>(d_p,shiftAmount,ld_p);
+            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_Pp,shiftAmount,ld_P);
+            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[7]>>>(d_pp,shiftAmount,ld_p);     
+        }
+        else{
+            gpuErrchk(cudaMemsetAsync(h_d_u[*alphaIndex],0,ld_u*NUM_TIME_STEPS*sizeof(T),streams[3]));
+            gpuErrchk(cudaMemsetAsync(d_KT,0,ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T),streams[5]));
+            gpuErrchk(cudaMemsetAsync(d_P,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[6]));
+            gpuErrchk(cudaMemsetAsync(d_p,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[7]));
+            gpuErrchk(cudaMemsetAsync(d_Pp,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[6]));
+            gpuErrchk(cudaMemsetAsync(d_pp,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[7]));
+        }
         gpuErrchk(cudaMemsetAsync(d_du,0,ld_du*NUM_TIME_STEPS*sizeof(T),streams[8]));
         gpuErrchk(cudaMemsetAsync(d_err,0,M_B*sizeof(int),streams[9]));
         gpuErrchk(cudaMemsetAsync(d_dT,0,NUM_ALPHA*sizeof(T),streams[10]));
@@ -608,30 +618,45 @@
     __host__ __forceinline__
     void loadVarsCPU_MPC(T *x_old, T *u_old, T *KT_old, T *x, T *xp, T *u, T *up, T *d, T *KT, T *xGoal, T *xActual, T *P, T *Pp, 
                          T *p, T *pp, T *du, T *AB, int *err, int *alphaIndex, T dt, std::thread *threads, int shiftAmount, 
-                         int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
+                         int last_successful_solve, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
                          T *I = nullptr, T *Tbody = nullptr){
         // note since we assume that we will reach the desired states to start later blocks the
         // control will remain the same as will the states outside of the first block
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
         // note in <x/u/d>, P, p, KT are all of the ones from the last run
+        // as always clear the things we can clear and shiftcopy P,p
         threads[0] = std::thread(&shiftAndCopy<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS>, std::ref(x), shiftAmount, ld_x, std::ref(xp));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
-        threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c,NUM_TIME_STEPS-1>, std::ref(u), shiftAmount, ld_u, std::ref(up));
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
         threads[2] = std::thread(&shiftAndCopy<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS>, std::ref(d), shiftAmount, ld_d, nullptr);
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
-        threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1>, std::ref(KT), shiftAmount, ld_KT, nullptr);
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}
-        
-        // as always clear the things we can clear and shiftcopy P,p
-        threads[4] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(P), shiftAmount, ld_P, nullptr);
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 4);}
-        threads[5] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(p), shiftAmount, ld_p, nullptr);
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 5);}
-        threads[6] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(Pp), shiftAmount, ld_P, nullptr);
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 6);}
-        threads[7] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(pp), shiftAmount, ld_p, nullptr);
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 7);}
+        if (last_successful_solve <= 10){
+            threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c,NUM_TIME_STEPS-1>, std::ref(u), shiftAmount, ld_u, std::ref(up));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
+            threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1>, std::ref(KT), shiftAmount, ld_KT, nullptr);
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}    
+            threads[4] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(P), shiftAmount, ld_P, nullptr);
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 4);}
+            threads[5] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(p), shiftAmount, ld_p, nullptr);
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 5);}
+            threads[6] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(Pp), shiftAmount, ld_P, nullptr);
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 6);}
+            threads[7] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(pp), shiftAmount, ld_p, nullptr);
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 7);}
+        }
+        else{
+            threads[1] = std::thread(memset, std::ref(u), 0, ld_u*NUM_TIME_STEPS*sizeof(T));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
+            threads[3] = std::thread(memset, std::ref(KT), 0, ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}
+            threads[4] = std::thread(memset, std::ref(P), 0, ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 4);}
+            threads[5] = std::thread(memset, std::ref(p), 0, ld_p*NUM_TIME_STEPS*sizeof(T));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 5);}
+            threads[6] = std::thread(memset, std::ref(Pp), 0, ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 6);}
+            threads[7] = std::thread(memset, std::ref(pp), 0, ld_p*NUM_TIME_STEPS*sizeof(T));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 7);}
+        }
         threads[8] = std::thread(memset, std::ref(du), 0, ld_du*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 8);}
         threads[9] = std::thread(memset, std::ref(err), 0, BP_THREADS*sizeof(int));
@@ -781,7 +806,7 @@
             // load and clear variables as requested and init the alg
             loadVarsGPU_MPC<T>(gv->d_x_old,gv->d_u_old,gv->d_KT_old,gv->h_d_x, gv->d_xp, gv->h_d_u, gv->d_up, gv->h_d_d, gv->d_KT, gv->d_xGoal, gv->xGoal, gv->d_xActual, gv->xActual,
                                gv->d_P, gv->d_Pp, gv->d_p, gv->d_pp, gv->d_du, gv->d_AB, gv->d_H, gv->d_dT, gv->d_err, gv->alphaIndex,(T)TIME_STEP, gv->streams, dynDimms,
-                               shiftAmount, md->ld_x, md->ld_u, md->ld_d, md->ld_KT, md->ld_P, md->ld_p, md->ld_du, md->ld_AB,
+                               shiftAmount, tv->last_successful_solve, md->ld_x, md->ld_u, md->ld_d, md->ld_KT, md->ld_P, md->ld_p, md->ld_du, md->ld_AB,
                                gv->d_I, gv->d_Tbody);
             gettimeofday(&end2,NULL);
             (data->initTime).push_back(time_delta_ms(start2,end2));
@@ -909,7 +934,7 @@
             
             // load in vars and init the alg
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
-                               cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,
+                               cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
                                md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody);
             gettimeofday(&end2,NULL);
             (data->initTime).push_back(time_delta_ms(start2,end2));
@@ -1017,14 +1042,14 @@
             
             // load in vars and init the alg
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
-                               cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,
+                               cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
                                md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody);
             gettimeofday(&end2,NULL);
             (data->initTime).push_back(time_delta_ms(start2,end2));
 
             // do initial "next iteration setup"
             gettimeofday(&start2,NULL);
-            initAlgCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,(cv->JTs)[0],Jout,&prevJ,cv->alphas,alphaOut,
+            initAlgCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,(cv->JTs)[0],Jout,&prevJ,cv->alpha,alphaOut,
                            cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody);
             gettimeofday(&end2,NULL);
             (data->nisTime).push_back(time_delta_ms(start2,end2));
@@ -1054,7 +1079,7 @@
                     // FORWARD SWEEP //
                         gettimeofday(&start2,NULL);
                         // Do the forward sweep if applicable
-                        if (M_F > 1){forwardSweep2<T>(cv->xs, cv->ApBK, cv->Bdu, cv->ds, cv->xp, cv->alphas, alphaIndex, cv->threads, md->ld_x, md->ld_d, md->ld_A);}
+                        if (M_F > 1){forwardSweep2<T>(cv->xs, cv->ApBK, cv->Bdu, cv->ds, cv->xp, cv->alpha, alphaIndex, cv->threads, md->ld_x, md->ld_d, md->ld_A);}
                         gettimeofday(&end2,NULL);
                         (data->sweepTime).back() += time_delta_ms(start2,end2);
                     // FORWARD SWEEP //
@@ -1062,7 +1087,7 @@
                     // FORWARD SIM //
                         gettimeofday(&start2,NULL);
                         int alphaIndexOut = forwardSimCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->KT,cv->du,cv->ds,cv->dp,cv->dJexp,cv->JTs,
-                                                              cv->alphas,alphaIndex,cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
+                                                              cv->alpha,alphaIndex,cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
                                                               cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody);
                         gettimeofday(&end2,NULL);   
                         (data->simTime).back() += time_delta_ms(start2,end2);
