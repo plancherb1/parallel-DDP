@@ -75,6 +75,7 @@
         T *xGoal;   T *xActual;
         std::thread *threads;
         std::mutex *lock;
+        T *xs;      T *us;  T *ds;  T *JTs;
     };
 
     template <typename T>
@@ -283,11 +284,27 @@
         cv->threads = new std::thread[MAX_CPU_THREADS];
         cv->lock = new std::mutex;
     }
+
+    template <typename T>
+    __host__ __forceinline__
+    void allocateMemory_CPU_MPC2(CPUVars<T> *cv, matDimms *md, trajVars<T> *tv){
+        allocateMemory_CPU_MPC(cv, md, tv);
+        // allocate the xs and us and ds (and JTs)
+        cv->xs = (T **)malloc(NUM_ALPHA*sizeof(T*));
+        cv->us = (T **)malloc(NUM_ALPHA*sizeof(T*));
+        cv->ds = (T **)malloc(NUM_ALPHA*sizeof(T*));
+        cv->JTs = (T **)malloc(NUM_ALPHA*sizeof(T*));
+        for (int i = 0; i < NUM_ALPHA; i++){
+            (cv->xs)[i] = (T *)malloc((md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+            (cv->us)[i] = (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+            (cv->ds)[i] = (T *)malloc((md->ld_d)*NUM_TIME_STEPS*sizeof(T));
+            (cv->JTs)[i] = (T *)malloc(max(FSIM_THREADS,COST_THREADS)*sizeof(T));
+        }
+    }
     
     template <typename T>
     __host__ __forceinline__
     void freeMemory_CPU_MPC(CPUVars<T> *cv){
-        // first use the old memory free which we know works
         free(cv->x);        free(cv->xp);       free(cv->x_old);    free(cv->xp2);      
         free(cv->u);        free(cv->up);       free(cv->u_old);
         free(cv->P);        free(cv->Pp);       free(cv->p);        free(cv->pp);    
@@ -297,6 +314,18 @@
         free(cv->I);        free(cv->Tbody);    free(cv->xGoal);    free(cv->xActual);
         delete[] cv->threads;
         delete cv->lock;
+    }
+
+        template <typename T>
+    __host__ __forceinline__
+    void freeMemory_CPU_MPC2(CPUVars<T> *cv){
+        // first use the old memory free which we know works
+        freeMemory_CPU_MPC(cv);
+        // then the new vars
+        for (int i = 0; i < NUM_ALPHA; i++){
+            free(cv->xs[i]);    free(cv->us[i]);    free(cv->ds[i]);    free(cv->JTs[i]);
+        }
+        free(cv->xs); free(cv->us); free(cv->ds); free(cv->JTs);
     }
 
 // 1: Variable Wrappers (structs) and memory allocators/freers //
@@ -949,6 +978,119 @@
                 gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
                 nextIterationSetupCPU<T>(cv->x,cv->xp,cv->u,cv->up,cv->d,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
                                          md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody);
+                gettimeofday(&end2,NULL);
+                (data->nisTime).push_back(time_delta_ms(start2,end2));
+            // NEXT ITERATION SETUP //
+      
+            if (DEBUG_SWITCH){
+                printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
+                            iter-1,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+            }
+        }
+
+        // EXIT Handling
+            if (DEBUG_SWITCH){
+                printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
+                            iter,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+            }
+            // Bring back the final state and control (and compute final d if needed)
+            gettimeofday(&start2,NULL);
+            storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd);
+            for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
+            gettimeofday(&end2,NULL);
+            gettimeofday(&end,NULL);
+            (data->initTime).back() += time_delta_ms(start2,end2);
+            (data->tTime).push_back(time_delta_ms(start,end));
+        // EXIT Handling
+    }
+
+    template <typename T>
+    __host__ __forceinline__
+    void runiLQR_MPC_CPU2(trajVars<T> *tv, CPUVars<T> *cv, matDimms *md, algTrace<T> *data, 
+                         int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
+                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER){
+        // INITIALIZE THE ALGORITHM //
+            struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
+            T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
+            T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
+            int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
+            
+            // load in vars and init the alg
+            loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
+                               cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,
+                               md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody);
+            gettimeofday(&end2,NULL);
+            (data->initTime).push_back(time_delta_ms(start2,end2));
+
+            // do initial "next iteration setup"
+            gettimeofday(&start2,NULL);
+            initAlgCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,(cv->JTs)[0],Jout,&prevJ,cv->alphas,alphaOut,
+                           cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody);
+            gettimeofday(&end2,NULL);
+            (data->nisTime).push_back(time_delta_ms(start2,end2));
+        // INITIALIZE THE ALGORITHM //
+        
+        // debug print -- so ready to start
+        if (DEBUG_SWITCH){
+            printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",
+                        cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
+        }
+
+        while(1){
+            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            // BACKWARD PASS //
+                gettimeofday(&start2,NULL);
+                backwardPassCPU<T>(cv->AB,cv->P,cv->p,cv->Pp,cv->pp,cv->H,cv->g,cv->KT,cv->du,cv->d,cv->dp,
+                                   cv->ApBK,cv->Bdu,cv->x,cv->xp2,cv->dJexp,cv->err,&rho,&drho,cv->threads,
+                                   md->ld_AB,md->ld_P,md->ld_p,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_A,md->ld_d,md->ld_x);
+                gettimeofday(&end2,NULL);
+                (data->bpTime).push_back(time_delta_ms(start2,end2));
+            // BACKWARD PASS //
+
+            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            // FORWARD PASS //
+                dJ = -1.0;  alphaIndex = 0; (data->sweepTime).push_back(0.0);    (data->simTime).push_back(0.0);
+                while(1){
+                    // FORWARD SWEEP //
+                        gettimeofday(&start2,NULL);
+                        // Do the forward sweep if applicable
+                        if (M_F > 1){forwardSweep2<T>(cv->xs, cv->ApBK, cv->Bdu, cv->ds, cv->xp, cv->alphas, alphaIndex, cv->threads, md->ld_x, md->ld_d, md->ld_A);}
+                        gettimeofday(&end2,NULL);
+                        (data->sweepTime).back() += time_delta_ms(start2,end2);
+                    // FORWARD SWEEP //
+
+                    // FORWARD SIM //
+                        gettimeofday(&start2,NULL);
+                        int alphaIndexOut = forwardSimCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->KT,cv->du,cv->ds,cv->dp,cv->dJexp,cv->JTs,
+                                                              cv->alphas,alphaIndex,cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
+                                                              cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody);
+                        gettimeofday(&end2,NULL);   
+                        (data->simTime).back() += time_delta_ms(start2,end2);
+                        if(alphaIndexOut == -1){ // failed
+                            if (alphaIndex < NUM_ALPHA - FSIM_ALPHA_THREADS){alphaIndex += FSIM_ALPHA_THREADS; continue;} // keep searching
+                            else{alphaIndex = -1; break;} // note failure
+                        } 
+                        else{alphaIndex = alphaIndexOut; break;} // save success
+                    // FORWARD SIM //
+                }
+            // FORWARD PASS //
+
+            // NEXT ITERATION SETUP //
+                gettimeofday(&start2,NULL);    
+                // process accept or reject of traj and test for exit
+                bool exitFlag = acceptRejectTrajCPU2<T>(cv->xs,cv->xp,cv->us,cv->up,cv->ds,cv->dp,J,&prevJ,&dJ,&rho,&drho,&alphaIndex,
+                                                        alphaOut,Jout,&iter,cv->threads,md->ld_x,md->ld_u,md->ld_d,max_iter);
+                if(alphaOut[iter - !exitFlag] > 0){if (DEBUG_SWITCH){printf("successful iter w/ alpha[%d]\n",alphaOut[iter - !exitFlag]);}tv->last_successful_solve = 0;} // note that we were able to take a step
+                if (exitFlag){
+                    gettimeofday(&end2,NULL);
+                    (data->nisTime).push_back(time_delta_ms(start2,end2));
+                    if (alphaIndex == -1){alphaIndex = 0;}
+                    break;
+                }
+                // if we have gotten here then prep for next pass
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                nextIterationSetupCPU2<T>(cv->xs,cv->xp,cv->us,cv->up,cv->ds,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
+                                          &alphaIndex,md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody);
                 gettimeofday(&end2,NULL);
                 (data->nisTime).push_back(time_delta_ms(start2,end2));
             // NEXT ITERATION SETUP //

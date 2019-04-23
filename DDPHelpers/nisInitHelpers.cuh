@@ -51,7 +51,7 @@ void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, 
 		__shared__ T s_T[36*NUM_POS]; 		__shared__ T s_T_dx[36*NUM_POS];
 		__shared__ T s_eePos[6];			__shared__ T s_deePos[6*NUM_POS];
 		#if USE_EE_VEL_COST
-			__shared__ T s_TbTdt[32*NUM_POS]; 	__shared__ T s_Tb_dt_dx[16*NUM_POS];
+			__shared__ T s_TbTdt[32*NUM_POS]; 	__shared__ T s_Tb_dt_dx[36*NUM_POS];
 			__shared__ T s_eeVel[6];		  	__shared__ T s_deePosVel[12*NUM_POS];
 			__shared__ T s_T_dt_dx[32*NUM_POS]; __shared__ T s_T_dt_dx_p[32*NUM_POS];
 		#endif
