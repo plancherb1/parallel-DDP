@@ -111,6 +111,11 @@ int getMaxIters(int maxInt, int minInt){
    return getInt(maxInt,minInt);
 }
 __host__ __forceinline__
+int getCPUMode(){
+   printf("Would you like to run serial[0] or parallel[1] line search? (q to exit)?\n");
+   return getInt(1,0);
+}
+__host__ __forceinline__
 void keyboardHold(){
    	printf("Press enter to continue\n");	std::string input;	getline(std::cin, input);
 }
@@ -225,13 +230,6 @@ void evNorm(T *xActual, T *xGoal, T *eNorm, T *vNorm){
 	*eNorm = static_cast<T>(sqrt(pow(eePos[0]-xGoal[0],2) + pow(eePos[1]-xGoal[1],2) + pow(eePos[2]-xGoal[2],2)));
 	*vNorm = 0; for(int i=0;i<NUM_POS;i++){*vNorm+=(T)pow(xActual[NUM_POS+i],2);} *vNorm = static_cast<T>(sqrt(*vNorm));
 }
-template <typename T>
-__host__
-void evNorm(double *xActual, T *xGoal, T *eNorm, T *vNorm){
-	T xActual2[STATE_SIZE];
-	for(int i=0; i < STATE_SIZE; i++){xActual2[i] = static_cast<T>(xActual[i]);}
-	evNorm<T>(xActual2,xGoal,eNorm,vNorm);
-}
 template <typename T, int SUBSTEPS>
 __host__
 T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goalTime, double totalTime){
@@ -241,10 +239,11 @@ T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goa
 	double dt_us = elapsedTime/static_cast<double>(SUBSTEPS); double dt = dt_us / 1000000.0;
 	for(int j=0; j < STATE_SIZE; j++){currX[j] = static_cast<double>(xActual[j]);}
 	double t0 = static_cast<double>(tvars->t0_plant); double tk = t0;
-	T totalError = 0;	T goal[3];	T eNorm, vNorm;
+	T totalError = 0;	T goal[3];	T eNorm, vNorm; T currX_T[STATE_SIZE];
 	for(int i = 0; i < SUBSTEPS; i++){
 		// get the goal and compute the error norm
-		loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX,goal,&eNorm,&vNorm);	totalError += eNorm;
+		for(int j=0; j < STATE_SIZE; j++){currX_T[j] = (T)currX[j];}
+		loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX_T,goal,&eNorm,&vNorm);	totalError += eNorm;
 		// then get controls
 		int err = getHardwareControls<T>(&(qdes[0]), 	&(udes[0]), 		tvars->x, 	tvars->u, 	tvars->KT, 	t0, 
                                          &(currX[0]),   &(currX[NUM_POS]),  tk, 
@@ -255,8 +254,8 @@ T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goa
 		for(int j=0; j < STATE_SIZE; j++){currX[j] = nextX[j];}		tk += dt_us;
 	}
 	#pragma unroll
-	for(int j=0; j < STATE_SIZE; j++){xActual[j] = (T)currX[j];}
-	loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX,goal,&eNorm,&vNorm);	totalError += eNorm;
+	for(int j=0; j < STATE_SIZE; j++){xActual[j] = (T)currX[j]; currX_T[j] = xActual[j];}
+	loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX_T,goal,&eNorm,&vNorm);	totalError += eNorm;
 	return (totalError / static_cast<T>(SUBSTEPS));
 }
 template <typename T>
@@ -288,7 +287,7 @@ int fig8Simulate(T *xActual, T *xGoal, trajVars<T> *tvars, T *error, double *goa
 		// update goals if doing figure 8
 		if (doFig8){
 			// if in figure 8 increment goalTime and see if we are ready to exit
-			if(*initial_convergence_flag){*goalTime += elapsedTime_us;	if(loadFig8Goal<T>(xGoal,*goalTime,totalTime_us) > 1){return 1;}}
+			if(*initial_convergence_flag){*goalTime += elapsedTime_us;	if(loadFig8Goal<T>(xGoal,*goalTime,totalTime_us) > 0){return 1;}}
 			// else see if we are ready to start the figure 8
 			else if(eNorm < eNormLim && vNorm < vNormLim){*initial_convergence_flag = 1; *error = 0; *counter = 0;}
 		}
@@ -301,7 +300,7 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 	// define the requirements for "conversion" to the first goal
 	T eNormLim = 0.05;	 T vNormLim = 0.05;	
 	// define local variables
-	double goalTime = 0; int initial_convergence_flag = 0; T eNorm, vNorm; T error = 0; int counter = 0; struct timeval start, end;
+	double goalTime = 0; int initial_convergence_flag = 0; T error = 0; int counter = 0; struct timeval start, end;
 	// get the max iters per solve
 	int itersToDo = getMaxIters(1000, 1);
 	// get the max iters per solve
@@ -329,57 +328,43 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
 			gettimeofday(&end,NULL);
 			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
-			tvars->t0_plant = 0; 	tActual_plant = static_cast<int>(std::floor(elapsedTime_us));
-			tvars->t0_sys = 0; 		tActual_sys = static_cast<int>(std::floor(elapsedTime_us));
-      		error += simulateForward<T,150>(tvars,algvars->xActual,elapsedTime_us,goalTime,totalTime_us);
-			// print where are we ending up and expected
-				// int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
-				// printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
-				// printMat<T,1,STATE_SIZE>(algvars->xActual,1);
-				// printf(" With expected:\n");
-				// printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*(dimms->ld_x),1);
-      		// print the state we sim to
-				// T *xk = &(algvars->xActual[0]);
-				// printf("%f,%f,%f,%f,%f,%f,%f,%f\n",timePrint,xk[0],xk[1],xk[2],xk[3],xk[4],xk[5],xk[6]);
-				// timePrint += elapsedTime_us;
-			// print the error and the end effector position
-				T eePos[NUM_POS];   compute_eePos_scratch<T>(&(algvars->xActual[0]), &eePos[0]);
-				evNorm(algvars->xActual, algvars->xGoal, &eNorm, &vNorm);
-				printf("[[%f,%f,%f],[%f,%f,%f],%f,%f,%f],\n",eePos[0],eePos[1],eePos[2],algvars->xGoal[0],algvars->xGoal[1],algvars->xGoal[2],eNorm,error/counter,vNorm);
-   			if (initial_convergence_flag){goalTime += elapsedTime_us;}
-   			if(loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us) > 1){break;};
-   			if (doFig8 && eNorm < eNormLim && vNorm < vNormLim){initial_convergence_flag = 1; error = 0; counter = 0;}
+			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
+							elapsedTime_us,totalTime_us,eNormLim,vNormLim,dimms->ld_x,doFig8)){break;}
 		}
-		printf("\n\nAverage tracking error: [%f]\n",(error/counter));
-		printAllTimingStats(data);
 		freeMemory_GPU_MPC<T>(algvars);	delete algvars;
 	}
 	else{
-		CPUVars<T> *algvars = new CPUVars<T>;
-		allocateMemory_CPU_MPC<T>(algvars, dimms, tvars);
+		CPUVars<T> *algvars = new CPUVars<T>;	int parallelLineSearch = getCPUMode();
+		if (parallelLineSearch){allocateMemory_CPU_MPC2<T>(algvars, dimms, tvars);} else{allocateMemory_CPU_MPC<T>(algvars, dimms, tvars);}
 		// load in inital trajectory and goal
 		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
-		for (int i = 0; i < NUM_ALPHA; i++){
-			memcpy(algvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
-			memcpy(algvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
-		}
+		memcpy(algvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
+		memcpy(algvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(algvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
+		if (parallelLineSearch){
+			for (int i = 0; i < NUM_ALPHA; i++){
+				memcpy(algvars->xs[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
+				memcpy(algvars->us[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
+			}
+		}
 		// note run to conversion with no time or iter limits
-		runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);
+		if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);}
+		else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);}
 		// then start a loop of run a couple steps simulate for X steps and repeat
 		while(1){
 			counter++;
 			gettimeofday(&start,NULL);
-			runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
+			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
+			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
 			gettimeofday(&end,NULL);
 			double elapsedTime_us = TIME_STEP*1000000;// time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
 							elapsedTime_us,totalTime_us,eNormLim,vNormLim,dimms->ld_x,doFig8)){break;}
 		}
-		printf("\n\nAverage tracking error: [%f]\n",(error/counter));
-		printAllTimingStats(data);
-		freeMemory_CPU_MPC<T>(algvars);	delete algvars;
+		if (parallelLineSearch){freeMemory_CPU_MPC2<T>(algvars);} else{freeMemory_CPU_MPC<T>(algvars);} delete algvars;
 	}
+	printf("\n\nAverage tracking error: [%f]\n",(error/counter));
+	printAllTimingStats(data);
 }
 int main(int argc, char *argv[])
 {
