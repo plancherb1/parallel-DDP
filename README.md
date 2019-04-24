@@ -26,6 +26,6 @@ https://askubuntu.com/questions/1077061/how-do-i-install-nvidia-and-cuda-drivers
 https://www.tensorflow.org/install/gpu
 
 ### To use with the Drake Kuka Simulator
-1) Install this fork of drake: https://github.com/plancherb1/drake
-2) Set DRAKE_PATH_ROOT to your install directory
+1) Install this fork of drake: [https://github.com/plancherb1/drake](https://github.com/plancherb1/drake)
+2) You need to put in you .bashrc ```export DRAKE_PATH_ROOT=<path_to_drake>```
 Then the scripts in the utils folder should launch the drake visualizer and simulator
