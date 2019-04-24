@@ -24,9 +24,9 @@ class lcmt_iiwa_command
 
         std::vector< double > joint_position;
 
-        int32_t    num_torques;
-
         std::vector< double > joint_torque;
+
+        double     wrench[6];
 
     public:
         /**
@@ -135,13 +135,13 @@ int lcmt_iiwa_command::_encodeNoHash(void *buf, int offset, int maxlen) const
         if(tlen < 0) return tlen; else pos += tlen;
     }
 
-    tlen = __int32_t_encode_array(buf, offset + pos, maxlen - pos, &this->num_torques, 1);
-    if(tlen < 0) return tlen; else pos += tlen;
-
-    if(this->num_torques > 0) {
-        tlen = __double_encode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_torques);
+    if(this->num_joints > 0) {
+        tlen = __double_encode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_joints);
         if(tlen < 0) return tlen; else pos += tlen;
     }
+
+    tlen = __double_encode_array(buf, offset + pos, maxlen - pos, &this->wrench[0], 6);
+    if(tlen < 0) return tlen; else pos += tlen;
 
     return pos;
 }
@@ -162,14 +162,14 @@ int lcmt_iiwa_command::_decodeNoHash(const void *buf, int offset, int maxlen)
         if(tlen < 0) return tlen; else pos += tlen;
     }
 
-    tlen = __int32_t_decode_array(buf, offset + pos, maxlen - pos, &this->num_torques, 1);
-    if(tlen < 0) return tlen; else pos += tlen;
-
-    if(this->num_torques) {
-        this->joint_torque.resize(this->num_torques);
-        tlen = __double_decode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_torques);
+    if(this->num_joints) {
+        this->joint_torque.resize(this->num_joints);
+        tlen = __double_decode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_joints);
         if(tlen < 0) return tlen; else pos += tlen;
     }
+
+    tlen = __double_decode_array(buf, offset + pos, maxlen - pos, &this->wrench[0], 6);
+    if(tlen < 0) return tlen; else pos += tlen;
 
     return pos;
 }
@@ -180,14 +180,14 @@ int lcmt_iiwa_command::_getEncodedSizeNoHash() const
     enc_size += __int64_t_encoded_array_size(NULL, 1);
     enc_size += __int32_t_encoded_array_size(NULL, 1);
     enc_size += __double_encoded_array_size(NULL, this->num_joints);
-    enc_size += __int32_t_encoded_array_size(NULL, 1);
-    enc_size += __double_encoded_array_size(NULL, this->num_torques);
+    enc_size += __double_encoded_array_size(NULL, this->num_joints);
+    enc_size += __double_encoded_array_size(NULL, 6);
     return enc_size;
 }
 
 uint64_t lcmt_iiwa_command::_computeHash(const __lcm_hash_ptr *)
 {
-    uint64_t hash = 0x6ee3e3b9c640a99aLL;
+    uint64_t hash = 0x824cf99dc1a2d574LL;
     return (hash<<1) + ((hash>>63)&1);
 }
 

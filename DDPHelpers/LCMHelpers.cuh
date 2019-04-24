@@ -122,11 +122,12 @@ class LCM_TrajRunner {
         // lcm STATUS callback function
         void statusCallback(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){ 
             if(!ready){return;}
-            //construct output msg container and begin to load it with data
+            // construct output msg container and begin to load it with data
             drake::lcmt_iiwa_command dataOut;   
-            dataOut.num_joints = static_cast<int32_t>(NUM_POS);   dataOut.num_torques = static_cast<int32_t>(CONTROL_SIZE);
-            dataOut.utime = static_cast<int64_t>(msg->utime);
-            dataOut.joint_position.resize(dataOut.num_joints);    dataOut.joint_torque.resize(dataOut.num_torques);
+            dataOut.num_joints = static_cast<int32_t>(NUM_POS);         dataOut.joint_position.resize(dataOut.num_joints);
+            dataOut.utime = static_cast<int64_t>(msg->utime);           dataOut.joint_torque.resize(dataOut.num_joints);
+            #pragma unroll
+            for(int i=0; i < 6; i++){dataOut.wrench[i] = 0.0;}
             // get the correct controls for this time
             int err = getHardwareControls<T>(&(dataOut.joint_position[0]), &(dataOut.joint_torque[0]), 
                                              x, u, KT, static_cast<double>(t0), 

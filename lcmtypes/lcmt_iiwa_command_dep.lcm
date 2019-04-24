@@ -1,7 +1,7 @@
 package drake;
 
 // Commands a single set of joint states for the arm.
-struct lcmt_iiwa_command {
+struct lcmt_iiwa_command_dep {
   // The timestamp in microseconds.
   int64_t utime;
 
@@ -13,9 +13,6 @@ struct lcmt_iiwa_command {
   // The reference joint torques. They should only be sent when the arm is in
   // torque control mode.  When only positions are being sent, num_torques
   // should be set to zero.
-  // int32_t num_torques;
-  // double joint_torque[num_torques];
-  // UPDATED 4/2019 to simply be num_joints always and to include a wrench for impedance control
-  double joint_torque[num_joints];
-  double wrench[6];
+  int32_t num_torques;
+  double joint_torque[num_torques];
 }
