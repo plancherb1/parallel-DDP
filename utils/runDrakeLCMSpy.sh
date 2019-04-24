@@ -1,6 +1,7 @@
 #! /bin/sh
-if cd $DRAKE_PATH_ROOT; then
-	bazel run @drake//lcmtypes:drake-lcm-spy
+if [ -z "$DRAKE_PATH_ROOT"]; then
+	echo "\n[!] ERROR: You need to put in you .bashrc export DRAKE_PATH_ROOT=<path_to_drake>\n"
 else
-	echo "You need to set DRAKE_PATH_ROOT to your drake path"
+	cd $DRAKE_PATH_ROOT;
+	bazel run @drake//lcmtypes:drake-lcm-spy;
 fi
