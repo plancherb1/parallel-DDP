@@ -23,3 +23,8 @@ This repository holds the code supporting "[A Performance Analysis of Differenti
 ### Instalation Tips for CUDA
 https://askubuntu.com/questions/1077061/how-do-i-install-nvidia-and-cuda-drivers-into-ubuntu
 https://www.tensorflow.org/install/gpu
+
+### To use with the Drake Kuka Simulator
+1) Install this fork of drake: https://github.com/plancherb1/drake
+2) Set DRAKE_PATH_ROOT to your install directory
+Then the scripts in the utils folder should launch the drake visualizer and simulator
