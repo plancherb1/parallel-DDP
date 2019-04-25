@@ -6,8 +6,8 @@
 
 #include <lcm/lcm_coretypes.h>
 
-#ifndef __drake_lcmt_iiwa_command_hpp__
-#define __drake_lcmt_iiwa_command_hpp__
+#ifndef __drake_lcmt_iiwa_command_hardware_hpp__
+#define __drake_lcmt_iiwa_command_hardware_hpp__
 
 #include <vector>
 
@@ -15,7 +15,7 @@ namespace drake
 {
 
 /// Commands a single set of joint states for the arm.
-class lcmt_iiwa_command
+class lcmt_iiwa_command_hardware
 {
     public:
         int64_t    utime;
@@ -24,9 +24,9 @@ class lcmt_iiwa_command
 
         std::vector< double > joint_position;
 
-        int32_t    num_torques;
-
         std::vector< double > joint_torque;
+
+        double     wrench[6];
 
     public:
         /**
@@ -64,7 +64,7 @@ class lcmt_iiwa_command
         inline static int64_t getHash();
 
         /**
-         * Returns "lcmt_iiwa_command"
+         * Returns "lcmt_iiwa_command_hardware"
          */
         inline static const char* getTypeName();
 
@@ -75,7 +75,7 @@ class lcmt_iiwa_command
         inline static uint64_t _computeHash(const __lcm_hash_ptr *p);
 };
 
-int lcmt_iiwa_command::encode(void *buf, int offset, int maxlen) const
+int lcmt_iiwa_command_hardware::encode(void *buf, int offset, int maxlen) const
 {
     int pos = 0, tlen;
     int64_t hash = (int64_t)getHash();
@@ -89,7 +89,7 @@ int lcmt_iiwa_command::encode(void *buf, int offset, int maxlen) const
     return pos;
 }
 
-int lcmt_iiwa_command::decode(const void *buf, int offset, int maxlen)
+int lcmt_iiwa_command_hardware::decode(const void *buf, int offset, int maxlen)
 {
     int pos = 0, thislen;
 
@@ -104,23 +104,23 @@ int lcmt_iiwa_command::decode(const void *buf, int offset, int maxlen)
     return pos;
 }
 
-int lcmt_iiwa_command::getEncodedSize() const
+int lcmt_iiwa_command_hardware::getEncodedSize() const
 {
     return 8 + _getEncodedSizeNoHash();
 }
 
-int64_t lcmt_iiwa_command::getHash()
+int64_t lcmt_iiwa_command_hardware::getHash()
 {
     static int64_t hash = _computeHash(NULL);
     return hash;
 }
 
-const char* lcmt_iiwa_command::getTypeName()
+const char* lcmt_iiwa_command_hardware::getTypeName()
 {
-    return "lcmt_iiwa_command";
+    return "lcmt_iiwa_command_hardware";
 }
 
-int lcmt_iiwa_command::_encodeNoHash(void *buf, int offset, int maxlen) const
+int lcmt_iiwa_command_hardware::_encodeNoHash(void *buf, int offset, int maxlen) const
 {
     int pos = 0, tlen;
 
@@ -135,18 +135,18 @@ int lcmt_iiwa_command::_encodeNoHash(void *buf, int offset, int maxlen) const
         if(tlen < 0) return tlen; else pos += tlen;
     }
 
-    tlen = __int32_t_encode_array(buf, offset + pos, maxlen - pos, &this->num_torques, 1);
-    if(tlen < 0) return tlen; else pos += tlen;
-
-    if(this->num_torques > 0) {
-        tlen = __double_encode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_torques);
+    if(this->num_joints > 0) {
+        tlen = __double_encode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_joints);
         if(tlen < 0) return tlen; else pos += tlen;
     }
+
+    tlen = __double_encode_array(buf, offset + pos, maxlen - pos, &this->wrench[0], 6);
+    if(tlen < 0) return tlen; else pos += tlen;
 
     return pos;
 }
 
-int lcmt_iiwa_command::_decodeNoHash(const void *buf, int offset, int maxlen)
+int lcmt_iiwa_command_hardware::_decodeNoHash(const void *buf, int offset, int maxlen)
 {
     int pos = 0, tlen;
 
@@ -162,32 +162,32 @@ int lcmt_iiwa_command::_decodeNoHash(const void *buf, int offset, int maxlen)
         if(tlen < 0) return tlen; else pos += tlen;
     }
 
-    tlen = __int32_t_decode_array(buf, offset + pos, maxlen - pos, &this->num_torques, 1);
-    if(tlen < 0) return tlen; else pos += tlen;
-
-    if(this->num_torques) {
-        this->joint_torque.resize(this->num_torques);
-        tlen = __double_decode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_torques);
+    if(this->num_joints) {
+        this->joint_torque.resize(this->num_joints);
+        tlen = __double_decode_array(buf, offset + pos, maxlen - pos, &this->joint_torque[0], this->num_joints);
         if(tlen < 0) return tlen; else pos += tlen;
     }
+
+    tlen = __double_decode_array(buf, offset + pos, maxlen - pos, &this->wrench[0], 6);
+    if(tlen < 0) return tlen; else pos += tlen;
 
     return pos;
 }
 
-int lcmt_iiwa_command::_getEncodedSizeNoHash() const
+int lcmt_iiwa_command_hardware::_getEncodedSizeNoHash() const
 {
     int enc_size = 0;
     enc_size += __int64_t_encoded_array_size(NULL, 1);
     enc_size += __int32_t_encoded_array_size(NULL, 1);
     enc_size += __double_encoded_array_size(NULL, this->num_joints);
-    enc_size += __int32_t_encoded_array_size(NULL, 1);
-    enc_size += __double_encoded_array_size(NULL, this->num_torques);
+    enc_size += __double_encoded_array_size(NULL, this->num_joints);
+    enc_size += __double_encoded_array_size(NULL, 6);
     return enc_size;
 }
 
-uint64_t lcmt_iiwa_command::_computeHash(const __lcm_hash_ptr *)
+uint64_t lcmt_iiwa_command_hardware::_computeHash(const __lcm_hash_ptr *)
 {
-    uint64_t hash = 0x6ee3e3b9c640a99aLL;
+    uint64_t hash = 0x824cf99dc1a2d574LL;
     return (hash<<1) + ((hash>>63)&1);
 }
 
