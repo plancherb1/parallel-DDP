@@ -18,33 +18,49 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 	#define QF_xHAND 0.0
 #else
 	#define Q_HAND1 10.0
-	#define Q_HAND2 0.0
-	#define R_HAND 0.0001
-	#define QF_HAND1 1000.0
-	#define QF_HAND2 0.0
-	#define Q_xdHAND 1.0
-	#define QF_xdHAND 100.0
+	#define Q_HAND2 0
+	#define R_HAND 0.001
+	#define QF_HAND1 100.0
+	#define QF_HAND2 0
+	#define Q_xdHAND 10.0
+	#define QF_xdHAND 10.0
 	#define Q_xHAND 0.0
 	#define QF_xHAND 0.0
-	#endif
+	// #define Q_HAND1 10.0
+	// #define Q_HAND2 0.0
+	// #define R_HAND 0.0001
+	// #define QF_HAND1 1000.0
+	// #define QF_HAND2 0.0
+	// #define Q_xdHAND 1.0
+	// #define QF_xdHAND 100.0
+	// #define Q_xHAND 0.0
+	// #define QF_xHAND 0.0
+#endif
+#define USE_EE_VEL_COST 0
 #define Q_HANDV1 0.0
 #define Q_HANDV2 0.0
 #define QF_HANDV1 0.0
 #define QF_HANDV2 0.0
 
-#define USE_LIMITS_FLAG 1
+#define USE_LIMITS_FLAG 0
 #define R_TL 0.0
 #define Q_PL 0.0
 #define Q_VL 0.0
 
 #define MPC_MODE 1
-#define USE_EE_VEL_COST 0
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
+#define HARDWARE_MODE 0
+
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
+#define SOLVES_TO_RESET 100
 #define PLANT 4
 #define PI 3.14159
+
+#define E_NORM_LIM 0.05
+#define V_NORM_LIM 0.05
+
 #include "../config.cuh"
 #include <random>
 #include <vector>
@@ -250,7 +266,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
     // launch the trajRunner
     std::thread trajThread = std::thread(&runTrajRunner<T>, dimms);
     // launch the goal monitor
-    std::thread goalThread = std::thread(&runFig8GoalLCM<algType>, totalTime_us, 0.05, 0.05);
+    std::thread goalThread = std::thread(&runFig8GoalLCM<algType>, totalTime_us, E_NORM_LIM, V_NORM_LIM);
     // launch the status filter if needed
     #if USE_VELOCITY_FILTER
     	std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<algType>);
