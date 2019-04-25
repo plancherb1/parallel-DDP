@@ -29,22 +29,11 @@
 #define TIME_STEP_LENGTH_IN_ms (TIME_STEP*1000.0)
 #define TIME_STEP_LENGTH_IN_us (TIME_STEP_LENGTH_IN_ms*1000.0)
 #define get_time_us_i64(time) (static_cast<int64_t>(std::ceil(get_time_us(time))))
-// #define get_time_ms_i64(time) (static_cast<int64_t>(std::ceil(get_time_ms(time))))
-// #define us_to_ms_i64(time) (static_cast<int64_t>(std::ceil(static_cast<double>(time)/1000.0))
-// #define ms_to_us_i64(time) (time*1000)
 #define get_time_steps_us_d(start,end) (static_cast<double>(end - start)/TIME_STEP_LENGTH_IN_us)
-// #define get_time_steps_ms_d(start,end) (static_cast<double>(end - start)/TIME_STEP_LENGTH_IN_ms)
 #define get_time_steps_us_f(start,end) (static_cast<int>(std::floor(get_time_steps_us_d(start,end))))
-// #define get_time_steps_ms_f(start,end) (static_cast<int>(std::floor(get_time_steps_ms_d(start,end))))
-// #define get_time_steps_us_c(start,end) (static_cast<int>(std::ceil(get_time_steps_us_d(start,end))))
-// #define get_time_steps_ms_c(start,end) (static_cast<int>(std::ceil(get_time_steps_ms_d(start,end))))
-// #define get_steps_us_d(delta) (delta/TIME_STEP_LENGTH_IN_us)
-// #define get_steps_ms_d(delta) (delta/TIME_STEP_LENGTH_IN_ms)
-// #define get_steps_us_f(delta) (static_cast<int>(std::floor(get_steps_us_d(delta))))
-// #define get_steps_ms_f(delta) (static_cast<int>(std::floor(get_steps_ms_d(delta))))
-// #define get_steps_us_c(delta) (static_cast<int>(std::ceil(get_steps_us_d(delta))))
-// #define get_steps_ms_c(delta) (static_cast<int>(std::ceil(get_steps_ms_d(delta))))
-
+#ifndef SOLVES_TO_RESET
+    #define SOLVES_TO_RESET 10
+#endif
 // 1: Variable Wrappers (structs) and memory allocators/freers //
     template <typename T>
     struct algTrace{
@@ -574,7 +563,7 @@
         gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice, streams[1]));
         shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[2]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
         shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[4]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
-        if (last_successful_solve <= 10){
+        if (last_successful_solve <= SOLVES_TO_RESET){
             shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
             shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[5]>>>(d_KT,shiftAmount,ld_KT);
             shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_P,shiftAmount,ld_P);
@@ -629,7 +618,7 @@
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
         threads[2] = std::thread(&shiftAndCopy<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS>, std::ref(d), shiftAmount, ld_d, nullptr);
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
-        if (last_successful_solve <= 10){
+        if (last_successful_solve <= SOLVES_TO_RESET){
             threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c,NUM_TIME_STEPS-1>, std::ref(u), shiftAmount, ld_u, std::ref(up));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
             threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1>, std::ref(KT), shiftAmount, ld_KT, nullptr);
