@@ -10,10 +10,11 @@
 #include <lcm/lcm-cpp.hpp>
 #include "../lcmtypes/drake/lcmt_iiwa_status.hpp"
 #include "../lcmtypes/drake/lcmt_iiwa_command.hpp"
+#include "../lcmtypes/drake/lcmt_iiwa_command_hardware.hpp"
 #include "../lcmtypes/drake/lcmt_trajectory_f.hpp"
 #include "../lcmtypes/drake/lcmt_trajectory_d.hpp"
 #include "../lcmtypes/kuka/lcmt_target_twist.hpp"
- #include "../lcmtypes/kuka/lcmt_target_position.hpp"
+#include "../lcmtypes/kuka/lcmt_target_position.hpp"
 #include <type_traits>
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
@@ -24,6 +25,9 @@ const char *ARM_STATUS_CHANNEL  = "IIWA_STATUS";
     const char *ARM_STATUS_FILTERED = "IIWA_STATUS_FILTERED";
 #else
     const char *ARM_STATUS_FILTERED = "IIWA_STATUS";
+#endif
+#ifndef HARDWARE_MODE
+    #define HARDWARE_MODE 0
 #endif
 // #define GOAL_PUBLISHER_RATE_MS 30
 // #define TEST_DELTA 0 // random small delta to keep things interesting (in ms) for tests
@@ -123,11 +127,16 @@ class LCM_TrajRunner {
         void statusCallback(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){ 
             if(!ready){return;}
             // construct output msg container and begin to load it with data
-            drake::lcmt_iiwa_command dataOut;   
+            #if HARDWARE_MODE
+                drake::lcmt_iiwa_command_hardware dataOut;
+                #pragma unroll
+                for(int i=0; i < 6; i++){dataOut.wrench[i] = 0.0;}
+            #else
+                drake::lcmt_iiwa_command dataOut;   
+                dataOut.num_torques = static_cast<int32_t>(CONTROL_SIZE);
+            #endif
             dataOut.num_joints = static_cast<int32_t>(NUM_POS);         dataOut.joint_position.resize(dataOut.num_joints);
-            dataOut.utime = static_cast<int64_t>(msg->utime);           dataOut.joint_torque.resize(dataOut.num_joints);
-            #pragma unroll
-            for(int i=0; i < 6; i++){dataOut.wrench[i] = 0.0;}
+            dataOut.utime = static_cast<int64_t>(msg->utime);           dataOut.joint_torque.resize(dataOut.num_joints);  // NUM_POS = CONTROL_SIZE for arm so this works
             // get the correct controls for this time
             int err = getHardwareControls<T>(&(dataOut.joint_position[0]), &(dataOut.joint_torque[0]), 
                                              x, u, KT, static_cast<double>(t0), 
@@ -327,12 +336,25 @@ class LCM_IIWA_COMMAND_printer {
             //                             msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],msg->joint_torque[3],
             //                             msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
         }
+
+        void handleMessage_hardware(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_command_hardware *msg){                
+            printf("%ld %f %f %f %f %f %f %f\n",msg->utime,msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],
+                                                 msg->joint_torque[3],msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
+            // double eePos[NUM_POS];   compute_eePos_scratch<double>((double *)&(msg->joint_position[0]), &eePos[0]);
+            // printf("[%ld] eePosDes: [%f %f %f] control: [%f %f %f %f %f %f %f ]\n",msg->utime,eePos[0],eePos[1],eePos[2],
+            //                             msg->joint_torque[0],msg->joint_torque[1],msg->joint_torque[2],msg->joint_torque[3],
+            //                             msg->joint_torque[4],msg->joint_torque[5],msg->joint_torque[6]);
+        }
 };
 
 template <typename T>
 __host__
-void run_IIWA_COMMAND_printer(lcm::LCM *lcm_ptr, LCM_IIWA_COMMAND_printer<T> *handler){
-    lcm::Subscription *sub = lcm_ptr->subscribe(ARM_COMMAND_CHANNEL, &LCM_IIWA_COMMAND_printer<T>::handleMessage, handler);
+void run_IIWA_COMMAND_printer(lcm::LCM *lcm_ptr, LCM_IIWA_COMMAND_printer<T> *handler, int hardware = 0){
+    #if HARDWARE_MODE
+        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_COMMAND_CHANNEL, &LCM_IIWA_COMMAND_printer<T>::handleMessage_hardware, handler);
+    #else
+        lcm::Subscription *sub = lcm_ptr->subscribe(ARM_COMMAND_CHANNEL, &LCM_IIWA_COMMAND_printer<T>::handleMessage, handler);
+    #endif
     // sub->setQueueCapacity(1);
     while(0 == lcm_ptr->handle());
 }

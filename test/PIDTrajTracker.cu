@@ -9,6 +9,7 @@ nvcc -std=c++11 -o PID.exe PIDTrajTracker.cu ../utils/cudaUtils.cu ../utils/thre
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
 #define PLANT 4
+#define HARDWARE_MODE 0
 #include <iostream>
 #include "../config.cuh"
 
@@ -49,12 +50,17 @@ class LCM_PIDTracker_Handler {
             printf("Tracker running with t0[%ld]\n",t0);
             while(counter < 18044){
                 double tk = t0 + counter*1000;    double *qk = &qData[counter*NUM_POS];  counter++;
-                drake::lcmt_iiwa_command dataOut;                     
-                dataOut.num_joints = static_cast<int32_t>(NUM_POS);   dataOut.joint_position.resize(dataOut.num_joints);
-                dataOut.utime = tk;                                   dataOut.joint_torque.resize(dataOut.num_joints);
-                // zero everything but positions
-                #pragma unroll
-                for (int i = 0; i < 6; i++){dataOut.wrench[i] = 0;}
+                #if HARDWARE_MODE
+                	drake::lcmt_iiwa_command_hardware dataOut;
+                	#pragma unroll
+	                for(int i=0; i < 6; i++){dataOut.wrench[i] = 0.0;}
+	            #else
+	                drake::lcmt_iiwa_command dataOut;   
+	                dataOut.num_torques = static_cast<int32_t>(CONTROL_SIZE);
+	            #endif
+	            dataOut.num_joints = static_cast<int32_t>(NUM_POS);         dataOut.joint_position.resize(dataOut.num_joints);
+	            dataOut.utime = tk;           								dataOut.joint_torque.resize(dataOut.num_joints);  // NUM_POS = CONTROL_SIZE for arm so this works
+                // zero torques and send positions
                 #pragma unroll
                 for (int i = 0; i < NUM_POS; i++){dataOut.joint_torque[i] = 0;}
                 #pragma unroll
