@@ -3,10 +3,10 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 *******/
 
 #define PLANT 4
-#define EE_COST 0
+#define EE_COST 1
 #define MPC_MODE 1
 #define USE_WAFR_URDF 1
-#define USE_EE_VEL_COST 1
+#define USE_EE_VEL_COST 0
 #define USE_LIMITS_FLAG 1
 #include "../config.cuh"
 #include <random>
@@ -74,7 +74,7 @@ void analyticalT2(T *x, T *grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      		T s_temp1[32*NUM_POS];
 	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   		initT<T>(d_Tb); 
 	T s_Tb_dx[16*NUM_POS];	   	T s_TbTdt[32*NUM_POS];			T s_T[36*NUM_POS];
-	T s_Tb_dt_dx[32*NUM_POS];	T s_T_dt_dx[32*NUM_POS];		T s_T_dt_dx_prev[32*NUM_POS];
+	T s_Tb_dt_dx[36*NUM_POS];	T s_T_dt_dx[32*NUM_POS];		T s_T_dt_dx_prev[32*NUM_POS];
    	// load in Tb, Tb_dx, Tb_dt
     load_Tbdtdx<T>(x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
     compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
@@ -122,7 +122,7 @@ __host__
 void analyticalTbdt(T *x, T *grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	
 	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
-	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_Tb_dt_dx[16*2*NUM_POS];
+	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_Tb_dt_dx[36*NUM_POS];
     load_Tbdtdx<T>(x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
    	for (int k = 0; k < STATE_SIZE; k++){
 		for (int i = 0; i < 16; i++){grad[16*k + i] = s_Tb_dt_dx[16*k + i];}
@@ -166,7 +166,7 @@ void analyticalTdt(T *x, T *grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      		T s_temp1[32*NUM_POS];
 	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   		initT<T>(d_Tb); 
 	T s_Tb_dx[16*NUM_POS];	   	T s_TbTdt[32*NUM_POS];			T s_T[36*NUM_POS];
-	T s_Tb_dt_dx[32*NUM_POS];	T s_T_dt_dx[32*NUM_POS];		T s_T_dt_dx_prev[32*NUM_POS];
+	T s_Tb_dt_dx[36*NUM_POS];	T s_T_dt_dx[32*NUM_POS];		T s_T_dt_dx_prev[32*NUM_POS];
    	// load in Tb, Tb_dx, Tb_dt
     load_Tbdtdx<T>(x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
     compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
@@ -245,7 +245,7 @@ template <typename T>
 __host__
 void analyticalVel(T *x, T *eePosVelGrad, int ld_grad){
 	T s_cosq[NUM_POS];         	T s_sinq[NUM_POS];      	T s_Tb[36*NUM_POS];
-	T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 			T s_Tb_dt_dx[16*NUM_POS];
+	T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 			T s_Tb_dt_dx[36*NUM_POS];
 	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_T[36*NUM_POS];
 	T s_temp1[32*NUM_POS];	   	T s_temp2[32*NUM_POS];		T s_temp3[32*NUM_POS];
 	T s_eePos[6];				T s_eeVel[6];
@@ -603,7 +603,7 @@ void compareEEPosdq(){
 			T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
 			T s_T[36*NUM_POS];			T s_T_dx[36*NUM_POS];
 			T s_eePos[6];				T s_deePos[6*NUM_POS];
-			T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[16*NUM_POS];
+			T s_TbTdt[32*NUM_POS]; 		T s_Tb_dt_dx[36*NUM_POS];
 			T s_eeVel[6];		  		T s_deePosVel[12*NUM_POS];
 			T s_T_dt_dx[32*NUM_POS];  	T s_T_dt_dx_p[32*NUM_POS];
 			
