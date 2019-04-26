@@ -43,7 +43,11 @@ void memcpyArr(T **dsts, T *src, size_t size, int amount, int skip = -1){
 // J = (qh-hdes)'Qhand(qh-hdes) + uRu + xQxHandx
 template <typename T>
 __global__
-void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, int ld_u, int ld_H, int ld_g, T *d_Tbody = nullptr, T *d_JT = nullptr){
+void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, int ld_u, int ld_H, int ld_g, T *d_Tbody = nullptr, T *d_JT = nullptr, \
+							T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+          	   			 	T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+          	   			 	T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+          	   			 	T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	#if EE_COST
 		__shared__ T s_x[STATE_SIZE];		__shared__ T s_u[NUM_POS];
 		__shared__ T s_sinq[NUM_POS];		__shared__ T s_cosq[NUM_POS];
@@ -69,11 +73,13 @@ void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, 
 				compute_eePosVel_dx<T>(s_x, s_Tb, d_Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
 	                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
 				__syncthreads();
-				costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT,-1,s_eeVel,s_deePosVel);
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT,-1,s_eeVel,s_deePosVel,
+							Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
 			#else
 				compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,s_x,s_cosq,d_Tbody);
 				__syncthreads();
-				costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT);
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,d_xg,s_x,s_u,k,ld_H,d_JT,-1,nullptr,nullptr,
+							Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
 			#endif
 		}
 	#else
@@ -81,14 +87,18 @@ void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, 
 		for (int k = blockIdx.x*blockDim.x+threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x*gridDim.x){
 			T *xk = &d_x[k*ld_x];			T *uk = &d_u[k*ld_u];
 			T *Hk = &d_H[k*ld_H*DIM_H_c];	T *gk = &d_g[k*ld_g];
-	    	costGrad(Hk,gk,xk,uk,d_xg,k,ld_H);
+	    	costGrad(Hk,gk,xk,uk,d_xg,k,ld_H,Q1,Q2,R,QF1,QF2);
 	 	}
 	#endif
 }
 
 template <typename T>
 __host__
-void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *xg, int ld_x, int ld_u, int ld_H, int ld_g, T *Tbody = nullptr, T *JT = nullptr){
+void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *xg, int ld_x, int ld_u, int ld_H, int ld_g, T *Tbody = nullptr, T *JT = nullptr, \
+								 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+                  	   			 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+                  	   			 T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+                  	   			 T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	#if EE_COST // need lots of temp mem space for the xfrm mats
 		T s_sinq[NUM_POS];			T s_cosq[NUM_POS];
 		T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
@@ -112,13 +122,15 @@ void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *x
       		#if USE_EE_VEL_COST
 				compute_eePosVel_dx<T>(xk, s_Tb, Tbody, s_cosq, s_sinq, s_Tb_dx, s_TbTdt, s_Tb_dt_dx, s_T, 
 	                                   s_T_dx, s_T_dt_dx, s_T_dt_dx_p, s_eePos, s_eeVel, s_deePosVel, 12);
-				costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid,s_eeVel,s_deePosVel);
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid,s_eeVel,s_deePosVel,
+							Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
 			#else
 				compute_eePos<T>(s_T,s_eePos,s_T_dx,s_deePos,s_sinq,s_Tb,s_Tb_dx,xk,s_cosq,Tbody);
-				costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid);
+				costGrad<T>(Hk,gk,s_eePos,s_deePos,xg,xk,uk,kInd,ld_H,JT,desc.tid,nullptr,nullptr,
+							Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
 			#endif
 		#else // simple
-			costGrad(Hk,gk,xk,uk,xg,kInd,ld_H);
+			costGrad(Hk,gk,xk,uk,xg,kInd,ld_H,Q1,Q2,R,QF1,QF2);
     	#endif
 	}
 }
@@ -236,14 +248,20 @@ void nextIterationSetupGPU(T **d_x, T **h_d_x, T *d_xp, T **d_u, T **h_d_u, T *d
                       	   T *d_AB, T *d_H, T *d_g, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_xGoal,\
                       	   int *alphaIndex, cudaStream_t *streams, dim3 dynDimms, dim3 intDimms, \
                       	   int ld_x, int ld_u, int ld_d, int ld_AB, int ld_H, int ld_g, int ld_P, int ld_p, \
-                      	   T *d_I = nullptr, T *d_Tbody = nullptr){
+                      	   T *d_I = nullptr, T *d_Tbody = nullptr,
+                      	   T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+          	   			   T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+          	   			   T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+          	   			   T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	// Compute derivatives for next pass(AB,H,g) and copy u into all us and run each in a separate stream
 	// also save x, u, J, P, p into prev variables (interleaving calls for maximum stream potential)
 	// these need to finish before the backpass
 	integratorGradientKern<T><<<intDimms,dynDimms,0,streams[0]>>>(d_AB,h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_I,d_Tbody,ld_x,ld_u,ld_AB);   
 	gpuErrchk(cudaPeekAtLastError());
-	if(!EE_COST){costGradientHessianKern<T><<<1,NUM_TIME_STEPS,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g);}
-	else{costGradientHessianKern<T><<<NUM_TIME_STEPS,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,d_Tbody);}
+	if(!EE_COST){costGradientHessianKern<T><<<1,NUM_TIME_STEPS,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,nullptr,nullptr,
+																			   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);}
+	else{costGradientHessianKern<T><<<NUM_TIME_STEPS,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,d_Tbody,nullptr,
+																			  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);}
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaMemcpyAsync(d_Pp,d_P,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[2]));
 	gpuErrchk(cudaMemcpyAsync(d_pp,d_p,ld_p*DIM_p_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[3]));
@@ -264,13 +282,18 @@ template <typename T>
 __host__ __forceinline__
 void nextIterationSetupCPU(T *x, T *xp, T *u, T *up, T *d, T *dp, T *AB, T *H, T *g, T *P, T *p, T *Pp, T *pp, T *xGoal, \
                            std::thread *threads, int ld_x, int ld_u, int ld_d, int ld_AB, int ld_H, int ld_g, int ld_P, int ld_p, \
-                           T *I = nullptr, T *Tbody = nullptr){
+                           T *I = nullptr, T *Tbody = nullptr,
+                           T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+          	   			   T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+          	   			   T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+          	   			   T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
     // Compute derivatives for next pass(AB,H,g) also save x, u, J, P, p into prev variables
     threadDesc_t desc;  desc.dim = COST_THREADS;
     for (unsigned int thread_i = 0; thread_i < COST_THREADS; thread_i++){
         desc.tid = thread_i; 	desc.reps = compute_reps(thread_i,COST_THREADS,NUM_TIME_STEPS);
         threads[thread_i] = 
-            std::thread(&costGradientHessianThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(g), std::ref(H), std::ref(xGoal), ld_x, ld_u, ld_H, ld_g, std::ref(Tbody), nullptr);
+            std::thread(&costGradientHessianThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(g), std::ref(H), std::ref(xGoal), ld_x, ld_u, ld_H, ld_g, std::ref(Tbody), nullptr,
+            											 Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads,thread_i);}
     }
     desc.dim = INTEGRATOR_THREADS;
@@ -298,9 +321,14 @@ template <typename T>
 __host__ __forceinline__
 void nextIterationSetupCPU2(T **xs, T *xp, T **us, T *up, T **ds, T *dp, T *AB, T *H, T *g, T *P, T *p, T *Pp, T *pp, T *xGoal, \
                            std::thread *threads, int *alphaIndex, int ld_x, int ld_u, int ld_d, int ld_AB, int ld_H, int ld_g, int ld_P, int ld_p, \
-                           T *I = nullptr, T *Tbody = nullptr){
+                           T *I = nullptr, T *Tbody = nullptr,
+                           T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+          	   			   T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+          	   			   T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+          	   			   T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	int flag = 1;	if (*alphaIndex == -1){*alphaIndex = 0; flag = 0;}
-	nextIterationSetupCPU<T>(xs[*alphaIndex],xp,us[*alphaIndex],up,ds[*alphaIndex],dp,AB,H,g,P,p,Pp,pp,xGoal,threads,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,I,Tbody);
+	nextIterationSetupCPU<T>(xs[*alphaIndex],xp,us[*alphaIndex],up,ds[*alphaIndex],dp,AB,H,g,P,p,Pp,pp,xGoal,threads,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,I,Tbody,
+							 Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
  	// and copy x,u,d to all x,u,d if needed
  	if(flag){
 	 	threads[0] = std::thread(&memcpyArr<T>, std::ref(xs), std::ref(xs[*alphaIndex]), ld_x*NUM_TIME_STEPS*sizeof(T), NUM_ALPHA, *alphaIndex);
@@ -320,14 +348,20 @@ __host__ __forceinline__
 void initAlgGPU(T **d_x, T **h_d_x, T *d_xp, T *d_xp2, T **d_u, T **h_d_u, T *d_up, T **d_d, T **h_d_d, T *d_dp, T *d_dT, T *d_AB, T *d_H, T *d_g, \
              	T *d_KT, T *d_du, T *d_JT, T *prevJ, T *d_xGoal, T *d_alpha, int *alphaIndex, int *alphaOut, T *Jout, \
              	cudaStream_t *streams, dim3 dynDimms, dim3 intDimms, int forwardRolloutFlag, \
-             	int ld_x, int ld_u, int ld_d, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, \
-             	T *d_I = nullptr, T *d_Tbody = nullptr){
+             	int ld_x, int ld_u, int ld_d, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, T *d_I = nullptr, T *d_Tbody = nullptr, \
+             	T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+   			    T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+   			    T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+   			    T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	if (forwardRolloutFlag){alphaOut[0] = 0;}	else{alphaOut[0] = -1;}
 	// compute initial derivatives in separate streams and save the current utraj, xtraj, xp, xp2, up, and d_d
 	integratorGradientKern<T><<<intDimms,dynDimms,0,streams[0]>>>(d_AB,h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_I,d_Tbody,ld_x,ld_u,ld_AB); gpuErrchk(cudaPeekAtLastError());
-	if(!EE_COST){costGradientHessianKern<T><<<1,NUM_TIME_STEPS,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g);}
-	else if(!forwardRolloutFlag){costGradientHessianKern<T><<<NUM_TIME_STEPS,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,d_Tbody,d_JT);}
-	else {costGradientHessianKern<T><<<1,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,d_Tbody);}
+	if(!EE_COST){costGradientHessianKern<T><<<1,NUM_TIME_STEPS,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,nullptr,nullptr,
+																			   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);}
+	else if(!forwardRolloutFlag){costGradientHessianKern<T><<<NUM_TIME_STEPS,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,d_Tbody,d_JT,
+																									  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);}
+	else {costGradientHessianKern<T><<<NUM_TIME_STEPS,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_g,d_H,d_xGoal,ld_x,ld_u,ld_H,ld_g,d_Tbody,nullptr,
+																  			   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);}
 	gpuErrchk(cudaPeekAtLastError());
 	if (NUM_ALPHA > 1){
 		memcpyCurrAKern<<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[2]>>>(d_u,h_d_u[*alphaIndex],*alphaIndex,ld_u); gpuErrchk(cudaPeekAtLastError());
@@ -341,7 +375,7 @@ void initAlgGPU(T **d_x, T **h_d_x, T *d_xp, T *d_xp2, T **d_u, T **h_d_u, T *d_
 	// get the cost and add epsilon in case the intialization results in zero update for the first pass
 	defectKern<T><<<NUM_ALPHA,NUM_TIME_STEPS,0,streams[5]>>>(d_d,d_dT,ld_d); gpuErrchk(cudaPeekAtLastError());
 	#if !EE_COST
-		costKern<T><<<1,NUM_TIME_STEPS,NUM_TIME_STEPS*sizeof(T),streams[6]>>>(d_x,d_u,d_JT,d_xGoal,ld_x,ld_u);
+		costKern<T><<<1,NUM_TIME_STEPS,NUM_TIME_STEPS*sizeof(T),streams[6]>>>(d_x,d_u,d_JT,d_xGoal,ld_x,ld_u,Q1,Q2,R,QF1,QF2);
 	#else
 		if (forwardRolloutFlag){costKern<T,0><<<1,1,0,streams[6]>>>(d_JT);}
 		else{costKern<T,1><<<1,NUM_TIME_STEPS,NUM_TIME_STEPS*sizeof(T),streams[1]>>>(d_JT);}
@@ -357,9 +391,13 @@ void initAlgGPU(T **d_x, T **h_d_x, T *d_xp, T *d_xp2, T **d_u, T **h_d_u, T *d_
 
 template <typename T>
 __host__ __forceinline__
-void initAlgCPU(T *x, T *xp, T *xp2, T *u, T *up, T *AB, T *H, T *g, T *KT, T *du, T *d, T *JT, T *Jout, T *prevJ, T *alpha, int *alphaOut, T *xGoal, \
-				std::thread *threads, int forwardRolloutFlag, int ld_x, int ld_u, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, \
-				T *I = nullptr, T *Tbody = nullptr){
+void initAlgCPU(T *x, T *xp, T *xp2, T *u, T *up, T *AB, T *H, T *g, T *KT, T *du, T *d, T *JT, T *Jout, T *prevJ, \
+				T *alpha, int *alphaOut, T *xGoal, std::thread *threads, int forwardRolloutFlag, \
+				int ld_x, int ld_u, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, T *I = nullptr, T *Tbody = nullptr, \
+				T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+   			    T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+   			    T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+   			    T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
     threadDesc_t desc;
     if (forwardRolloutFlag){alphaOut[0] = 0;}	else{alphaOut[0] = -1;}
     // compute the cost (if needed) and initial derivatives
@@ -367,7 +405,7 @@ void initAlgCPU(T *x, T *xp, T *xp2, T *u, T *up, T *AB, T *H, T *g, T *KT, T *d
         desc.dim = COST_THREADS;
         for (unsigned int thread_i = 0; thread_i < COST_THREADS; thread_i++){
             desc.tid = thread_i; 	desc.reps = compute_reps(thread_i,COST_THREADS,NUM_TIME_STEPS);
-            threads[thread_i] = std::thread(&costThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(JT), std::ref(xGoal), ld_x, ld_u);
+            threads[thread_i] = std::thread(&costThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(JT), std::ref(xGoal), ld_x, ld_u, Q1, Q2, R, QF1, QF2);
         }
     #endif
     desc.dim = COST_THREADS;
@@ -375,11 +413,13 @@ void initAlgCPU(T *x, T *xp, T *xp2, T *u, T *up, T *AB, T *H, T *g, T *KT, T *d
         desc.tid = thread_i; 	desc.reps = compute_reps(thread_i,COST_THREADS,NUM_TIME_STEPS);
         if (EE_COST && !forwardRolloutFlag){
             threads[COST_THREADS + thread_i] = 
-                std::thread(&costGradientHessianThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(g), std::ref(H), std::ref(xGoal), ld_x, ld_u, ld_H, ld_g, std::ref(Tbody), std::ref(JT));    
+                std::thread(&costGradientHessianThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(g), std::ref(H), std::ref(xGoal), ld_x, ld_u, ld_H, ld_g, std::ref(Tbody), std::ref(JT),
+                											 Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);    
         }
         else{
             threads[COST_THREADS + thread_i] = 
-                std::thread(&costGradientHessianThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(g), std::ref(H), std::ref(xGoal), ld_x, ld_u, ld_H, ld_g, std::ref(Tbody), nullptr);    
+                std::thread(&costGradientHessianThreaded<T>, desc, std::ref(x), std::ref(u), std::ref(g), std::ref(H), std::ref(xGoal), ld_x, ld_u, ld_H, ld_g, std::ref(Tbody), nullptr,
+                											 Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
         }
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, COST_THREADS + thread_i);}
     }
@@ -406,11 +446,16 @@ void initAlgCPU(T *x, T *xp, T *xp2, T *u, T *up, T *AB, T *H, T *g, T *KT, T *d
 
 template <typename T>
 __host__ __forceinline__
-void initAlgCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *AB, T *H, T *g, T *KT, T *du, T **ds, T *JT, T *Jout, T *prevJ, T *alphas, int *alphaOut, T *xGoal, \
-				std::thread *threads, int forwardRolloutFlag, int ld_x, int ld_u, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, \
-				T *I = nullptr, T *Tbody = nullptr){
+void initAlgCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *AB, T *H, T *g, T *KT, T *du, T **ds, T *JT, T *Jout, T *prevJ, \
+				T *alphas, int *alphaOut, T *xGoal, std::thread *threads, int forwardRolloutFlag, \
+				int ld_x, int ld_u, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, T *I = nullptr, T *Tbody = nullptr, \
+				T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+   			    T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+   			    T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+   			    T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	initAlgCPU<T>(xs[0],xp,xp2,us[0],up,AB,H,g,KT,du,ds[0],JT,Jout,prevJ,alphas,alphaOut,xGoal,threads,
-		          forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody);
+		          forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody,
+		          Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 	// also copy all x,u,d to xs,us,ds
 	for (int i = 1; i < NUM_ALPHA; i++){
 		threads[3*i] = std::thread(memcpy, std::ref(xs[i]), std::ref(xs[0]), ld_x*NUM_TIME_STEPS*sizeof(T));
@@ -537,7 +582,11 @@ __host__ __forceinline__
 void loadVarsGPU(T **d_x, T **h_d_x, T *d_xp, T *x0, T **d_u, T **h_d_u, T *d_up, T *u0, T *d_P, T *d_Pp, T *P0, T *d_p, T *d_pp, T *p0, \
 			  	 T *d_KT, T *KT0, T *d_du, T *d_dT, T **d_d, T **h_d_d, T *d0, T *d_AB, int *d_err, T *xGoal, T *d_xGoal, T *d_alpha, \
 			  	 T *d_Tbody, T *d_I, T *d_JT, int clearVarsFlag, int forwardRolloutFlag, cudaStream_t *streams, dim3 dynDimms, \
-			  	 int ld_x, int ld_u, int ld_P, int ld_p, int ld_KT, int ld_du, int ld_d, int ld_AB){
+			  	 int ld_x, int ld_u, int ld_P, int ld_p, int ld_KT, int ld_du, int ld_d, int ld_AB,
+			  	 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+   			     T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+   			     T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+   			     T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	// load x and u onto the device (assumes passed in x and u are ld aligned -- and goal)
 	gpuErrchk(cudaMemcpyAsync(h_d_x[0], x0, ld_x*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
 	gpuErrchk(cudaMemcpyAsync(h_d_u[0], u0, ld_u*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice, streams[1]));
@@ -577,8 +626,10 @@ void loadVarsGPU(T **d_x, T **h_d_x, T *d_xp, T *x0, T **d_u, T **h_d_u, T *d_up
 
     // run initial forward sim if asked
 	if (forwardRolloutFlag){
-		if (!EE_COST){forwardSimKern<T><<<M_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody);}
-		else{forwardSimKern<T><<<M_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,d_xGoal,d_JT);}
+		if (!EE_COST){forwardSimKern<T><<<M_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,nullptr,nullptr,
+																	   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
+		else{forwardSimKern<T><<<M_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,d_xGoal,d_JT,
+															  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
 		gpuErrchk(cudaPeekAtLastError());
 	}
    
@@ -591,7 +642,11 @@ __host__ __forceinline__
 void loadVarsCPU(T *x, T *xp, T *x0, T *u, T *up, T *u0, T *P, T *Pp, T *P0, T *p, T *pp, T *p0, \
 			  	 T *KT, T *KT0, T *du, T *d, T *d0, T *AB, int *err, int clearVarsFlag, int forwardRolloutFlag, \
 			  	 T *alpha, T *I, T *Tbody, T *xGoal, T *JT, std::thread *threads, 
-			  	 int ld_x, int ld_u, int ld_P, int ld_p, int ld_KT, int ld_du, int ld_AB, int ld_d){
+			  	 int ld_x, int ld_u, int ld_P, int ld_p, int ld_KT, int ld_du, int ld_AB, int ld_d,
+			  	 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+   			     T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+   			     T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+   			     T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	// load x and u onto the device and into xp, up (assumes passed in x0 and u0 are ld aligned)
 	threads[0] = std::thread(memcpy, std::ref(x), std::ref(x0), ld_x*NUM_TIME_STEPS*sizeof(T));
 	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
@@ -651,12 +706,14 @@ void loadVarsCPU(T *x, T *xp, T *x0, T *u, T *up, T *u0, T *P, T *Pp, T *P0, T *
             #if EE_COST
                 threads[thread_i] = std::thread(&forwardSim<T>, desc, std::ref(x), std::ref(u), std::ref(KT), std::ref(du), std::ref(d), alpha[0], 
                                                         			  std::ref(xp), ld_x, ld_u, ld_KT, ld_du, ld_d, 
-                                                        			  std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JT));
+                                                        			  std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JT),
+                                                        			  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
             
             #else
                 threads[thread_i] = std::thread(&forwardSim<T>, desc, std::ref(x), std::ref(u), std::ref(KT), std::ref(du), std::ref(d), alpha[0], 
                                                         			  std::ref(xp), ld_x, ld_u, ld_KT, ld_du, ld_d, 
-                                                        			  std::ref(I), std::ref(Tbody), nullptr, nullptr);
+                                                        			  std::ref(I), std::ref(Tbody), nullptr, nullptr,
+                                                        			  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
             #endif
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, thread_i);}
         }

@@ -14,7 +14,11 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 				 T **d_d, T **h_d_d, T *d_dp, T *d_dT, T *d, T *d_ApBK, T *d_Bdu, T *d_dM,
 				 T *alpha, T *d_alpha, int *alphaIndex, T *d_JT, T *J, T *dJexp, T *d_dJexp, T *d_xGoal,
 				 int *err, int *d_err, int ld_x, int ld_u, int ld_P, int ld_p, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, int ld_A, 
-				 T *d_I = nullptr, T *d_Tbody = nullptr){
+				 T *d_I = nullptr, T *d_Tbody = nullptr,
+				 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+   			     T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+   			     T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+   			     T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	// INITIALIZE THE ALGORITHM	//
 	struct timeval start, end, start2, end2;	gettimeofday(&start,NULL);	gettimeofday(&start2,NULL);
 	T prevJ, dJ, z; 	int iter = 1;	T rho = RHO_INIT; 	T drho = 1.0;	 *alphaIndex = 0;
@@ -27,9 +31,11 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 
 	// load and clear variables as requested and init the alg
 	loadVarsGPU<T>(d_x,h_d_x,d_xp,x0,d_u,h_d_u,d_up,u0,d_P,d_Pp,P0,d_p,d_pp,p0,d_KT,KT0,d_du,d_dT,d_d,h_d_d,d0,d_AB,d_err,xGoal,d_xGoal,d_alpha,
-				   d_Tbody,d_I,d_JT,clearVarsFlag,forwardRolloutFlag,streams,dynDimms,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB);
+				   d_Tbody,d_I,d_JT,clearVarsFlag,forwardRolloutFlag,streams,dynDimms,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB,
+				   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 	initAlgGPU<T>(d_x,h_d_x,d_xp,d_xp2,d_u,h_d_u,d_up,d_d,h_d_d,d_dp,d_dT,d_AB,d_H,d_g,d_KT,d_du,d_JT,&prevJ,d_xGoal,d_alpha,alphaIndex,
-			      alphaOut,Jout,streams,dynDimms,intDimms,forwardRolloutFlag,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_KT,ld_du,d_I,d_Tbody);
+			      alphaOut,Jout,streams,dynDimms,intDimms,forwardRolloutFlag,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_KT,ld_du,d_I,d_Tbody,
+			      Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 	gettimeofday(&end2,NULL);
 	*initTime = time_delta_ms(start2,end2);
 	// INITIALIZE THE ALGORITHM //
@@ -75,7 +81,8 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 				gettimeofday(&start2,NULL);
 				// Simulate forward with all alpha in parallel with MS, compute costs and line search
 				forwardSimGPU<T>(d_x,d_xp,d_xp2,d_u,d_KT,d_du,alpha,d_alpha,d,d_d,d_dT,dJexp,d_dJexp,J,d_JT,d_xGoal,&dJ,&z,prevJ,
-							     streams,dynDimms,FPBlocks,alphaIndex,&ignoreFirstDefectFlag,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody);
+							     streams,dynDimms,FPBlocks,alphaIndex,&ignoreFirstDefectFlag,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,
+							     Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 				gettimeofday(&end2,NULL);
 				simTime[iter-1] = time_delta_ms(start2,end2);
 			// FORWARD SIM //
@@ -92,7 +99,8 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 
 			// if we have gotten here then prep for next pass
 			nextIterationSetupGPU<T>(d_x,h_d_x,d_xp,d_u,h_d_u,d_up,d_d,h_d_d,d_dp,d_AB,d_H,d_g,d_P,d_p,d_Pp,d_pp,d_xGoal,alphaIndex,
-								     streams,dynDimms,intDimms,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,d_I,d_Tbody);
+								     streams,dynDimms,intDimms,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,d_I,d_Tbody,
+								     Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 			gettimeofday(&end2,NULL);
 			nisTime[iter-2] = time_delta_ms(start2,end2);
 		// NEXT ITERATION SETUP //
@@ -137,7 +145,11 @@ void runiLQR_CPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 				 T *AB, T *H, T *g, T *KT, T *du, T *d, T *dp, 
 				 T *ApBK, T *Bdu, T *alpha, T *JT, T *dJexp,  int *err,
 				 int ld_x, int ld_u, int ld_P, int ld_p, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, int ld_A,
-				 T *I = nullptr, T *Tbody = nullptr){
+				 T *I = nullptr, T *Tbody = nullptr,
+				 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+	   			 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+	   			 T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+	   			 T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	// INITIALIZE THE ALGORITHM //
 		struct timeval start, end, start2, end2;	gettimeofday(&start,NULL);	gettimeofday(&start2,NULL);
 		T prevJ, dJ, J, z, maxd = 0;	int iter = 1;
@@ -148,9 +160,11 @@ void runiLQR_CPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 		
 		// load in vars and init the alg
 		loadVarsCPU<T>(x,xp,x0,u,up,u0,P,Pp,P0,p,pp,p0,KT,KT0,du,d,d0,AB,err,clearVarsFlag,forwardRolloutFlag,
-					   alpha,I,Tbody,xGoal,JT,threads,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB);
+					   alpha,I,Tbody,xGoal,JT,threads,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB,
+					   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 		initAlgCPU<T>(x,xp,xp2,u,up,AB,H,g,KT,du,d,JT,Jout,&prevJ,alpha,alphaOut,xGoal,&threads[0],
-		               forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody);
+		               forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody,
+		               Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 		gettimeofday(&end2,NULL);
 		*initTime = time_delta_ms(start2,end2);
 	// INITIALIZE THE ALGORITHM //
@@ -184,7 +198,8 @@ void runiLQR_CPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 				// FORWARD SIM //
 					gettimeofday(&start2,NULL);
 					int err = forwardSimCPU<T>(x,xp,xp2,u,up,KT,du,d,dp,dJexp,JT,alpha[alphaIndex],xGoal,
-		    								   &J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,threads,ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody);
+		    								   &J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,threads,ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody,
+		    								   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 					gettimeofday(&end2,NULL);	
 					simTime[iter-1] += time_delta_ms(start2,end2);
 					if(err){if (alphaIndex < NUM_ALPHA - 1){alphaIndex++; continue;} else{alphaIndex = -1; break;}} else{break;}
@@ -201,7 +216,8 @@ void runiLQR_CPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 				break;
 			}
 			// if we have gotten here then prep for next pass
-			nextIterationSetupCPU<T>(x,xp,u,up,d,dp,AB,H,g,P,p,Pp,pp,xGoal,threads,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,I,Tbody);
+			nextIterationSetupCPU<T>(x,xp,u,up,d,dp,AB,H,g,P,p,Pp,pp,xGoal,threads,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,I,Tbody,
+									 Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 			gettimeofday(&end2,NULL);
 			nisTime[iter-2] = time_delta_ms(start2,end2);
 		// NEXT ITERATION SETUP //
@@ -240,7 +256,11 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 				 T *AB, T *H, T *g, T *KT, T *du, T **ds, T *dp, 
 				 T *ApBK, T *Bdu, T *alphas, T **JTs, T *dJexp,  int *err,
 				 int ld_x, int ld_u, int ld_P, int ld_p, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, int ld_A,
-				 T *I = nullptr, T *Tbody = nullptr){
+				 T *I = nullptr, T *Tbody = nullptr,
+				 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+	   			 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+	   			 T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+	   			 T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	// INITIALIZE THE ALGORITHM //
 		struct timeval start, end, start2, end2;	gettimeofday(&start,NULL);	gettimeofday(&start2,NULL);
 		T prevJ, dJ, J, z, maxd = 0;	int iter = 1;
@@ -251,9 +271,11 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 		
 		// load in vars and init the alg
 		loadVarsCPU<T>(xs[0],xp,x0,us[0],up,u0,P,Pp,P0,p,pp,p0,KT,KT0,du,ds[0],d0,AB,err,clearVarsFlag,forwardRolloutFlag,
-					   alphas,I,Tbody,xGoal,JTs[0],threads,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB);
+					   alphas,I,Tbody,xGoal,JTs[0],threads,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB,
+					   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 		initAlgCPU2<T>(xs,xp,xp2,us,up,AB,H,g,KT,du,ds,JTs[0],Jout,&prevJ,alphas,alphaOut,xGoal,threads,
-		               forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody);
+		               forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody,
+		               Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 		gettimeofday(&end2,NULL);
 		*initTime = time_delta_ms(start2,end2);
 	// INITIALIZE THE ALGORITHM //
@@ -286,7 +308,9 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 					gettimeofday(&start2,NULL);
 					int alphaIndexOut = forwardSimCPU2<T>(xs,xp,xp2,us,up,KT,du,ds,dp,dJexp,JTs,alphas,alphaIndex,xGoal,
 		    								              &J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,threads,
-		    								    		  ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody);
+		    								    		  ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody,
+		    								    		  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,
+		    								    		  Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 					gettimeofday(&end2,NULL);	
 					simTime[iter-1] += time_delta_ms(start2,end2);
 					if(alphaIndexOut == -1){ // failed
@@ -307,7 +331,8 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 				if (alphaIndex == -1){alphaIndex = 0;} break;
 			}
 			// if we have gotten here then prep for next pass
-			nextIterationSetupCPU2<T>(xs,xp,us,up,ds,dp,AB,H,g,P,p,Pp,pp,xGoal,threads,&alphaIndex,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,I,Tbody);
+			nextIterationSetupCPU2<T>(xs,xp,us,up,ds,dp,AB,H,g,P,p,Pp,pp,xGoal,threads,&alphaIndex,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,I,Tbody,
+									  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 			gettimeofday(&end2,NULL);
 			nisTime[iter-2] = time_delta_ms(start2,end2);
 		// NEXT ITERATION SETUP //
@@ -346,7 +371,11 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 				 T **d_d, T **h_d_d, T *d_dp, T *d_dT, T *d, T *d_ApBK, T *d_Bdu, T *d_dM,
 				 T *alpha, T *d_alpha, int *alphaIndex, T *d_JT, T *J, T *dJexp, T *d_dJexp, T *d_xGoal,
 				 int *err, int *d_err, int ld_x, int ld_u, int ld_P, int ld_p, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, int ld_A, 
-				 T *d_I = nullptr, T *d_Tbody = nullptr){
+				 T *d_I = nullptr, T *d_Tbody = nullptr,
+				 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
+	   			 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
+	   			 T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
+	   			 T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 	// INITIALIZE THE ALGORITHM	//
 	struct timeval start, end, start2, end2;	gettimeofday(&start,NULL);	gettimeofday(&start2,NULL);
 	T prevJ, dJ, z; 	int iter = 1;	T rho = RHO_INIT; 	T drho = 1.0;	 *alphaIndex = 0;
@@ -359,9 +388,11 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 
 	// load and clear variables as requested and init the alg
 	loadVarsGPU<T>(d_x,h_d_x,d_xp,x0,d_u,h_d_u,d_up,u0,d_P,d_Pp,P0,d_p,d_pp,p0,d_KT,KT0,d_du,d_dT,d_d,h_d_d,d0,d_AB,d_err,xGoal,d_xGoal,d_alpha,
-				   d_Tbody,d_I,d_JT,clearVarsFlag,forwardRolloutFlag,streams,dynDimms,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB);
+				   d_Tbody,d_I,d_JT,clearVarsFlag,forwardRolloutFlag,streams,dynDimms,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB,
+				   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 	initAlgGPU<T>(d_x,h_d_x,d_xp,d_xp2,d_u,h_d_u,d_up,d_d,h_d_d,d_dp,d_dT,d_AB,d_H,d_g,d_KT,d_du,d_JT,&prevJ,d_xGoal,d_alpha,alphaIndex,
-			      alphaOut,Jout,streams,dynDimms,intDimms,forwardRolloutFlag,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_KT,ld_du,d_I,d_Tbody);
+			      alphaOut,Jout,streams,dynDimms,intDimms,forwardRolloutFlag,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_KT,ld_du,d_I,d_Tbody,
+			      Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 	gettimeofday(&end2,NULL);
 	*initTime = time_delta_ms(start2,end2);
 	// INITIALIZE THE ALGORITHM //
@@ -395,7 +426,8 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 			
 			gettimeofday(&start2,NULL);
 			forwardPassSLQGPU(d_x,d_xp,d_xp2,d_u,d_ApBK,d_Bdu,d_du,d_KT,alpha,d_alpha,dJexp,d_dJexp,J,d_JT,
-				              d_xGoal,&dJ,&z,prevJ,streams,ADimms,alphaIndex,ld_x,ld_u,ld_d,ld_A,ld_du,ld_KT);
+				              d_xGoal,&dJ,&z,prevJ,streams,ADimms,alphaIndex,ld_x,ld_u,ld_d,ld_A,ld_du,ld_KT,
+				              Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 			gettimeofday(&end2,NULL);
 			sweepTime[iter-1] = time_delta_ms(start2,end2);		simTime[iter-1] = 0;
 		// FORWARD PASS //
@@ -411,7 +443,8 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 
 			// if we have gotten here then prep for next pass
 			nextIterationSetupGPU<T>(d_x,h_d_x,d_xp,d_u,h_d_u,d_up,d_d,h_d_d,d_dp,d_AB,d_H,d_g,d_P,d_p,d_Pp,d_pp,d_xGoal,alphaIndex,
-								     streams,dynDimms,intDimms,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,d_I,d_Tbody);
+								     streams,dynDimms,intDimms,ld_x,ld_u,ld_d,ld_AB,ld_H,ld_g,ld_P,ld_p,d_I,d_Tbody,
+								     Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 			gettimeofday(&end2,NULL);
 			nisTime[iter-2] = time_delta_ms(start2,end2);
 		// NEXT ITERATION SETUP //

@@ -26,16 +26,8 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 	#define QF_xdHAND 10.0
 	#define Q_xHAND 0.0
 	#define QF_xHAND 0.0
-	// #define Q_HAND1 10.0
-	// #define Q_HAND2 0.0
-	// #define R_HAND 0.0001
-	// #define QF_HAND1 1000.0
-	// #define QF_HAND2 0.0
-	// #define Q_xdHAND 1.0
-	// #define QF_xdHAND 100.0
-	// #define Q_xHAND 0.0
-	// #define QF_xHAND 0.0
 #endif
+
 #define USE_EE_VEL_COST 0
 #define Q_HANDV1 0.0
 #define Q_HANDV2 0.0
@@ -231,10 +223,12 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
 	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
+	// get the cost parameters
+	costParams<T> *cst = new costParams<T>;	loadCost(cst);
     // allocate memory and construct the appropriate handlers and launch the threads
     std::thread mpcThread;                  //lcm::Subscription *mpcSub = nullptr;  // pass in sub objects so we can unsubscribe later
-    CPUVars<T> *cvars = new CPUVars<T>;     LCM_MPCLoop_Handler<T> chandler = LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,itersToDo,timeLimit);
-    GPUVars<T> *gvars = new GPUVars<T>;     LCM_MPCLoop_Handler<T> ghandler = LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,itersToDo,timeLimit);
+    CPUVars<T> *cvars = new CPUVars<T>;     LCM_MPCLoop_Handler<T> chandler = LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
+    GPUVars<T> *gvars = new GPUVars<T>;     LCM_MPCLoop_Handler<T> ghandler = LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
     if (hardware == 'G'){
 		allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);
 		// load in inital trajectory and goal
@@ -245,7 +239,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
 		}
 		memcpy(gvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
 		// note run to conversion with no time or iter limits
-		runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,tActual_sys,tActual_plant,1);
+		runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,cst,tActual_sys,tActual_plant,1);
 		// then launch the MPC thread
      	mpcThread  = std::thread(&runMPCHandler<T>, lcm_ptr, &ghandler);    
      	// setCPUForThread(&mpcThread, 1);
@@ -258,7 +252,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
 		memcpy(cvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(cvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
 		// note run to conversion with no time or iter limits
-		runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,tActual_sys,tActual_plant,1);
+		runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,cst,tActual_sys,tActual_plant,1);
 		// then launch the MPC thread
      	mpcThread = std::thread(&runMPCHandler<T>, lcm_ptr, &chandler);    
      	// setCPUForThread(&mpcThread, 1);
@@ -277,7 +271,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
     	filterThread.join();
     #endif
     // printf("Threads Joined\n");
-    if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars);}  else{freeMemory_CPU_MPC<T>(cvars);}     delete gvars;   delete cvars;
+    if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars);}  else{freeMemory_CPU_MPC<T>(cvars);}     delete gvars;   delete cvars;	delete cst;
 }
 
 int main(int argc, char *argv[])

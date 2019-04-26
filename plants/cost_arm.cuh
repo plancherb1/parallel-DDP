@@ -9,7 +9,7 @@
 #define SAFETY_FACTOR_V 0.8
 #define SAFETY_FACTOR_T 0.8
 // From URDF
-#define TORQUE_LIMIT 50//(300.0 * SAFETY_FACTOR_T)
+#define TORQUE_LIMIT  (300.0 * SAFETY_FACTOR_T)
 #define POS_LIMIT_024 (2.96705972839 * SAFETY_FACTOR_P)
 #define POS_LIMIT_135 (2.09439510239 * SAFETY_FACTOR_P)
 #define POS_LIMIT_6   (3.05432619099 * SAFETY_FACTOR_P)
@@ -89,19 +89,40 @@
 	}
 #endif
 
+// default cost multipliers
+#ifndef _Q1 // For standrd costs
+ 	#define _Q1 0.1 // q
+	#define _Q2 0.001 // qd
+	#define _R  0.0001
+	#define _QF1 1000.0 // q
+	#define _QF2 1000.0 // qd
+	#endif
+#ifndef _Q_EE1 // For EE Costs
+ 	#define USE_SMOOTH_ABS 0
+	#define SMOOTH_ABS_ALPHA 0.2
+	#define _Q_EE1 0.1		 // xyz
+	#define _Q_EE2 0		 // rpy
+	#define _R_EE 0.0001
+	#define _QF_EE1 1000.0
+	#define _QF_EE2 0
+	#define _Q_xdEE 0.1
+	#define _QF_xdEE 1000.0
+	#define _Q_xEE 0.0
+	#define _QF_xEE 0.0
+#endif
+#ifndef _Q_EEV1 // for EE_Vel Costs
+	#define _Q_EEV1 0
+	#define _Q_EEV2 0
+	#define _QF_EEV1 0
+	#define _QF_EEV2 0
+#endif
+
 // joint level costs are simple
 #if !EE_COST
- 	#ifndef Q1
-	 	#define Q1 0.1 // q
-		#define Q2 0.001 // qd
-		#define R  0.0001
-		#define QF1 1000.0 // q
-		#define QF2 1000.0 // qd
- 	#endif
 	// joint level cost func returns single val
 	template <typename T>
 	__host__ __device__ __forceinline__
-	T costFunc(T *xk, T *uk, T *xgk, int k){
+	T costFunc(T *xk, T *uk, T *xgk, int k, T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 		T cost = 0.0;
 		if (k == NUM_TIME_STEPS - 1){
 			#pragma unroll
@@ -129,7 +150,7 @@
 	// joint level cost grad
 	template <typename T>
 	__host__ __device__ __forceinline__
-	void costGrad(T *Hk, T *gk, T *xk, T *uk, T *xgk, int k, int ld_H){
+	void costGrad(T *Hk, T *gk, T *xk, T *uk, T *xgk, int k, int ld_H, T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2){
 		if (k == NUM_TIME_STEPS - 1){
 			#pragma unroll
 	      	for (int i=0; i<STATE_SIZE; i++){
@@ -177,78 +198,72 @@
 
 // else need to consider multiple scenarios for end effector costs
 #else
-	#ifndef Q_HAND1
-	 	#define USE_SMOOTH_ABS 0
-		#define SMOOTH_ABS_ALPHA 0.2
-		#define Q_HAND1 0.1		 // xyz
-		#define Q_HAND2 0		 // rpy
-		#define R_HAND 0.0001
-		#define QF_HAND1 1000.0
-		#define QF_HAND2 0
-		#define Q_xdHAND 0.1
-		#define QF_xdHAND 1000.0
-		#define Q_xHAND 0.0
-		#define QF_xHAND 0.0
-		#define Q_HANDV1 0
-		#define Q_HANDV2 0
-		#define QF_HANDV1 0
-		#define QF_HANDV2 0
- 	#endif
-
 	template <typename T>
 	__host__ __device__ __forceinline__
-	T eeCost(T *s_eePos, T *d_eeGoal, int k, T *s_eeVel = nullptr){
+	T eeCost(T *s_eePos, T *d_eeGoal, int k, T *s_eeVel = nullptr, T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
+											 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2){
 		T cost = 0.0;
 	 	for (int i = 0; i < 6; i ++){
 	    	T delta = s_eePos[i] - d_eeGoal[i];
-	    	cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*delta;
-    		if (USE_EE_VEL_COST && s_eeVel != nullptr){cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
+	    	cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*delta;
+	    	#if USE_EE_VEL_COST
+    			if (s_eeVel != nullptr){cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*s_eeVel[i];}
+    		#endif
 	 	}
-	 	if (USE_SMOOTH_ABS){
+	 	#if USE_SMOOTH_ABS
 	    	cost = (T) sqrt(2*cost + SMOOTH_ABS_ALPHA*SMOOTH_ABS_ALPHA) - SMOOTH_ABS_ALPHA;
-	 	}
+	 	#endif
 	 	return cost;
 	}
 
 	template <typename T>
 	__host__ __device__ __forceinline__
-	T deeCost(T *s_eePos, T *s_deePos, T *d_eeGoal, int k, int r, T *s_eeVel = nullptr, T *s_deePosVel = nullptr){
-		T val = 0.0;	T deePos, deeVel;
+	T deeCost(T *s_eePos, T *s_deePos, T *d_eeGoal, int k, int r, T *s_eeVel = nullptr, T *s_deePosVel = nullptr, T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
+											 					  T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2){
+		T val = 0.0;	T deePos;
 	 	#pragma unroll
 	 	for (int i = 0; i < 6; i++){
 	 		T delta = s_eePos[i]-d_eeGoal[i];
-	 		if (USE_EE_VEL_COST && s_eeVel != nullptr){deePos = s_deePosVel[r*12+i];	deeVel = s_deePosVel[r*12+i+6];}
-	 		else{deePos = s_deePos[r*6+i];}
-	    	val += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*deePos;
-    		if (USE_EE_VEL_COST && s_eeVel != nullptr){val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*deeVel;}
+	    	#if USE_EE_VEL_COST
+    			if (s_eeVel != nullptr){
+    				T deeVel = s_deePosVel[r*12+i+6];	deePos = s_deePosVel[r*12+i];
+    				val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*deeVel;
+    			}
+			#else
+    			deePos = s_deePos[r*6+i];
+			#endif
+    		val += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*deePos;
 	 	}
-	 	if (USE_SMOOTH_ABS){
+	 	#if USE_SMOOTH_ABS
 			T val2 = 0.0;
 	    	#pragma unroll
 	    	for (int i = 0; i < 6; i++){
 	    		T delta = s_eePos[i]-d_eeGoal[i];
-	       		val2 += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_HAND1 : QF_HAND2) : (i < 3 ? Q_HAND1 : Q_HAND2))*delta*delta;
-       			if (USE_EE_VEL_COST && s_eeVel != nullptr){val2 += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_HANDV1 : QF_HANDV2) : (i < 3 ? Q_HANDV1 : Q_HANDV2))*s_eeVel[i]*s_eeVel[i];}
+	       		val2 += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*delta;
+       			if (USE_EE_VEL_COST && s_eeVel != nullptr){val2 += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*s_eeVel[i];}
 	    	}
 	    	val2 += SMOOTH_ABS_ALPHA*SMOOTH_ABS_ALPHA;
 	    	val /= sqrt(val2);
-	 	}
+	 	#endif
 	 	return val;
 	}
 
 	// eeCost Func to split shared mem
 	template <typename T>
 	__host__ __device__ __forceinline__
-	void costFunc(T *s_cost, T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr){
+	void costFunc(T *s_cost, T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr, 
+				  T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
+				  T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, 
+				  T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE){
 		int start, delta; singleLoopVals(&start,&delta);
 		#pragma unroll
 	    for (int ind = start; ind < NUM_POS; ind += delta){
 	    	T cost = 0.0;
-	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel);} // compute in one thread for smooth abs
+	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);} // compute in one thread for smooth abs
 	    	// in all cases add on u cost and state cost
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_HAND)*s_u[ind]*s_u[ind]; // add on input cost
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xHAND : Q_xHAND)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xdHAND : Q_xdHAND)*s_x[ind + NUM_POS]*s_x[ind + NUM_POS]; // add on the state tend to zero cost  
+	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
+	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xEE : Q_xEE)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
+	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xdEE : Q_xdEE)*s_x[ind + NUM_POS]*s_x[ind + NUM_POS]; // add on the state tend to zero cost  
 	      	// add on any limit costs if needed
 	      	#if USE_LIMITS_FLAG
 	      		cost += limitCosts<T,0>(s_x,s_u,ind,k);
@@ -262,15 +277,18 @@
 	// eeCost Func returns single val
 	template <typename T>
 	__host__ __device__ __forceinline__
-	T costFunc(T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr){
+	T costFunc(T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr,
+			   T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
+			   T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, 
+			   T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE){
 		T cost = 0.0;
 		#pragma unroll
 	    for (int ind = 0; ind < NUM_POS; ind ++){
-	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel);} // compute in one thread for smooth abs
+	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);} // compute in one thread for smooth abs
 	    	// in all cases add on u cost and state cost
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_HAND)*s_u[ind]*s_u[ind]; // add on input cost
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xHAND : Q_xHAND)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xdHAND : Q_xdHAND)*s_x[ind + NUM_POS]*s_x[ind + NUM_POS]; // add on the state tend to zero cost  
+	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
+	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xEE : Q_xEE)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
+	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xdEE : Q_xdEE)*s_x[ind + NUM_POS]*s_x[ind + NUM_POS]; // add on the state tend to zero cost  
 	      	// add on any limit costs if needed
 	      	#if USE_LIMITS_FLAG
 	      		cost += limitCosts<T,0>(s_x,s_u,ind,k);
@@ -284,7 +302,11 @@
 	// eeCost Grad
 	template <typename T>
 	__host__ __device__ __forceinline__
-	void costGrad(T *Hk, T*gk, T *s_eePos, T *s_deePos, T *d_eeGoal, T *s_x, T *s_u, int k, int ld_H, T *d_JT = nullptr, int tid = -1, T *s_eeVel = nullptr, T *s_deePosVel = nullptr){
+	void costGrad(T *Hk, T*gk, T *s_eePos, T *s_deePos, T *d_eeGoal, T *s_x, T *s_u, int k, int ld_H, 
+				  T *d_JT = nullptr, int tid = -1, T *s_eeVel = nullptr, T *s_deePosVel = nullptr,
+				  T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
+				  T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, 
+				  T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE){
 		// then to get the gradient and Hessian we need to compute the following for the state block (and also standard control block)
 		// J = \sum_i Q_i*pow(hand_delta_i,2) + other stuff
 		// dJ/dx = g = \sum_i Q_i*hand_delta_i*dh_i/dx + other stuff
@@ -293,12 +315,15 @@
 		#pragma unroll
 		for (int r = start; r < DIM_g_r; r += delta){
 		  	T val = 0.0;
-		  	if (USE_EE_VEL_COST && s_deePosVel != nullptr && r < STATE_SIZE){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deePosVel);}
-		  	else if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r);}
+		  	#if USE_EE_VEL_COST 
+		  		if (s_deePosVel != nullptr && r < STATE_SIZE){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deePosVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);}
+	  		#else
+		  		if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,nullptr,nullptr,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);}
+	  		#endif
 		  	// add on the joint level state cost (tend to zero regularizer) and control cost
-		  	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xHAND : Q_xHAND)*s_x[r];}
-		  	else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdHAND : Q_xdHAND)*s_x[r];}
-		  	else{val += (k == NUM_TIME_STEPS - 1 ? 0 : R_HAND)*s_u[r-STATE_SIZE];}
+		  	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xEE : Q_xEE)*s_x[r];}
+		  	else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdEE : Q_xdEE)*s_x[r];}
+		  	else{val += (k == NUM_TIME_STEPS - 1 ? 0 : R_EE)*s_u[r-STATE_SIZE];}
 		  	// add on any limit costs if needed
 		  	#if USE_LIMITS_FLAG
 	      		val += limitCosts<T,1>(s_x,s_u,r,k);
@@ -313,25 +338,28 @@
 		  	#pragma unroll
 		  	for (int r= startx; r<DIM_H_r; r += dx){
 		     	T val = 0.0;
-		     	if (USE_EE_VEL_COST && s_deePosVel != nullptr && r < STATE_SIZE && c < STATE_SIZE){
-			     	#pragma unroll
-		        	for (int j = 0; j < 9; j++){//for (int j = 0; j < 12; j++){
-		        		//T factor = (k == NUM_TIME_STEPS - 1 ? (j < 3 ? QF_HAND1 : (j < 6 ? QF_HAND2 : (j < 9 ? QF_HANDV1 : QF_HANDV2))) : (j < 3 ? Q_HAND1 : (j < 6 ? Q_HAND2 : (j < 9 ? Q_HANDV1 : Q_HANDV2))));
-		        		val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j];//*factor;
-		        	}
-        		}
-        		else if (r < NUM_POS && c < NUM_POS){
-	        		#pragma unroll
-		           	for (int j = 0; j < 6; j++){
-		           		// T factor = (k == NUM_TIME_STEPS - 1 ? (j < 3 ? QF_HAND1 : QF_HAND2) : (j < 3 ? Q_HAND1 : Q_HAND2));
-		           		val += s_deePos[r*6+j]*s_deePos[c*6+j];//*factor;
+		     	#if USE_EE_VEL_COST
+			     	if (s_deePosVel != nullptr && r < STATE_SIZE && c < STATE_SIZE){
+				     	#pragma unroll
+			        	for (int j = 0; j < 9; j++){//for (int j = 0; j < 12; j++){
+			        		//T factor = (k == NUM_TIME_STEPS - 1 ? (j < 3 ? QF_EE1 : (j < 6 ? QF_EE2 : (j < 9 ? QF_EEV1 : QF_EEV2))) : (j < 3 ? Q_EE1 : (j < 6 ? Q_EE2 : (j < 9 ? Q_EEV1 : Q_EEV2))));
+			        		val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j];//*factor;
+			        	}
+	        		}
+        		#else
+	        		if (r < NUM_POS && c < NUM_POS){
+		        		#pragma unroll
+			           	for (int j = 0; j < 6; j++){
+			           		// T factor = (k == NUM_TIME_STEPS - 1 ? (j < 3 ? QF_EE1 : QF_EE2) : (j < 3 ? Q_EE1 : Q_EE2));
+			           		val += s_deePos[r*6+j]*s_deePos[c*6+j];//*factor;
+			           	}
 		           	}
-	           	}
+	           	#endif
 			    // if applicable add on the joint level state cost (tend to zero regularizer) and control cost
 			    if (r == c){
-		        	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xHAND : Q_xHAND);}
-		        	else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdHAND : Q_xdHAND);}
-		        	else {val += (k== NUM_TIME_STEPS - 1) ? 0.0 : R_HAND;}
+		        	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xEE : Q_xEE);}
+		        	else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdEE : Q_xdEE);}
+		        	else {val += (k== NUM_TIME_STEPS - 1) ? 0.0 : R_EE;}
 		        	// add on any limit costs if needed
 		        	#if USE_LIMITS_FLAG
 	      				val += limitCosts<T,2>(s_x,s_u,r,k);
@@ -344,9 +372,9 @@
 		bool flag = d_JT != nullptr; int ind = (tid != -1 ? tid : k);
 		#ifdef __CUDA_ARCH__
 			if(threadIdx.x != 0 || threadIdx.y != 0){flag = 0;}
-			if (flag){d_JT[ind] = costFunc(s_eePos,d_eeGoal,s_x,s_u,k);}
+			if (flag){d_JT[ind] = costFunc(s_eePos,d_eeGoal,s_x,s_u,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
 		#else
-			if (flag){d_JT[ind] += costFunc(s_eePos,d_eeGoal,s_x,s_u,k);}
+			if (flag){d_JT[ind] += costFunc(s_eePos,d_eeGoal,s_x,s_u,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
 		#endif
 	}
 #endif
