@@ -7,42 +7,30 @@ nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu ../utils/cudaUtils.cu ../utils/t
 #define USE_SMOOTH_ABS 0
 #define SMOOTH_ABS_ALPHA 0.2
 #if USE_SMOOTH_ABS
-	#define Q_HAND1 0.1		//2.0 // xyz
-	#define Q_HAND2 0.001		//2.0 // rpy
-	#define R_HAND 0.0001		//0.0001
-	#define QF_HAND1 1000000.0	//20000.0 // xyz
-	#define QF_HAND2 10000.0	//20000.0 // rpy
-	#define Q_xdHAND 0.1		//1.0//0.1
-	#define QF_xdHAND 10000.0	//10.0//100.0
-	#define Q_xHAND 0.0		//0.0//0.001//1.0
-	#define QF_xHAND 0.0		//0.0//1.0
+	#define _Q_EE1 0.1		//2.0 // xyz
+	#define _Q_EE2 0.001		//2.0 // rpy
+	#define _R_EE 0.0001		//0.0001
+	#define _QF_EE1 1000000.0	//20000.0 // xyz
+	#define _QF_EE2 10000.0	//20000.0 // rpy
+	#define _Q_xdEE 0.1		//1.0//0.1
+	#define _QF_xdEE 10000.0	//10.0//100.0
+	#define _Q_xEE 0.0		//0.0//0.001//1.0
+	#define _QF_xEE 0.0		//0.0//1.0
 #else
-	// #define Q_HAND1 0.1		//1.0 // xyz
-	// #define Q_HAND2 0//0.001		//1.0 // rpy
-	// #define R_HAND 0.0001		//0.001
-	// #define QF_HAND1 1000.0		//5000.0 // xyz
-	// #define QF_HAND2 0//10.0		//5000.0 // rpy
-	// #define Q_xdHAND 0.1		//1.0//0.1
-	// #define QF_xdHAND 1000.0	//10.0//100.0
-	// #define Q_xHAND 0.0		//0.0//0.001//1.0
-	// #define QF_xHAND 0.0		//0.0//1.0
-	#define Q_HAND1 10.0
-	#define Q_HAND2 0
-	#define R_HAND 0.01
-	#define QF_HAND1 50.0
-	#define QF_HAND2 0
-	#define Q_xdHAND 1.0
-	#define QF_xdHAND 5.0
-	#define Q_xHAND 0.0
-	#define QF_xHAND 0.0
+	#define _Q_EE1 0.1		//1.0 // xyz
+	#define _Q_EE2 0//0.001		//1.0 // rpy
+	#define _R_EE 0.0001		//0.001
+	#define _QF_EE1 1000.0		//5000.0 // xyz
+	#define _QF_EE2 0//10.0		//5000.0 // rpy
+	#define _Q_xdEE 0.1		//1.0//0.1
+	#define _QF_xdEE 1000.0	//10.0//100.0
+	#define _Q_xEE 0.0		//0.0//0.001//1.0
+	#define _QF_xEE 0.0		//0.0//1.0
 #endif
-#define Q_HANDV1 0
-#define Q_HANDV2 0
-#define QF_HANDV1 0
-#define QF_HANDV2 0
+#define USE_EE_VEL_COST 0
+#define USE_LIMITS_FLAG 0
 
 #define MPC_MODE 1
-#define USE_EE_VEL_COST 0
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
 #define PLANT 4
@@ -275,7 +263,7 @@ int fig8Simulate(T *xActual, T *xGoal, trajVars<T> *tvars, T *error, double *goa
 	tvars->t0_sys = 0; 		int tActual_sys = static_cast<int>(std::floor(elapsedTime_us));
 	*error += simulateForward<T,150>(tvars,xActual,elapsedTime_us,(*goalTime),totalTime_us);
 	// print where are we ending up and expected
-	if(debugMode == 2 || 1){
+	if(debugMode == 2){
 		int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
 		printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",*counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
 		printMat<T,1,STATE_SIZE>(xActual,1);
@@ -318,6 +306,8 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1)); double timePrint = 0;
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
+	// get the cost parameters
+	costParams<T> *cst = new costParams<T>;	loadCost(cst);
 	if (hardware == 'G'){
 		GPUVars<T> *algvars = new GPUVars<T>;
 		allocateMemory_GPU_MPC<T>(algvars, dimms, tvars);
@@ -329,12 +319,12 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 		}
 		memcpy(algvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
 		// note run to conversion with no time or iter limits
-		runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);
+		runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,1);
 		// then start a loop of run a couple steps simulate for X steps and repeat
 		while(1){
 			counter++;
 			gettimeofday(&start,NULL);
-			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
+			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
 			gettimeofday(&end,NULL);
 			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
@@ -357,14 +347,14 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 			}
 		}
 		// note run to conversion with no time or iter limits
-		if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);}
-		else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,1);}
+		if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,1);}
+		else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,1);}
 		// then start a loop of run a couple steps simulate for X steps and repeat
 		while(1){
 			counter++;
 			gettimeofday(&start,NULL);
-			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
-			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
+			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
+			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
 			gettimeofday(&end,NULL);
 			double elapsedTime_us = TIME_STEP*1000000;// time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
@@ -374,6 +364,7 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 	}
 	printf("\n\nAverage tracking error: [%f]\n",(error/counter));
 	printAllTimingStats(data);
+	delete cst;
 }
 int main(int argc, char *argv[])
 {
