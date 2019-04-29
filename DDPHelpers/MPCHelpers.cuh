@@ -102,7 +102,7 @@
     };
 
     template <typename T>
-    __host__
+    __host__ __forceinline__
     void loadCost(costParams<T> *cst, T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
                                       T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
                                       T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
@@ -111,6 +111,14 @@
         cst->Q_EEV1 = Q_EEV1;   cst->Q_EEV2 = Q_EEV2;   cst->QF_EEV1 = QF_EEV1; cst->QF_EEV2 = QF_EEV2;
         cst->Q_xdEE = Q_xdEE;   cst->QF_xdEE = QF_xdEE; cst->Q_xEE = Q_xEE;     cst->QF_xEE = QF_xEE;   cst->R_EE = R_EE;
         cst->Q1 = Q1;           cst->Q2 = Q2;           cst->QF1 = QF1;         cst->QF2 = QF2;         cst->R = R;
+    }
+    template <typename T>
+    __host__ __forceinline__
+    void loadCost(costParams<T> *dst, costParams<T> *src){
+        dst->Q_EE1 = src->Q_EE1;     dst->Q_EE2 = src->Q_EE2;     dst->QF_EE1 = src->QF_EE1;   dst->QF_EE2 = src->QF_EE2; 
+        dst->Q_EEV1 = src->Q_EEV1;   dst->Q_EEV2 = src->Q_EEV2;   dst->QF_EEV1 = src->QF_EEV1; dst->QF_EEV2 = src->QF_EEV2;
+        dst->Q_xdEE = src->Q_xdEE;   dst->QF_xdEE = src->QF_xdEE; dst->Q_xEE = src->Q_xEE;     dst->QF_xEE = src->QF_xEE;   dst->R_EE = src->R_EE;
+        dst->Q1 = src->Q1;           dst->Q2 = src->Q2;           dst->QF1 = src->QF1;         dst->QF2 = src->QF2;         dst->R = src->R;
     }
 
     //int 64_t t_actual; is the only other var we will ever need

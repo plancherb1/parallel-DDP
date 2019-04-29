@@ -15,12 +15,14 @@
 #include "../lcmtypes/drake/lcmt_trajectory_d.hpp"
 #include "../lcmtypes/kuka/lcmt_target_twist.hpp"
 #include "../lcmtypes/kuka/lcmt_target_position.hpp"
+#include "../lcmtypes/kuka/lcmt_cost_params.hpp"
 #include <type_traits>
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
 const char *ARM_TRAJ_CHANNEL    = "TRAJ_CHANNEL";
 const char *ARM_COMMAND_CHANNEL = "IIWA_COMMAND";
 const char *ARM_STATUS_CHANNEL  = "IIWA_STATUS";
+const char *COST_PARAMS_CHANNEL = "COST_PARAMS_CHANNEL";
 #if USE_VELOCITY_FILTER
     const char *ARM_STATUS_FILTERED = "IIWA_STATUS_FILTERED";
 #else
@@ -200,6 +202,14 @@ class LCM_MPCLoop_Handler {
         void handleGoalqqd(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_target_position *msg){
             memcpy(gvars->xGoal,msg->position,NUM_POS*sizeof(T));   memcpy(&(gvars->xGoal[NUM_POS]),msg->velocity,NUM_POS*sizeof(T));
         }
+
+        // lcm callback function for new cost function parameters
+        void handleCostParams(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_cost_params *msg){
+            cst->Q_EE1 = msg->q_ee1;     cst->Q_EE2 = msg->q_ee2;     cst->QF_EE1 = msg->qf_ee1;   cst->QF_EE2 = msg->qf_ee2; 
+            cst->Q_EEV1 = msg->q_eev1;   cst->Q_EEV2 = msg->q_eev2;   cst->QF_EEV1 = msg->qf_eev1; cst->QF_EEV2 = msg->qf_eev2;
+            cst->Q_xdEE = msg->q_xdee;   cst->QF_xdEE = msg->qf_xdee; cst->Q_xEE = msg->q_xee;     cst->QF_xEE = msg->qf_xee;   cst->R_EE = msg->r_ee;
+            cst->Q1 = msg->q1;           cst->Q2 = msg->q2;           cst->QF1 = msg->qf1;         cst->QF2 = msg->qf2;         cst->R = msg->r;
+        }        
     
         // lcm callback function for new arm status
         void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
@@ -259,7 +269,8 @@ void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler){
     #else
         lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalqqd, handler);
     #endif
-    sub->setQueueCapacity(1);   sub2->setQueueCapacity(1);
+    lcm::Subscription *sub3 = lcm_ptr->subscribe(COST_PARAMS_CHANNEL, &LCM_MPCLoop_Handler<T>::handleCostParams, handler);
+    sub->setQueueCapacity(1); sub2->setQueueCapacity(1); sub3->setQueueCapacity(1);
     while(0 == lcm_ptr->handle());
 }
 

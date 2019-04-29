@@ -1,0 +1,12 @@
+package kuka;
+struct lcmt_cost_params
+{
+	// The timestamp in microseconds.
+	int64_t  utime;
+ 
+	// The pose (position and orientation)
+	float q_ee1;    float q_ee2;    float qf_ee1;   float qf_ee2; 
+	float q_eev1;   float q_eev2;   float qf_eev1;  float qf_eev2; 
+	float q_xdee;   float qf_xdee;  float q_xee;    float qf_xee;   float r_ee;
+	float q1;       float q2;       float qf1;    	float qf2;     float r;
+}
