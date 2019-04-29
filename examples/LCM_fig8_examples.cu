@@ -5,34 +5,33 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define EE_COST 1
 #define USE_SMOOTH_ABS 0
 #define SMOOTH_ABS_ALPHA 0.2
-#if USE_SMOOTH_ABS
-	// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
-	#define Q_HAND1 0.1
-	#define Q_HAND2 0
-	#define R_HAND 0.0001
-	#define QF_HAND1 1000.0
-	#define QF_HAND2 0
-	#define Q_xdHAND 1.0
-	#define QF_xdHAND 100.0
-	#define Q_xHAND 0.0
-	#define QF_xHAND 0.0
-#else
-	#define Q_HAND1 10.0
-	#define Q_HAND2 0
-	#define R_HAND 0.001
-	#define QF_HAND1 100.0
-	#define QF_HAND2 0
-	#define Q_xdHAND 10.0
-	#define QF_xdHAND 10.0
-	#define Q_xHAND 0.0
-	#define QF_xHAND 0.0
-#endif
+// default cost terms for the start of the goal to drop the arm from 0 vector to the start of the fig 8
+// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
+#define _Q_EE1 10.0
+#define _Q_EE2 0
+#define _R_EE 0.001
+#define _QF_EE1 100.0
+#define _QF_EE2 0
+#define _Q_xdEE 10.0
+#define _QF_xdEE 10.0
+#define _Q_xEE 0.0
+#define _QF_xEE 0.0
+// new cost terms for the actual fig 8 tracking
+#define _Q_EE1_fig8 0.1
+#define _Q_EE2_fig8 0
+#define _R_EE_fig8 0.0001
+#define _QF_EE1_fig8 1000.0
+#define _QF_EE2_fig8 0
+#define _Q_xdEE_fig8 1.0
+#define _QF_xdEE_fig8 100.0
+#define _Q_xEE_fig8 0.0
+#define _QF_xEE_fig8 0.0
 
 #define USE_EE_VEL_COST 0
-#define Q_HANDV1 0.0
-#define Q_HANDV2 0.0
-#define QF_HANDV1 0.0
-#define QF_HANDV2 0.0
+#define _Q_EEV1 0.0
+#define _Q_EEV2 0.0
+#define _QF_EEV1 0.0
+#define _QF_EEV2 0.0
 
 #define USE_LIMITS_FLAG 0
 #define R_TL 0.0
@@ -198,7 +197,22 @@ class LCM_Fig8Goal_Handler {
 			    lcm_ptr.publish(ARM_GOAL_CHANNEL,&dataOut);
 			}
 			// else check to see if we should update goal next time
-			else if (eNorm < eNormLim && vNorm < vNormLim){zeroTime = msg->utime; inFig8 = 1;}
+			else if (eNorm < eNormLim && vNorm < vNormLim){
+				// reset the zeroTime and set that we are inFig8
+				zeroTime = msg->utime;		inFig8 = 1;
+				// also update the cost params to track instead of move down
+				kuka::lcmt_cost_params dataOut;	dataOut.utime = msg->utime;
+				dataOut.q_ee1 = _Q_EE1_fig8;	dataOut.q_ee2 = _Q_EE2_fig8;
+				dataOut.qf_ee1 = _QF_EE1_fig8;	dataOut.qf_ee2 = _QF_EE2_fig8;
+				dataOut.q_eev1 = _Q_EEV1;		dataOut.q_eev2 = _Q_EEV2;
+				dataOut.qf_eev1 = _QF_EEV1;		dataOut.qf_eev2 = _QF_EEV2;
+				dataOut.q_xdee = _Q_xdEE_fig8;	dataOut.qf_xdee = _QF_xdEE_fig8;
+				dataOut.q_xee = _Q_xEE_fig8;	dataOut.qf_xee = _QF_xEE_fig8;
+				dataOut.r_ee = _R_EE_fig8;		dataOut.r = _R;
+				dataOut.q1 = _Q1; 				dataOut.q2 = _Q2;
+				dataOut.qf1 = _QF1; 			dataOut.qf2 = _QF2;
+				lcm_ptr.publish(COST_PARAMS_CHANNEL,&dataOut);
+			}
 			
 		}
 };
@@ -223,7 +237,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
 	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1));
 	// init the Ts
 	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
-	// get the cost parameters
+	// get the cost parameters (load in initial defualts)
 	costParams<T> *cst = new costParams<T>;	loadCost(cst);
     // allocate memory and construct the appropriate handlers and launch the threads
     std::thread mpcThread;                  //lcm::Subscription *mpcSub = nullptr;  // pass in sub objects so we can unsubscribe later

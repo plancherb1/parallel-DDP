@@ -200,7 +200,7 @@
 #else
 	template <typename T>
 	__host__ __device__ __forceinline__
-	T eeCost(T *s_eePos, T *d_eeGoal, int k, T *s_eeVel = nullptr, T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
+	T eeCost(T *s_eePos, T *d_eeGoal, int k, T *s_eeVel = nullptr, T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2,
 											 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2){
 		T cost = 0.0;
 	 	for (int i = 0; i < 6; i ++){
