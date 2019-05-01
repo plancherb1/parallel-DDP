@@ -150,6 +150,59 @@ class LCM_TrajRunner {
         }
 };
 
+// template <typename T>
+// class LCM_moveToState {
+//     public:
+//         T qdes[NUM_POS]; // desired position
+//         T errorLim; // the error limit needed to consider the move done
+//         lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
+//         lcm::Subscription *sub; // ptr to LCM sub object
+//         // bool done;
+
+//         // load in goal state
+//         LCM_moveToState(T *qdes_in, T errorLim_in = 0.01) : errorLim(errorLim_in) {
+//             for (int i = 0; i < NUM_POS; i++){qdes[i] = qdes_in[i];}    //done = 0;
+//             if(!lcm_ptr.good()){printf("LCM Failed to Init in LCM_moveToState\n");}
+//         } 
+//         ~LCM_moveToState(){}
+
+//         void run(){
+//             sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, this::statusCallback, this);
+//             while(0 == lcm_ptr.handle());
+//             // // poll the fd for updates
+//             // while(!done){   
+//             //     int lcm_fd = lcm_ptr.getFileno();  fd_set fds;     FD_ZERO(&fds);  FD_SET(lcm_fd, &fds);
+//             //     struct timeval timeout = {0,100};   // seconds, microseconds to wait for message
+//             //     if (select(lcm_fd + 1, &fds, 0, 0, &timeout)) {if (FD_ISSET(lcm_fd, &fds)){lcm_ptr.handle();}} 
+//             // }
+
+//         }
+
+//         // lcm STATUS callback function
+//         void statusCallback(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){ 
+//             // check if done
+//             T error = 0;    for (int i = 0; i < NUM_POS; i++){T delta = msg->joint_position_measured[i] - qdes[i]; error += delta*delta;}
+//             if (error < errorLim){lcm_ptr->unsubscribe(sub); return;}//done = 1; return;}
+//             // if not send out another command to move to the desired state
+//             #if HARDWARE_MODE
+//                 drake::lcmt_iiwa_command_hardware dataOut;
+//                 #pragma unroll
+//                 for(int i=0; i < 6; i++){dataOut.wrench[i] = 0.0;}
+//             #else
+//                 drake::lcmt_iiwa_command dataOut;   
+//                 dataOut.num_torques = static_cast<int32_t>(CONTROL_SIZE);
+//             #endif
+//             dataOut.num_joints = static_cast<int32_t>(NUM_POS);         dataOut.joint_position.resize(dataOut.num_joints);
+//             dataOut.utime = static_cast<int64_t>(msg->utime);           dataOut.joint_torque.resize(dataOut.num_joints);  // NUM_POS = CONTROL_SIZE for arm so this works
+//             // zero out torques
+//             for(int i=0; i < CONTROL_SIZE; i++){dataOut.joint_torque[i] = 0.0;}
+//             // set desired position
+//             for(int i=0; i < NUM_POS; i++){dataOut.joint_position[i] = xdes[i];}
+//             // then publish
+//             lcm_ptr.publish(ARM_COMMAND_CHANNEL,&dataOut);
+//         }
+// }
+
 template <typename T>
 __host__
 void runTrajRunner(matDimms *dimms){
@@ -495,12 +548,13 @@ class LCM_Simulator_Handler {
         }
 };
 
-
+template <typename T>
 __host__
-void runLCMSimulator(double *xInit, int numSteps = 50, int hertz = 1000, int debug = 0){
+void runLCMSimulator(T *xInit, int numSteps = 50, int hertz = 1000, int debug = 0){
     lcm::LCM lcm_ptr;
     if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
-    LCM_Simulator_Handler handler = LCM_Simulator_Handler(xInit, numSteps, hertz, debug);
+    double xInitd[STATE_SIZE];  for (int i = 0; i < STATE_SIZE; i++){xInitd[i] = static_cast<double>(xInit[i]);}
+    LCM_Simulator_Handler handler = LCM_Simulator_Handler(xInitd, numSteps, hertz, debug);
     lcm::Subscription *sub = lcm_ptr.subscribe(ARM_COMMAND_CHANNEL, &LCM_Simulator_Handler::handleMessage, &handler);
     sub->setQueueCapacity(1);
     // poll the fd for updates
