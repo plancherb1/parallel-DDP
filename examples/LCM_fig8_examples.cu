@@ -7,25 +7,26 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define SMOOTH_ABS_ALPHA 0.2
 // default cost terms for the start of the goal to drop the arm from 0 vector to the start of the fig 8
 // delta xyz, delta rpy, u, xzyrpyd, xyzrpy
-#define _Q_EE1 10.0
-#define _Q_EE2 0
+#define SMALL 0.00001
+#define _Q_EE1 50.0
+#define _Q_EE2 SMALL
 #define _R_EE 0.001
 #define _QF_EE1 100.0
-#define _QF_EE2 0
+#define _QF_EE2 SMALL
 #define _Q_xdEE 10.0
 #define _QF_xdEE 10.0
-#define _Q_xEE 0.0
-#define _QF_xEE 0.0
+#define _Q_xEE SMALL
+#define _QF_xEE SMALL
 // new cost terms for the actual fig 8 tracking
-#define _Q_EE1_fig8 0.1
-#define _Q_EE2_fig8 0
-#define _R_EE_fig8 0.0001
-#define _QF_EE1_fig8 1000.0
-#define _QF_EE2_fig8 0
-#define _Q_xdEE_fig8 1.0
-#define _QF_xdEE_fig8 100.0
-#define _Q_xEE_fig8 0.0
-#define _QF_xEE_fig8 0.0
+#define _Q_EE1_fig8 150.0 //(_Q_EE1*2)
+#define _Q_EE2_fig8 _Q_EE2
+#define _R_EE_fig8 _R_EE
+#define _QF_EE1_fig8 150.0 //_QF_EE1
+#define _QF_EE2_fig8 _QF_EE2
+#define _Q_xdEE_fig8 _Q_xdEE
+#define _QF_xdEE_fig8 _QF_xdEE
+#define _Q_xEE_fig8 _Q_xEE
+#define _QF_xEE_fig8 _Q_xEE
 
 #define USE_EE_VEL_COST 0
 #define _Q_EEV1 0.0
@@ -41,15 +42,15 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define MPC_MODE 1
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
-#define HARDWARE_MODE 0
+#define HARDWARE_MODE 1
 
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
-#define SOLVES_TO_RESET 100
+#define SOLVES_TO_RESET 15
 #define PLANT 4
 #define PI 3.14159
 
-#define E_NORM_LIM 0.05
+#define E_NORM_LIM 0.075
 #define V_NORM_LIM 0.05
 
 #include "../config.cuh"
@@ -105,11 +106,11 @@ void loadX(T *xk){
 }
 template <typename T>
 __host__ __forceinline__
-void loadTraj(trajVars<T> *tvars, matDimms *dimms){
+void loadTraj(trajVars<T> *tvars, matDimms *dimms, T *xInit){
 	T *xk = tvars->x;	T *uk = tvars->u;
 	for (int k=0; k<NUM_TIME_STEPS; k++){
 		for (int i = 0; i < STATE_SIZE; i++){
-			xk[i] = 0.0;	if (i < CONTROL_SIZE){uk[i] = 0.001;}
+			xk[i] = xInit[i];	if (i < CONTROL_SIZE){uk[i] = 0.01;}
 		}
 		// loadX(xk);
 		xk += (dimms->ld_x);	uk += (dimms->ld_u);
@@ -200,7 +201,9 @@ class LCM_Fig8Goal_Handler {
 			else if (eNorm < eNormLim && vNorm < vNormLim){
 				// reset the zeroTime and set that we are inFig8
 				zeroTime = msg->utime;		inFig8 = 1;
-				// also update the cost params to track instead of move down
+			}
+			// else if close but not there yet update the cost func to care more about moving to goals
+			else if (eNorm < 2*eNormLim && vNorm < 2*vNormLim){
 				kuka::lcmt_cost_params dataOut;	dataOut.utime = msg->utime;
 				dataOut.q_ee1 = _Q_EE1_fig8;	dataOut.q_ee2 = _Q_EE2_fig8;
 				dataOut.qf_ee1 = _QF_EE1_fig8;	dataOut.qf_ee2 = _QF_EE2_fig8;
@@ -227,7 +230,7 @@ void runFig8GoalLCM(double tTime, double eLim, double vLim){
 
 template <typename T>
 __host__
-void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, matDimms *dimms, char hardware){
+void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, matDimms *dimms, T *xInit, char hardware){
     // launch the simulator
     printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");//, [F]ilter, [G]oal changer, and traj[R]unner are launched!!!\n");
 	// get the max iters and time per solve
@@ -246,7 +249,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
     if (hardware == 'G'){
 		allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);
 		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(gvars,0,1);
+		loadTraj<T>(tvars, dimms, xInit);		loadFig8Goal<T>(gvars,0,1);
 		for (int i = 0; i < NUM_ALPHA; i++){
 			gpuErrchk(cudaMemcpy(gvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
 			gpuErrchk(cudaMemcpy(gvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
@@ -261,7 +264,7 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
     else{
 		allocateMemory_CPU_MPC<T>(cvars, dimms, tvars);
 		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(cvars,0,1);
+		loadTraj<T>(tvars, dimms, xInit);		loadFig8Goal<T>(cvars,0,1);
 		memcpy(cvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(cvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
 		memcpy(cvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
@@ -290,14 +293,22 @@ void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, mat
 
 int main(int argc, char *argv[])
 {
-	srand(time(NULL));
+	srand(time(NULL)); // init rand
+	// initial state for example
+	algType xInit[STATE_SIZE] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+	xInit[1] = PI/4.0;	xInit[3] = -PI/4.0;	xInit[5] = PI/4.0;
+		// xInit[0] = PI/2.0; 	xInit[1] = -PI/6.0; 	xInit[2] = -PI/3.0; 	xInit[3] = -PI/2.0; 	xInit[4] = 3.0*PI/4.0; 	xInit[5] = -PI/4.0; 	xInit[6] = 0.0;
 	// test based on command line args
 	char hardware = '?'; // require user input
 	if (argc > 1){hardware = argv[1][0];}
 	trajVars<algType> *tvars = new trajVars<algType>;	algTrace<algType> *atrace = new algTrace<algType>;	matDimms *dimms = new matDimms;
 	if (hardware == 'C' || hardware == 'G'){
+		// // move to starting position
+		// LCM_moveToState<algType> *mts = new LCM_moveToState<algType>(xInit);
+		// mts->run();
+		// then start control loop
 		lcm::LCM lcm_ptr;	if(!lcm_ptr.good()){printf("LCM Failed to Init\n"); return 1;}
-		testMPC_LCM<algType>(&lcm_ptr,tvars,atrace,dimms,hardware);
+		testMPC_LCM<algType>(&lcm_ptr,tvars,atrace,dimms,xInit,hardware);
 	}
 	// run the status filter
 	else if (hardware == 'F'){
@@ -305,9 +316,7 @@ int main(int argc, char *argv[])
 	}
 	// run the simulator
 	else if (hardware == 'S'){
-		double xInit[STATE_SIZE] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-		xInit[0] = PI/2.0; 	xInit[1] = -PI/6.0; 	xInit[2] = -PI/3.0; 	xInit[3] = -PI/2.0; 	xInit[4] = 3.0*PI/4.0; 	xInit[5] = -PI/4.0; 	xInit[6] = 0.0;
-		runLCMSimulator(xInit);
+		runLCMSimulator<algType>(xInit);
 	}
 	// various printers
 	else if (hardware == 'P'){
