@@ -1,83 +1,51 @@
 /***
 nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
-#define EE_COST 0
-#define USE_WAFR_URDF 1
-#define Q1 0.1 // q
-#define Q2 0.001 // qd
-#define R  0.0001
-#define QF1 1000.0 // q
-#define QF2 1000.0 // qd
+#define USE_WAFR_URDF 0
+#define EE_COST 1
+#define USE_SMOOTH_ABS 0
+#define SMOOTH_ABS_ALPHA 0.2
+// default cost terms for the start of the goal to drop the arm from 0 vector to the start of the fig 8
+// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
+#define SMALL 0.00001
+#define _Q_EE1 150.0
+#define _Q_EE2 SMALL
+#define _R_EE 0.001
+#define _QF_EE1 150.0
+#define _QF_EE2 SMALL
+#define _Q_xdEE 10.0
+#define _QF_xdEE 10.0
+#define _Q_xEE SMALL
+#define _QF_xEE SMALL
 
-#define USE_LIMITS_FLAG 1
-#define R_TL 100.0
-#define Q_PL 100.0
-#define Q_VL 100.0
+#define USE_EE_VEL_COST 0
+#define _Q_EEV1 0.0
+#define _Q_EEV2 0.0
+#define _QF_EEV1 0.0
+#define _QF_EEV2 0.0
+
+#define USE_LIMITS_FLAG 0
+#define R_TL 0.0
+#define Q_PL 0.0
+#define Q_VL 0.0
 
 #define MPC_MODE 1
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
+#define HARDWARE_MODE 1
+
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
+#define SOLVES_TO_RESET 15
 #define PLANT 4
-
 #define PI 3.14159
+
+#define E_NORM_LIM 0.05
+#define V_NORM_LIM 0.05
+
 #include "../config.cuh"
-#include <random>
-#include <vector>
-#include <algorithm>
-#include <iostream>
 
-__host__ __forceinline__
-bool tryParse(std::string& input, int& output) {
-	try{output = std::stoi(input);}
-	catch (std::invalid_argument) {return false;}
-	return true;
-}
-__host__ __forceinline__
-int getInt(int maxInt, int minInt){
-	std::string input;	std::string exitCode ("q"); int x;
-	while(1){
-		getline(std::cin, input);
-		while (!tryParse(input, x)){
-			if (input.compare(input.size()-1,1,exitCode) == 0){return -1;}
-				std::cout << "Bad entry. Enter a NUMBER\n";	getline(std::cin, input);
-			}
-		if (x >= minInt && x <= maxInt){break;}
-		else{std::cout << "Entry must be in range[" << minInt << "," << maxInt << "]\n";}
-	}
-	return x;
-}
 
-__host__ __forceinline__
-int getTimeBudget(int maxInt, int minInt){
-   printf("What should the MPC time budget be (in ms)? (q to exit)?\n");
-   return getInt(maxInt,minInt);
-}
-__host__ __forceinline__
-int getMaxIters(int maxInt, int minInt){
-   printf("What is the maximum number of iterations a solver can take? (q to exit)?\n");
-   return getInt(maxInt,minInt);
-}
-__host__ __forceinline__
-void keyboardHold(){
-   	printf("Press enter to continue\n");	std::string input;	getline(std::cin, input);
-}
-template <typename T>
-__host__ __forceinline__
-void loadX(T *xk){
-	xk[0] = PI/2.0; 	xk[1] = -PI/6.0; 	xk[2] = -PI/3.0; 	xk[3] = -PI/2.0; 	xk[4] = 3.0*PI/4.0; 	xk[5] = -PI/4.0; 	xk[6] = 0.0;
-	for(int i = NUM_POS; i < STATE_SIZE; i++){xk[i] = 0.0;}
-}
-template <typename T>
-__host__ __forceinline__
-void loadTraj(T *x, T *u, T *KT, int ld_x, int ld_u, int ld_KT){
-	T *xk = &x[0];	T *uk = &u[0];
-	for (int k=0; k<NUM_TIME_STEPS; k++){
-		loadX<T>(xk);	for(int i = 0; i < CONTROL_SIZE; i++){uk[i] = 0.001;}	xk += ld_x;	uk += ld_u;
-	}
-	memset(KT, 0, ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
-}
 template <typename T>
 class LCM_PickAndPlaceGoal_Handler {
     public:
@@ -142,113 +110,67 @@ void runPickAndPlaceGoalLCM(LCM_PickAndPlaceGoal_Handler<T> *handler){
 
 template <typename T>
 __host__
-void testMPC_LCM(lcm::LCM *lcm_ptr, trajVars<T> *tvars, algTrace<T> *atrace, matDimms *dimms, char hardware){
+int runMPC_LCM(char hardware, T *xInit){
     // launch the simulator
     printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");//, [F]ilter, [G]oal changer, and traj[R]unner are launched!!!\n");
 	// get the max iters and time per solve
-	int itersToDo = getMaxIters(1000, 1);
-	int timeLimit = getTimeBudget(1000, 1); //note in ms
-	// init the Ts
-	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
-    // allocate memory and construct the appropriate handlers and launch the threads
-    std::thread mpcThread;                  //lcm::Subscription *mpcSub = nullptr;  // pass in sub objects so we can unsubscribe later
-    CPUVars<T> *cvars = new CPUVars<T>;     LCM_MPCLoop_Handler<T> chandler = LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,itersToDo,timeLimit);
-    GPUVars<T> *gvars = new GPUVars<T>;     LCM_MPCLoop_Handler<T> ghandler = LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,itersToDo,timeLimit);
-    LCM_PickAndPlaceGoal_Handler<T> goalhandler = LCM_PickAndPlaceGoal_Handler<T>(0.001);
+	printf("What is the maximum number of iterations a solver can take? (q to exit)?\n");
+	int itersToDo = getInt(1000, 1);
+	printf("What should the MPC time budget be (in ms)? (q to exit)?\n");
+	int timeLimit = getInt(1000, 1); //note in ms
+	// allocate variables and load inital variables
+	trajVars<T> *tvars = new trajVars<T>; matDimms *dimms = new matDimms; algTrace<T> *atrace = new algTrace<T>;
+	costParams<T> *cst = new costParams<T>;	loadCost(cst); // load in default cost to start
+    std::thread mpcThread; LCM_MPCLoop_Handler<T> *mpchandler; CPUVars<T> *cvars; GPUVars<T> *gvars; // pointers for reference later
+    // spend time allocating for CPU / GPU split
+    if (hardware == 'G'){gvars = new GPUVars<T>; allocateMemory_GPU_MPC<T>(gvars, dimms, tvars); loadTraj<T>(gvars, tvars, dimms, xInit);}
+    else{				 cvars = new CPUVars<T>; allocateMemory_CPU_MPC<T>(cvars, dimms, tvars); loadTraj<T>(cvars, tvars, dimms, xInit);}
+    // get the goal handler
+    LCM_PickAndPlaceGoal_Handler<T> *goalhandler = new LCM_PickAndPlaceGoal_Handler<T>(E_NORM_LIM);
+    // then load the goals and LCM handlers and launch the MPC threads
     if (hardware == 'G'){
-		allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);
-		// load in inital trajectory and initial goal
-		loadTraj<T>(tvars->x, tvars->u, tvars->KT, dimms->ld_x, dimms->ld_u, dimms->ld_KT);		goalhandler.loadInitialGoal(gvars->xGoal);
-		for (int i = 0; i < NUM_ALPHA; i++){
-			gpuErrchk(cudaMemcpy(gvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
-			gpuErrchk(cudaMemcpy(gvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
-		}
-		memcpy(gvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
-		// note run to conversion with no time or iter limits
-		runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,tActual_sys,tActual_plant,1);
-		// then launch the MPC thread
-     	mpcThread  = std::thread(&runMPCHandler<T>, lcm_ptr, &ghandler);    
-     	// setCPUForThread(&mpcThread, 1);
+    	// load initial goal and run to full convergence to warm start
+    	goalhandler->loadInitialGoal(gvars->xGoal); runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,cst,0,0,1);
+		// then create the handler and launch the MPC thread
+		mpchandler = new LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
+     	mpcThread  = std::thread(&runMPCHandler<T>, mpchandler);    
     }
     else{
-		allocateMemory_CPU_MPC<T>(cvars, dimms, tvars);
-		// load in inital trajectory and goal
-		loadTraj<T>(tvars->x, tvars->u, tvars->KT, dimms->ld_x, dimms->ld_u, dimms->ld_KT);		goalhandler.loadInitialGoal(cvars->xGoal);
-		memcpy(cvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
-		memcpy(cvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
-		memcpy(cvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
-		// note run to conversion with no time or iter limits
-		runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,tActual_sys,tActual_plant,1);
-		// then launch the MPC thread
-     	mpcThread = std::thread(&runMPCHandler<T>, lcm_ptr, &chandler);    
-     	// setCPUForThread(&mpcThread, 1);
+    	// load initial goal and run to full convergence to warm start
+    	goalhandler->loadInitialGoal(cvars->xGoal); runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,cst,0,0,1);
+		// then create the handler and launch the MPC thread
+		mpchandler = new LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
+     	mpcThread  = std::thread(&runMPCHandler<T>, mpchandler);    
+     	if(FORCE_CORE_SWITCHES){setCPUForThread(&mpcThread, 1);} // move to another CPU
     }
+    // launch the goal monitor
+    std::thread goalThread = std::thread(&runPickAndPlaceGoalLCM<T>, goalhandler);
     // launch the trajRunner
     std::thread trajThread = std::thread(&runTrajRunner<T>, dimms);
-    // launch the goal monitor
-    std::thread goalThread = std::thread(&runPickAndPlaceGoalLCM<algType>, &goalhandler);
     // launch the status filter if needed
     #if USE_VELOCITY_FILTER
-    	std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<algType>);
+    	std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<T>);
 	#endif
-    printf("All threads launched -- check simulator output!\n");
+    printf("All threads launched -- check simulator/hardware output!\n");
     mpcThread.join();	trajThread.join();	goalThread.join();
     #if USE_VELOCITY_FILTER
     	filterThread.join();
     #endif
-    // printf("Threads Joined\n");
-    if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars);}  else{freeMemory_CPU_MPC<T>(cvars);}     delete gvars;   delete cvars;
+    if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars); delete gvars;} else{freeMemory_CPU_MPC<T>(cvars); delete cvars;}
+    freeTrajVars<T>(tvars); delete tvars; delete atrace; delete dimms; delete cst; delete mpchandler; delete goalhandler;
+    return 0;
 }
 
 int main(int argc, char *argv[])
 {
+	// init rand
 	srand(time(NULL));
-	// test based on command line args
-	char hardware = '?'; // require user input
-	if (argc > 1){hardware = argv[1][0];}
-	trajVars<algType> *tvars = new trajVars<algType>;	algTrace<algType> *atrace = new algTrace<algType>;	matDimms *dimms = new matDimms;
-	if (hardware == 'C' || hardware == 'G'){
-		lcm::LCM lcm_ptr;	if(!lcm_ptr.good()){printf("LCM Failed to Init\n"); return 1;}
-		testMPC_LCM<algType>(&lcm_ptr,tvars,atrace,dimms,hardware);
-	}
-	// run the status filter
-	else if (hardware == 'F'){
-		run_IIWA_STATUS_filter<algType>();
-	}
-	// run the simulator
-	else if (hardware == 'S'){
-		double xInit[STATE_SIZE]; loadX<double>(xInit);
-		runLCMSimulator(xInit);
-	}
-	// various printers
-	else if (hardware == 'P'){
-		char type = argv[1][1];
-		lcm::LCM lcm_ptr;	if(!lcm_ptr.good()){printf("LCM Failed to Init\n"); return 1;} 
-		if(type == 'S'){
-			LCM_IIWA_STATUS_printer<algType> *shandler = new LCM_IIWA_STATUS_printer<algType>;
-			run_IIWA_STATUS_printer<algType>(&lcm_ptr,shandler);
-			delete shandler;	
-		}
-		else if(type == 'C'){
-			LCM_IIWA_COMMAND_printer<algType> *chandler = new LCM_IIWA_COMMAND_printer<algType>;
-			run_IIWA_COMMAND_printer<algType>(&lcm_ptr,chandler);
-			delete chandler;
-		}
-		else if(type == 'T'){
-			LCM_traj_printer<algType> *thandler = new LCM_traj_printer<algType>;
-			run_traj_printer<algType>(&lcm_ptr,thandler);
-			delete thandler;
-		}
-		else if(type == 'F'){
-			LCM_IIWA_STATUS_FILTERED_printer<algType> *fhandler = new LCM_IIWA_STATUS_FILTERED_printer<algType>;
-			run_IIWA_STATUS_FILTERED_printer<algType>(&lcm_ptr,fhandler);
-			delete fhandler;
-		}
-		else{printf("Invalid printer requested as second char [%c]. Currently supports: [S]tatus, [C]ommand, [T]rajectory, or [F]iltered Status\n",type);}
-	}
-	// else error
-	printf("Error: Unkown code - usage is: [C]PU or [G]PU MPC Algorithm, Debug [P]rinters, or Kuka [S]imulator\n"); hardware = '?';
-	// free the trajVars and the wrappers
-	freeTrajVars<algType>(tvars);	delete atrace;	delete tvars;	delete dimms;
-	return (hardware == '?');
+	// initial state for example
+	algType xInit[STATE_SIZE]; loadInitialState(xInit,1);
+	// require user input for mode of operation
+	char hardware = '?'; if (argc > 1){hardware = argv[1][0];}
+	// run the MPC loop
+	if (hardware == 'C' || hardware == 'G'){return runMPC_LCM<algType>(hardware,xInit);}
+	// run aditional example options (printers, simulator, etc.)
+	else{return runOtherOptions<algType>(argv,xInit);}
 }

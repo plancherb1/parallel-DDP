@@ -256,4 +256,7 @@ typedef float algType;
 	#include "DDPHelpers/LCMHelpers.cuh"
 #endif
 
+// finally include the example helpers
+#include "utils/exampleUtils.cuh"
+
 #endif
