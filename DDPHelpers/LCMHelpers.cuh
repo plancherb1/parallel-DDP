@@ -104,7 +104,7 @@ class LCM_TrajRunner {
         LCM_TrajRunner(int _ld_x, int _ld_u, int _ld_KT) : ld_x(_ld_x), ld_u(_ld_u), ld_KT(_ld_KT) {
             x = (T *)malloc(ld_u*NUM_TIME_STEPS*sizeof(T));                 u = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));
             KT = (T *)malloc(ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));      ready = 0;
-            /*lcm_ptr = new lcm::LCM;*/  if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
+            if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
         } 
         // free and delete
         ~LCM_TrajRunner(){free(x); free(u); free(KT); /*delete lcm_ptr;*/}
@@ -212,12 +212,9 @@ void runTrajRunner(matDimms *dimms){
     // subscribe to everything
     lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_TrajRunner<T>::statusCallback, &tr);
     lcm::Subscription *trajSub;
-    if (std::is_same<T, float>::value){
-        trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_f, &tr);
-    }
-    else{
-        trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_d, &tr);   
-    }
+    if (std::is_same<T, float>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_f, &tr);}
+    else if (std::is_same<T, double>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_d, &tr);}
+    else{printf("Traj runner only defined for floats and doubles\n"); return;}
     // only execute latest message (no lag)
     statusSub->setQueueCapacity(1); trajSub->setQueueCapacity(1);
     // handle forever
@@ -239,13 +236,11 @@ class LCM_MPCLoop_Handler {
         // init and store the global location
         LCM_MPCLoop_Handler(GPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL) : 
                             gvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL) {
-                            /*lcm_ptr = new lcm::LCM;*/  if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
-                            cvars = nullptr; mode = 1;}
+                            if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} cvars = nullptr; mode = 1;}
         LCM_MPCLoop_Handler(CPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL) : 
                             cvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL) {
-                            /*lcm_ptr = new lcm::LCM;*/  if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
-                            gvars = nullptr; mode = 0;}
-        ~LCM_MPCLoop_Handler(){/*delete lcm_ptr;*/} // do nothing in the destructor
+                            if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} gvars = nullptr; mode = 0;}
+        ~LCM_MPCLoop_Handler(){} // do nothing in the destructor
 
         // lcm callback function for new arm goal (eePos)
         void handleGoalEE(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_target_twist *msg){
@@ -288,11 +283,9 @@ class LCM_MPCLoop_Handler {
                                               xActual_load[i+NUM_POS] = (T)(msg->joint_velocity_estimated)[i];}
                 if(mode){gpuErrchk(cudaMemcpy(gvars->d_xActual, gvars->xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice));}
             }
-            
             // run iLQR
             if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (gvars->lock)->unlock();}
             else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (cvars->lock)->unlock();}
-
             // publish to trajRunner
             if (std::is_same<T, float>::value){
                 drake::lcmt_trajectory_f dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(float);
@@ -302,7 +295,7 @@ class LCM_MPCLoop_Handler {
                 memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);   memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);   memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
                 lcm_ptr.publish(ARM_TRAJ_CHANNEL,&dataOut);
             }
-            else{
+            else if (std::is_same<T, double>::value){
                 drake::lcmt_trajectory_d dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(double);   
                 int xSize = (dimms->ld_x)*stepsSize;            int uSize = (dimms->ld_u)*stepsSize;            int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;
                 dataOut.x_size = xSize;                         dataOut.u_size = uSize;                         dataOut.KT_size = KTSize;
@@ -310,21 +303,23 @@ class LCM_MPCLoop_Handler {
                 memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);   memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);   memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
                 lcm_ptr.publish(ARM_TRAJ_CHANNEL,&dataOut);
             }
+            else{printf("MPC Loop Handler only defined for float and double\n");}
         }      
 };
 
 template <typename T>
 __host__
-void runMPCHandler(lcm::LCM *lcm_ptr, LCM_MPCLoop_Handler<T> *handler){
-    lcm::Subscription *sub = lcm_ptr->subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
+void runMPCHandler(LCM_MPCLoop_Handler<T> *handler){
+    lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to init in MPC handler runner\n");}
+    lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
     #if defined EE_COST && EE_COST == 1
-        lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalEE, handler);
+        lcm::Subscription *sub2 = lcm_ptr.subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalEE, handler);
     #else
-        lcm::Subscription *sub2 = lcm_ptr->subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalqqd, handler);
+        lcm::Subscription *sub2 = lcm_ptr.subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalqqd, handler);
     #endif
-    lcm::Subscription *sub3 = lcm_ptr->subscribe(COST_PARAMS_CHANNEL, &LCM_MPCLoop_Handler<T>::handleCostParams, handler);
+    lcm::Subscription *sub3 = lcm_ptr.subscribe(COST_PARAMS_CHANNEL, &LCM_MPCLoop_Handler<T>::handleCostParams, handler);
     sub->setQueueCapacity(1); sub2->setQueueCapacity(1); sub3->setQueueCapacity(1);
-    while(0 == lcm_ptr->handle());
+    while(0 == lcm_ptr.handle());
 }
 
 template <typename T>
