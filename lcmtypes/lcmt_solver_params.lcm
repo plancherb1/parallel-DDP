@@ -1,0 +1,10 @@
+package kuka;
+struct lcmt_solver_params
+{
+	// The timestamp in microseconds.
+	int64_t  utime;
+ 
+	// The data
+	int32_t iterLimit;
+	int32_t timeLimit;
+}

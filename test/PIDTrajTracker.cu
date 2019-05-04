@@ -1,5 +1,5 @@
 /***
-nvcc -std=c++11 -o PID.exe PIDTrajTracker.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o PID.exe PIDTrajTracker.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define USE_WAFR_URDF 0
 #define EE_COST 1
@@ -93,26 +93,6 @@ void runPIDTracker(bool torque_mode = 0){
     lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_CHANNEL, &LCM_PIDTracker_Handler::handleMessage, &handler);
     sub->setQueueCapacity(1);
     while(0 == lcm_ptr.handle());
-}
-__host__ __forceinline__
-bool tryParse(std::string& input, int& output) {
-	try{output = std::stoi(input);}
-	catch (std::invalid_argument) {return false;}
-	return true;
-}
-__host__ __forceinline__
-int getInt(int maxInt, int minInt){
-	std::string input;	std::string exitCode ("q"); int x;
-	while(1){
-		getline(std::cin, input);
-		while (!tryParse(input, x)){
-			if (input.compare(input.size()-1,1,exitCode) == 0){return -1;}
-				std::cout << "Bad entry. Enter a NUMBER\n";	getline(std::cin, input);
-			}
-		if (x >= minInt && x <= maxInt){break;}
-		else{std::cout << "Entry must be in range[" << minInt << "," << maxInt << "]\n";}
-	}
-	return x;
 }
 
 int main(int argc, char *argv[])

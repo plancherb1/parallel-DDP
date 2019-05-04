@@ -1,5 +1,5 @@
 /***
-nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define EE_COST 0
 #define TOL_COST 0.0
@@ -12,9 +12,6 @@ nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils
 
 #include "../config.cuh"
 #include <random>
-#include <vector>
-#include <algorithm>
-#include <iostream>
 
 #define TEST_ITERS 100
 #define ROLLOUT_FLAG 0
@@ -65,21 +62,24 @@ std::normal_distribution<double> randDist(RANDOM_MEAN, RANDOM_STDEV); //mean fol
 
 template <typename T>
 __host__ __forceinline__
+T getRand(){return static_cast<T>(randDist(randEng));}
+
+template <typename T>
+__host__ __forceinline__
 void loadXU(T *x, T *u, T *xGoal, int ld_x, int ld_u){
 	for (int k=0; k<NUM_TIME_STEPS; k++){
 		T *xk = x + k*ld_x;
 		#if PLANT == 1 // pend
-			xk[0] = 0.0;	xk[1] = (T)randDist(randEng);
+			xk[0] = 0.0;	xk[1] = getRand<T>();
 		#elif PLANT == 2 // cart
-		 	xk[0] = 0.0;				xk[1] = 0.0;
-			xk[2] = (T)randDist(randEng);	xk[3] = (T)randDist(randEng);
+		 	xk[0] = 0.0;			xk[1] = 0.0;
+			xk[2] = getRand<T>();	xk[3] = getRand<T>();
 		#elif PLANT == 3 // quad
-			for (int k2=0; k2<STATE_SIZE; k2++){if (k2 == 2){xk[k2] = 0.5;}	else if(k2 >= NUM_POS){xk[k2] = (T)randDist(randEng);}	else{xk[k2] = 0.0;}}
+			for (int k2=0; k2<STATE_SIZE; k2++){if (k2 == 2){xk[k2] = 0.5;}	else if(k2 >= NUM_POS){xk[k2] = getRand<T>();}	else{xk[k2] = 0.0;}}
 		#elif PLANT == 4 // arm
-			xk[0] = (T)-0.5*PI;		xk[1] = (T)0.25*PI;		xk[2] = (T)0.167*PI;
-			xk[3] = (T)-0.167*PI;	xk[4] = (T)0.125*PI;	xk[5] = (T)0.167*PI;	xk[6] = (T)0.5*PI;
-			xk[7] = (T)randDist(randEng);	xk[8] = (T)randDist(randEng);	xk[9] = (T)randDist(randEng);
-			xk[10] = (T)randDist(randEng);	xk[11] = (T)randDist(randEng);	xk[12] = (T)randDist(randEng);	xk[13] = (T)randDist(randEng);
+			xk[0] = -0.5*PI;		xk[1] = 0.25*PI;	xk[2] = 0.167*PI;
+			xk[3] = -0.167*PI;		xk[4] = 0.125*PI;	xk[5] = 0.167*PI;	xk[6] = 0.5*PI;
+			for (int k2=0; k2<NUM_POS; k2++){xk[NUM_POS+k2] = getRand<T>();}
 		#endif
 	}
 	for (int k=0; k<NUM_TIME_STEPS; k++){

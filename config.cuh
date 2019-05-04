@@ -62,6 +62,7 @@
 // define if we are working in doubles or floats
 // typedef double algType;
 typedef float algType;
+// typedef half algType; // code needs reworking before this will work
 
 // algorithmic options
 #ifndef INTEGRATOR
@@ -160,6 +161,9 @@ typedef float algType;
 #ifndef USE_LIMITS_FLAG
 	#define USE_LIMITS_FLAG 0 // use joint vel torque limits (quad pen)
 #endif
+#ifndef USE_SMOOTH_ABS
+	#define USE_SMOOTH_ABS 0 // use smooth abs cost (only applicable to EE cost)
+#endif
 #ifndef CONSTRAINTS_ON
 	#define CONSTRAINTS_ON 0 // AL style constraints
 #endif
@@ -167,6 +171,9 @@ typedef float algType;
 // dynamics URDF options (only applies to Kuka)
 #ifndef USE_WAFR_URDF
 	#define USE_WAFR_URDF 0
+#endif
+#ifndef MPC_MODE
+	#define MPC_MODE 0 // sets gravity to 0
 #endif
 
 // Matrix Dimms

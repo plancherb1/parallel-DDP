@@ -3,7 +3,9 @@
 /*****************************************************************
  * Utils for Cuda code
  *
- * 0 Host Device loop bounds and sync code
+ * -1 Support for non-float/double types
+ *
+ * 0 Host Device loop bounds and sync code as well as half math conversions
  *
  * 1 CUDA ERROR CHECKING CODE
  *
@@ -39,6 +41,18 @@
 #include <cusolverDn.h>
 #include <cusolverSp.h>
 #include <assert.h>
+#include <cuda_fp16.h>
+/*** -1 Support for non-float/double types ***/
+ 	__host__ __device__ __forceinline__
+	half sin(half val){return __float2half(sin(__half2float(val)));}
+	__host__ __device__ __forceinline__
+	half cos(half val){return __float2half(cos(__half2float(val)));}
+	__host__ __device__ __forceinline__
+	half abs(half val){return __float2half(abs(__half2float(val)));}
+	__host__ __device__ __forceinline__
+	half max(half val1, half val2){return __float2half(max(__half2float(val1),__half2float(val2)));}
+/*** -1 Support for non-float/double types ***/
+
 /*** 0 Host Device loop bounds and sync code 0 ***/
 	__host__ __device__ __forceinline__
 	void doubleLoopVals(int *starty, int *dy, int *startx, int *dx){
