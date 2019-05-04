@@ -15,11 +15,6 @@ This repository holds the code supporting "[A Performance Analysis of Differenti
 * [CUDA](https://developer.nvidia.com/cuda-zone) needs to be installed as code needs to be compiled with the NVCC comiler
 * For multi-computer / hardware MPC code there is an additional communicaiton dependency: [LCM](https://lcm-proj.github.io/).
 
-### Known Bugs / Ongoing Development
-* GPU RBDYN for Kuka only works in Euler mode -- need to introduce loops and reduce shared memory for Midpoint and RK3 (or use a brand new GPU which has double the shared memory)
-* Need to catch up the CPU MPC for multi-threaded line search
-* Constraint handling / penalities need further development
-
 ### Instalation Tips for CUDA
 https://askubuntu.com/questions/1077061/how-do-i-install-nvidia-and-cuda-drivers-into-ubuntu
 https://www.tensorflow.org/install/gpu
@@ -28,3 +23,8 @@ https://www.tensorflow.org/install/gpu
 1) Install this fork of drake: [https://github.com/plancherb1/drake](https://github.com/plancherb1/drake)
 2) You need to put in you .bashrc ```export DRAKE_PATH_ROOT=<path_to_drake>```
 Then the scripts in the utils folder should launch the drake visualizer and simulator
+
+### Known Bugs / Ongoing Development
+* GPU RBDYN for Kuka only works in Euler mode -- need to introduce loops and reduce shared memory for Midpoint and RK3 (or use a brand new GPU which has double the shared memory)
+* Need to catch up the CPU MPC for multi-threaded line search
+* Constraint handling / penalities need further development

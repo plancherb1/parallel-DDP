@@ -39,15 +39,15 @@
  *    compute_dTau, finish_dqdd
  *****************************************************************/
 
-#ifdef MPC_MODE
-   #define GRAVITY 0.0 // Kuka arm does automatic gravity compensation on top of torques sent so assume 0
+#if MPC_MODE
+   #define GRAVITY (static_cast<T>(0)) // Kuka arm does automatic gravity compensation on top of torques sent so assume 0
 #else
-   #define GRAVITY 9.81 // in full iLQR sim we are trying to come up with something assuming no gravity comp or anything hardware related
+   #define GRAVITY (static_cast<T>(9.81)) // in full iLQR sim we are trying to come up with something assuming no gravity comp or anything hardware related
 #endif
 /*** PLANT SPECIFIC RBDYN HELPERS ***/
-#define EE_ON_LINK_X 0
-#define EE_ON_LINK_Y 0
-#define EE_ON_LINK_Z 0
+#define EE_ON_LINK_X (static_cast<T>(0))
+#define EE_ON_LINK_Y (static_cast<T>(0))
+#define EE_ON_LINK_Z (static_cast<T>(0.1524)) // flange plus peg is 6 inches
 
 template <typename T>
 __host__ __device__ 
@@ -960,8 +960,8 @@ void load_Tb(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbody =
    // compute sin/cos in parallel as well as Tbase
    #pragma unroll
    for (int ind = start; ind < NUM_POS; ind += delta){
-         s_sinx[ind] = std::sin(s_x[ind]);    
-         s_cosx[ind] = std::cos(s_x[ind]);
+         s_sinx[ind] = sin(s_x[ind]);    
+         s_cosx[ind] = cos(s_x[ind]);
    }
    #pragma unroll
    for (int ind = start; ind < 36*NUM_POS; ind += delta){
@@ -1012,8 +1012,8 @@ void load_Tbdtdx(T *s_x, T *s_Tbody, T *d_Tbody, T *s_sinx, T *s_cosx, T *s_dTbo
    // compute sin/cos in parallel as well as Tbase
    #pragma unroll
    for (int ind = start; ind < NUM_POS; ind += delta){
-         s_sinx[ind] = std::sin(s_x[ind]);    
-         s_cosx[ind] = std::cos(s_x[ind]);
+         s_sinx[ind] = sin(s_x[ind]);    
+         s_cosx[ind] = cos(s_x[ind]);
    }
    // load in Tb_base and zero out dTb_dtdx
    #pragma unroll

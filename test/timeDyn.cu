@@ -1,5 +1,5 @@
 /*******
-nvcc -std=c++11 -o timeDyn.exe timeDyn.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o timeDyn.exe timeDyn.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -O3
 *******/
 
 #define PLANT 4

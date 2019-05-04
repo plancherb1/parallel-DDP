@@ -98,8 +98,6 @@
 	#define _QF2 1000.0 // qd
 	#endif
 #ifndef _Q_EE1 // For EE Costs
- 	#define USE_SMOOTH_ABS 0
-	#define SMOOTH_ABS_ALPHA 0.2
 	#define _Q_EE1 0.1		 // xyz
 	#define _Q_EE2 0		 // rpy
 	#define _R_EE 0.0001
@@ -115,6 +113,9 @@
 	#define _Q_EEV2 0
 	#define _QF_EEV1 0
 	#define _QF_EEV2 0
+#endif
+#ifndef SMOOTH_ABS_ALPHA
+	#define SMOOTH_ABS_ALPHA 0.2
 #endif
 
 // joint level costs are simple

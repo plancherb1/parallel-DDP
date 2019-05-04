@@ -1,10 +1,9 @@
 /***
-nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define USE_WAFR_URDF 0
 #define EE_COST 1
 #define USE_SMOOTH_ABS 0
-#define SMOOTH_ABS_ALPHA 0.2
 // default cost terms for the start of the goal to drop the arm from the initial point to the start of the fig 8
 // delta xyz, delta rpy, u, xzyrpyd, xyzrpy
 #define SMALL 0.00001
@@ -48,7 +47,6 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define TOL_COST 0.00001
 #define SOLVES_TO_RESET 15
 #define PLANT 4
-#define PI 3.14159
 
 #define E_NORM_LIM 0.05
 #define V_NORM_LIM 0.05
@@ -111,6 +109,10 @@ class LCM_Fig8Goal_Handler {
 			else if (eNorm < eNormLim && vNorm < vNormLim){
 				// reset the zeroTime and set that we are inFig8
 				zeroTime = msg->utime;		inFig8 = 1;
+				// also update the solver params
+				kuka::lcmt_solver_params dataOut;	dataOut.utime = msg->utime;
+				dataOut.timeLimit = 100;			dataOut.iterLimit = 1;
+				lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut);
 			}
 			// else if close but not there yet update the cost func to care more about moving to goals
 			else if (eNorm < 2*eNormLim && vNorm < 2*vNormLim){
@@ -139,7 +141,7 @@ void runFig8GoalLCM(LCM_Fig8Goal_Handler<T> *handler){
 
 template <typename T>
 __host__
-int runMPC_LCM(char hardware, T *xInit){
+int runMPC_LCM(char mode, T *xInit){
 	// launch the simulator
     printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");
 	// get the max iters and time per solve
@@ -154,22 +156,24 @@ int runMPC_LCM(char hardware, T *xInit){
 	trajVars<T> *tvars = new trajVars<T>; matDimms *dimms = new matDimms; algTrace<T> *atrace = new algTrace<T>;
 	costParams<T> *cst = new costParams<T>;	loadCost(cst); // load in default cost to start
     std::thread mpcThread; LCM_MPCLoop_Handler<T> *mpchandler; CPUVars<T> *cvars; GPUVars<T> *gvars; // pointers for reference later
-    // spend time allocating for CPU / GPU split
-    if (hardware == 'G'){gvars = new GPUVars<T>; allocateMemory_GPU_MPC<T>(gvars, dimms, tvars); loadTraj<T>(gvars, tvars, dimms, xInit);}
-    else{				 cvars = new CPUVars<T>; allocateMemory_CPU_MPC<T>(cvars, dimms, tvars); loadTraj<T>(cvars, tvars, dimms, xInit);}
+    // allocate for CPU / GPU
+    if (mode == 'G'){gvars = new GPUVars<T>; allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);}
+    else{		     cvars = new CPUVars<T>; allocateMemory_CPU_MPC<T>(cvars, dimms, tvars);}
     // get the goal handler
     LCM_Fig8Goal_Handler<T> *goalhandler = new LCM_Fig8Goal_Handler<T>(totalTime_us, E_NORM_LIM, V_NORM_LIM);
     // then load the goals and LCM handlers and launch the MPC threads
-    if (hardware == 'G'){
-    	// load initial goal and run to full convergence to warm start
-    	goalhandler->loadInitialGoal(gvars->xGoal); runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,cst,0,0,1);
+    if (mode == 'G'){
+    	// load initial traj and goal and run to full convergence to warm start
+    	loadTraj<T>(gvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(gvars->xGoal);
+    	runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,cst,0,0,1);
 		// then create the handler and launch the MPC thread
 		mpchandler = new LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
      	mpcThread  = std::thread(&runMPCHandler<T>, mpchandler);    
     }
     else{
     	// load initial goal and run to full convergence to warm start
-    	goalhandler->loadInitialGoal(cvars->xGoal); runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,cst,0,0,1);
+    	loadTraj<T>(cvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(cvars->xGoal); 
+    	runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,cst,0,0,1);
 		// then create the handler and launch the MPC thread
 		mpchandler = new LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
      	mpcThread  = std::thread(&runMPCHandler<T>, mpchandler);   
@@ -188,7 +192,7 @@ int runMPC_LCM(char hardware, T *xInit){
     #if USE_VELOCITY_FILTER
     	filterThread.join();
     #endif
-    if (hardware == 'G'){freeMemory_GPU_MPC<T>(gvars); delete gvars;} else{freeMemory_CPU_MPC<T>(cvars); delete cvars;}
+    if (mode == 'G'){freeMemory_GPU_MPC<T>(gvars); delete gvars;} else{freeMemory_CPU_MPC<T>(cvars); delete cvars;}
     freeTrajVars<T>(tvars); delete tvars; delete atrace; delete dimms; delete cst; delete mpchandler; delete goalhandler;
     return 0;
 }
@@ -200,9 +204,9 @@ int main(int argc, char *argv[])
 	// initial state for example
 	algType xInit[STATE_SIZE]; loadInitialState(xInit,1);
 	// require user input for mode of operation
-	char hardware = '?'; if (argc > 1){hardware = argv[1][0];}
+	char mode = '?'; if (argc > 1){mode = argv[1][0];}
 	// run the MPC loop
-	if (hardware == 'C' || hardware == 'G'){return runMPC_LCM<algType>(hardware,xInit);}
+	if (mode == 'C' || mode == 'G'){return runMPC_LCM<algType>(mode,xInit);}
 	// run aditional example options (printers, simulator, etc.)
-	else{return runOtherOptions<algType>(argv,xInit);}
+	else{return runOtherOptions<algType>(mode,xInit,argv);}
 }

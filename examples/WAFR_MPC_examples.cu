@@ -1,5 +1,5 @@
 /***
-nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define USE_WAFR_URDF 1
 #define EE_COST 1
@@ -35,20 +35,12 @@ nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu ../utils/cudaUtils.cu ../utils/t
 #define TOL_COST 0.00001
 #define PLANT 4
 #include "../config.cuh"
-#include <random>
-#include <vector>
-#include <algorithm>
-#include <iostream>
 
 #define TEST_ITERS 1 // 100
 #define ROLLOUT_FLAG 0
-#define RANDOM_MEAN 0.0
-#define RANDOM_STDEV 0.001
 char errMsg[]  = "Error: Unkown code - usage is [C]PU or [G]PU with flag 1/0 for doFig8\n";
 char tot[]  = "  TOT";		char init[] = " INIT";	char fsim[]   = "  SIM";	
 char fsweep[]   = "SWEEP";	char bp[]   = "   BP";	char nis[]  = "  NIS";
-std::default_random_engine randEng(time(0)); //seed
-std::normal_distribution<double> randDist(RANDOM_MEAN, RANDOM_STDEV); //mean followed by stdiv
 
 #if PLANT == 1 // pend
 	#error "MPC example defined for KukaArm[4].\n"
@@ -72,50 +64,6 @@ std::normal_distribution<double> randDist(RANDOM_MEAN, RANDOM_STDEV); //mean fol
 	#error "MPC example defined for KukaArm[4].\n"
 #endif
 
-__host__ __forceinline__
-bool tryParse(std::string& input, int& output) {
-	try{output = std::stoi(input);}
-	catch (std::invalid_argument) {return false;}
-	return true;
-}
-__host__ __forceinline__
-int getInt(int maxInt, int minInt){
-	std::string input;	std::string exitCode ("q"); int x;
-	while(1){
-		getline(std::cin, input);
-		while (!tryParse(input, x)){
-			if (input.compare(input.size()-1,1,exitCode) == 0){return -1;}
-				std::cout << "Bad entry. Enter a NUMBER\n";	getline(std::cin, input);
-			}
-		if (x >= minInt && x <= maxInt){break;}
-		else{std::cout << "Entry must be in range[" << minInt << "," << maxInt << "]\n";}
-	}
-	return x;
-}
-__host__ __forceinline__
-int getTrajTime(int maxInt, int minInt){
-   printf("How many seconds long should the tracked trajectory be? (q to exit)\n");
-   return getInt(maxInt,minInt);
-}
-__host__ __forceinline__
-int getTimeBudget(int maxInt, int minInt){
-   printf("What should the MPC time budget be (in ms)? (q to exit)?\n");
-   return getInt(maxInt,minInt);
-}
-__host__ __forceinline__
-int getMaxIters(int maxInt, int minInt){
-   printf("What is the maximum number of iterations a solver can take? (q to exit)?\n");
-   return getInt(maxInt,minInt);
-}
-__host__ __forceinline__
-int getCPUMode(){
-   printf("Would you like to run serial[0] or parallel[1] line search? (q to exit)?\n");
-   return getInt(1,0);
-}
-__host__ __forceinline__
-void keyboardHold(){
-   	printf("Press enter to continue\n");	std::string input;	getline(std::cin, input);
-}
 __host__
 void printStats(std::vector<double> v, char *type){
 	// sort gives us the median, max and min
@@ -142,72 +90,6 @@ void printAllTimingStats(algTrace<T> *atrace){
 }
 template <typename T>
 __host__ __forceinline__
-void loadTraj(trajVars<T> *tvars, matDimms *dimms){
-	T *xk = tvars->x;	T *uk = tvars->u;
-	// for (int k=0; k<NUM_TIME_STEPS; k++){
-	// 	xk[0] = (T)-0.5*PI;	xk[1] = (T)0.25*PI;	xk[2] = (T)0.167*PI;
-	// 	xk[3] = (T)-0.167*PI;	xk[4] = (T)0.125*PI;	xk[5] = (T)0.167*PI;	xk[6] = (T)0.5*PI;
-	// 	xk[7] = (T)randDist(randEng);	xk[8] = (T)randDist(randEng);	xk[9] = (T)randDist(randEng);
-	// 	xk[10] = (T)randDist(randEng);	xk[11] = (T)randDist(randEng);	xk[12] = (T)randDist(randEng);	xk[13] = (T)randDist(randEng);
-	// 	if (k < NUM_TIME_STEPS - 1){
-	// 		uk[0] = 0.0;		uk[1] = -102.9832;	uk[2] = 11.1968;
-	// 		uk[3] = 47.0724;	uk[4] = 2.5993;		uk[5] = -7.0290;	uk[6] = -0.0907;
-	// 		//uk[0] = (T)0.01; uk[1] = (T)0.01; uk[2] = (T)0.01; uk[3] = (T)0.01; uk[4] = (T)0.01; uk[5] = (T)0.01; uk[6] = (T)0.01;
-	// 	}
-	// 	xk += (dimms->ld_x);	uk += (dimms->ld_u);
-	// }
-	for (int k=0; k<NUM_TIME_STEPS; k++){
-		for (int i = 0; i < STATE_SIZE; i++){
-			xk[i] = 0.0;	if (i < CONTROL_SIZE){uk[i] = 0.01;}
-		}
-		xk += (dimms->ld_x);	uk += (dimms->ld_u);
-	}
-	memset(tvars->KT, 0, (dimms->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
-}
-template <typename T>
-__host__ __forceinline__
-void loadGoal(CPUVars<T> *algvars){
-	const T temp[] = {GOAL_X,GOAL_Y,GOAL_Z,GOAL_r,GOAL_p,GOAL_y};
-	for (int i=0; i < 6; i++){(algvars->xGoal)[i] = temp[i];}
-}
-template <typename T>
-__host__ __forceinline__
-void loadGoal(GPUVars<T> *algvars){
-	const T temp[] = {GOAL_X,GOAL_Y,GOAL_Z,GOAL_r,GOAL_p,GOAL_y};
-	for (int i=0; i < 6; i++){(algvars->xGoal)[i] = temp[i];}
-}
-template <typename T>
-__host__ __forceinline__
-int loadGoal(T *goal, T *xGoals, T *yGoals, T *zGoals, double time, double tstep, double totalTime){
-	int rep = 0;
-	while(time > totalTime){time -= totalTime; rep++;}
-	double delta = time/tstep;							double fraction = delta - std::floor(delta);
-	int rd = static_cast<int>(std::floor(delta));		int ru = static_cast<int>(std::ceil(delta));
-	goal[0] = (1-fraction)*xGoals[rd] + fraction*xGoals[ru];
-	goal[1] = (1-fraction)*yGoals[rd] + fraction*yGoals[ru];
-	goal[2] = (1-fraction)*zGoals[rd] + fraction*zGoals[ru];
-	return rep;
-}
-template <typename T>
-__host__ __forceinline__
-int loadGoal(CPUVars<T> *algvars, T *xGoals, T *yGoals, T *zGoals, double time, double tstep, double totalTime){
-	T goal[3];
-	int rep = loadGoal(&goal[0],xGoals,yGoals,zGoals,time,tstep,totalTime);
-	algvars->xGoal[0] = goal[0];	algvars->xGoal[1] = goal[1];	algvars->xGoal[2] = goal[2];
-	algvars->xGoal[3] = 0;			algvars->xGoal[4] = 0;			algvars->xGoal[5] = 0;
-	return rep;
-}
-template <typename T>
-__host__ __forceinline__
-int loadGoal(GPUVars<T> *algvars, T *xGoals, T *yGoals, T *zGoals, double time, double tstep, double totalTime){
-	T goal[3];
-	int rep = loadGoal(&goal[0],xGoals,yGoals,zGoals,time,tstep,totalTime);
-	algvars->xGoal[0] = goal[0];	algvars->xGoal[1] = goal[1];	algvars->xGoal[2] = goal[2];
-	algvars->xGoal[3] = 0;			algvars->xGoal[4] = 0;			algvars->xGoal[5] = 0;
-	return rep;
-}
-template <typename T>
-__host__ __forceinline__
 int loadFig8Goal(T *goal, double time, double totalTime){
 	T xGoals[] = {0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004,0.6556285000000004};
 	T yGoals[] = {0.13686922001827645,0.1281183229143938,0.11926059413541247,0.11030432312999372,0.1012577993467988,0.09212931223448896,0.08292715124172548,0.0736596058171696,0.06433496540948258,0.05496151946732569,0.045547557439360176,0.03610136877424733,0.026631242920648335,0.017145469327224508,0.007652337442637103,-0.001839863284452653,-0.011322843405383448,-0.020788313471494096,-0.030227984034123273,-0.039633565644609764,-0.0489967688542923,-0.05830930421450961,-0.06756288227660043,-0.07674921359190354,-0.08586000871175764,-0.09488697818749958,-0.1038655258329727,-0.11272375591745916,-0.12145267616480321,-0.13004109492853494,-0.13848752180117063,-0.1467858524541864,-0.1549281455978588,-0.1629165235905652,-0.1707482796892309,-0.17841599130217783,-0.18591882035832843,-0.1932502389635062,-0.20040076105913676,-0.20735798772338723,-0.21411519853223893,-0.22066551450768562,-0.2269966386554578,-0.2331053523296066,-0.23897989082424964,-0.24461177603116246,-0.24999586174091798,-0.255127737887603,-0.2600037985005273,-0.264623973362925,-0.2689800086072113,-0.27306787696210033,-0.2768840041676995,-0.2804279779836409,-0.28369462501981374,-0.28667669709392635,-0.2893761036490012,-0.29178950599107006,-0.29391158123626243,-0.29574034972478985,-0.29727453396452347,-0.29851358128156347,-0.2994544451742904,-0.30009482660988346,-0.30043907902783173,-0.30048644363405164,-0.3002369544043975,-0.29968819678814346,-0.2988444313574429,-0.2977048064508765,-0.2962719042333858,-0.29454317198576974,-0.2925200231035754,-0.2902045731500091,-0.2876022809123594,-0.2847133796914938,-0.28154140071122247,-0.27809048676073667,-0.27436270583704647,-0.2703665745543449,-0.26610524813698555,-0.26158238012185503,-0.25680474076422527,-0.2517742032662073,-0.2464935808285531,-0.24096598110942027,-0.23519855715870805,-0.22919065210989617,-0.22294815964121067,-0.216477551020404,-0.20978904844956445,-0.20289009717093992,-0.19578529751522875,-0.18849136560284127,-0.1810102720333381,-0.17335332623615154,-0.16552932116242403,-0.15754446533330008,-0.1494055335341655,-0.141119776212369,-0.13269158757842503,-0.12412621123921029,-0.11543344583116043,-0.10661783052843572,-0.09768974155699829,-0.08866263788534111,-0.07955032956578706,-0.07036309089673469,-0.06111613853088287,-0.051824258760106816,-0.04250384833178472,-0.03316965050170948,-0.02383739609051122,-0.014517898480146497,-0.00521285872839692,0.004084069854356758,0.013377716369566438,0.022678964415954628,0.03199791841264746,0.04134623887290685,0.05072829056150665,0.06014998301207159,0.06960936374549687,0.07908892160637689,0.08855068744478754,0.09794356384062872,0.10720878615596977,0.11629326145552335,0.12514991959047528,0.13374545516319478,0.14207020091055017,0.15012393938707272,0.15792746608076888,0.16551126865840357,0.1729042968130615,0.18013571994835326,0.1872239892183252,0.19418299168723718,0.20100573965434845,0.2076839316858779,0.2142059797503866,0.22054968628960595,0.22669845070103078,0.2326348093954518,0.2383522458039774,0.24384287073319427,0.2491022174907651,0.2541293098371375,0.2589202699947854,0.2634683865999179,0.2677700650071298,0.27181899023759926,0.2756002672767167,0.2791048721375289,0.28231577838682104,0.28522354073704403,0.2878230537497963,0.2901076694828819,0.2920783437903407,0.29374310403406084,0.295107993386028,0.2961895263765827,0.2970056784978085,0.2975819271104611,0.29794495005548816,0.298109264082986,0.2980740741579594,0.2978323971097816,0.2973591836734637,0.296622924641549,0.2955794967043364,0.29418154658089085,0.2923728011959445,0.2900962060295761,0.2873037962354698,0.28396753800504204,0.28032650994085717,0.2763886650341475,0.27216195627614015,0.26765433665806226,0.2628737591711411,0.2578281768066035,0.25252554255567694,0.2469738094095883,0.2411809303595648,0.2351548583968336,0.2289035465126218,0.22243494769815644,0.21575701494466482,0.208877701243374,0.201804959585511,0.19454674296230312,0.1871110043649775,0.179505696784761,0.1717387732128811,0.16381818664056474,0.1557518900590391,0.14754783645953137,0.1392139788332685,0.1307582701714778};
@@ -220,13 +102,6 @@ int loadFig8Goal(T *goal, double time, double totalTime){
 	goal[2] = (1-fraction)*zGoals[rd] + fraction*zGoals[ru];		goal[5] = 0.0;
 	return rep;
 }	
-template <typename T>
-__host__
-void evNorm(T *xActual, T *xGoal, T *eNorm, T *vNorm){
-	T eePos[NUM_POS];   compute_eePos_scratch<T>(xActual, &eePos[0]);
-	*eNorm = static_cast<T>(sqrt(pow(eePos[0]-xGoal[0],2) + pow(eePos[1]-xGoal[1],2) + pow(eePos[2]-xGoal[2],2)));
-	*vNorm = 0; for(int i=0;i<NUM_POS;i++){*vNorm+=(T)pow(xActual[NUM_POS+i],2);} *vNorm = static_cast<T>(sqrt(*vNorm));
-}
 template <typename T, int SUBSTEPS>
 __host__
 T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goalTime, double totalTime){
@@ -293,38 +168,33 @@ int fig8Simulate(T *xActual, T *xGoal, trajVars<T> *tvars, T *error, double *goa
 }
 template <typename T>
 __host__
-void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, char hardware, int doFig8, int debugMode = 0){
+void testMPC_lockstep(char hardware, int doFig8, int debugMode = 0){
+	// get the max iters and time per solve
+	printf("What is the maximum number of iterations a solver can take? (q to exit)?\n");
+	int itersToDo = getInt(1000, 1);
+	printf("What should the MPC time budget be (in ms)? (q to exit)?\n");
+	int timeLimit = getInt(1000, 1); //note in ms
+	// get the total traj time
+	printf("How many seconds long should one figure eight of the tracked trajectory be? (q to exit)\n");
+	double totalTime_us = 1000000.0*static_cast<double>(getInt(100, 1)); double timePrint = 0;
 	// define the requirements for "conversion" to the first goal
 	T eNormLim = 0.05;	 T vNormLim = 0.05;	
 	// define local variables
 	double goalTime = 0; int initial_convergence_flag = 0; T error = 0; int counter = 0; struct timeval start, end;
-	// get the max iters per solve
-	int itersToDo = getMaxIters(1000, 1);
-	// get the max iters per solve
-	int timeLimit = getTimeBudget(1000, 1); //note in ms
-	// get the total time for the trajectory
-	double totalTime_us = 1000000.0*static_cast<double>(getTrajTime(100, 1)); double timePrint = 0;
-	// init the Ts
-	tvars->t0_plant = 0; tvars->t0_sys = 0;	int64_t tActual_plant = 0; int64_t tActual_sys = 0;
-	// get the cost parameters
-	costParams<T> *cst = new costParams<T>;	loadCost(cst);
+	// allocate variables for both
+	trajVars<algType> *tvars = new trajVars<algType>; 	matDimms *dimms = new matDimms;
+	algTrace<algType> *atrace = new algTrace<algType>; 	costParams<T> *cst = new costParams<T>;	loadCost(cst);
 	if (hardware == 'G'){
-		GPUVars<T> *algvars = new GPUVars<T>;
-		allocateMemory_GPU_MPC<T>(algvars, dimms, tvars);
-		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
-		for (int i = 0; i < NUM_ALPHA; i++){
-			gpuErrchk(cudaMemcpy(algvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
-			gpuErrchk(cudaMemcpy(algvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
-		}
-		memcpy(algvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
-		// note run to conversion with no time or iter limits
-		runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,1);
+		//allocate variables
+		GPUVars<T> *algvars = new GPUVars<T>; allocateMemory_GPU_MPC<T>(algvars, dimms, tvars);
+		// load initial traj and goal and run to full convergence to warm start
+		loadTraj<T>(algvars, tvars, dimms); loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
+		runiLQR_MPC_GPU<T>(tvars,algvars,dimms,atrace,cst,0,0,1);
 		// then start a loop of run a couple steps simulate for X steps and repeat
 		while(1){
 			counter++;
 			gettimeofday(&start,NULL);
-			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,0,itersToDo,timeLimit);
+			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);
 			gettimeofday(&end,NULL);
 			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
@@ -333,28 +203,20 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 		freeMemory_GPU_MPC<T>(algvars);	delete algvars;
 	}
 	else{
-		CPUVars<T> *algvars = new CPUVars<T>;	int parallelLineSearch = getCPUMode();
+		printf("Would you like to run serial[0] or parallel[1] line search? (q to exit)?\n");	int parallelLineSearch = getInt(1,0);
+		// allocate variable
+		CPUVars<T> *algvars = new CPUVars<T>;
 		if (parallelLineSearch){allocateMemory_CPU_MPC2<T>(algvars, dimms, tvars);} else{allocateMemory_CPU_MPC<T>(algvars, dimms, tvars);}
-		// load in inital trajectory and goal
-		loadTraj<T>(tvars, dimms);		loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
-		memcpy(algvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
-		memcpy(algvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
-		memcpy(algvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
-		if (parallelLineSearch){
-			for (int i = 0; i < NUM_ALPHA; i++){
-				memcpy(algvars->xs[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
-				memcpy(algvars->us[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
-			}
-		}
-		// note run to conversion with no time or iter limits
-		if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,1);}
-		else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,1);}
+		// load initial traj and goal and run to full convergence to warm start
+		loadTraj<T>(algvars, tvars, dimms, nullptr, nullptr, parallelLineSearch); loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
+		if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,atrace,cst,0,0,1);}
+		else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,atrace,cst,0,0,1);}
 		// then start a loop of run a couple steps simulate for X steps and repeat
 		while(1){
 			counter++;
 			gettimeofday(&start,NULL);
-			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
-			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,data,cst,tActual_sys,tActual_plant,0,itersToDo,timeLimit);}
+			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);}
+			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);}
 			gettimeofday(&end,NULL);
 			double elapsedTime_us = TIME_STEP*1000000;// time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
@@ -362,9 +224,11 @@ void testMPC_lockstep(trajVars<T> *tvars, algTrace<T> *data, matDimms *dimms, ch
 		}
 		if (parallelLineSearch){freeMemory_CPU_MPC2<T>(algvars);} else{freeMemory_CPU_MPC<T>(algvars);} delete algvars;
 	}
+	// print results
 	printf("\n\nAverage tracking error: [%f]\n",(error/counter));
-	printAllTimingStats(data);
-	delete cst;
+	printAllTimingStats(atrace);
+	// free and delete
+	freeTrajVars<algType>(tvars);	delete atrace;	delete tvars;	delete dimms;	delete cst;
 }
 int main(int argc, char *argv[])
 {
@@ -372,14 +236,12 @@ int main(int argc, char *argv[])
 	// test based on command line args
 	char hardware = '?'; // require user input
 	if (argc > 1){hardware = argv[1][0];}
-	trajVars<algType> *tvars = new trajVars<algType>;	algTrace<algType> *atrace = new algTrace<algType>;	matDimms *dimms = new matDimms;
 	if (hardware == 'C' || hardware == 'G'){
 		int flag = atoi(&argv[1][1]);
 		if (flag != 0 && flag != 1){printf("%s",errMsg); return 1;};
-		testMPC_lockstep<algType>(tvars,atrace,dimms,hardware,flag);
+		testMPC_lockstep<algType>(hardware,flag);
 	}
 	else{printf("%s",errMsg); hardware = '?';}
 	// free the trajVars and the wrappers
-	freeTrajVars<algType>(tvars);	delete atrace;	delete tvars;	delete dimms;
 	return (hardware == '?');
 }
