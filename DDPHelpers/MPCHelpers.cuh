@@ -586,7 +586,7 @@
     void loadVarsGPU_MPC(T *x_old, T *u_old, T *KT_old, T **h_d_x, T *d_xp, T **h_d_u, T *d_up, T **h_d_d, T *d_KT, T *d_xGoal, T *xGoal, T *d_xActual, T *xActual,
                          T *d_P, T *d_Pp, T *d_p, T *d_pp, T *d_du, T *d_AB, T *d_H, T *d_dT, int *d_err, int *alphaIndex, T dt, cudaStream_t *streams, dim3 dynDimms,
                          int shiftAmount, int last_successful_solve, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
-                         T *d_I = nullptr, T *d_Tbody = nullptr){
+                         T *d_I = nullptr, T *d_Tbody = nullptr, int clear_vars = 0){
         // note since we assume that we will reach the desired states to start later blocks the
         // control will remain the same as will the states outside of the first block
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
@@ -596,7 +596,7 @@
         gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice, streams[1]));
         shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[2]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
         shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[4]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
-        if (last_successful_solve <= SOLVES_TO_RESET){
+        if (last_successful_solve <= SOLVES_TO_RESET && !clear_vars){
             shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
             shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[5]>>>(d_KT,shiftAmount,ld_KT);
             shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_P,shiftAmount,ld_P);
@@ -640,7 +640,7 @@
     void loadVarsCPU_MPC(T *x_old, T *u_old, T *KT_old, T *x, T *xp, T *u, T *up, T *d, T *KT, T *xGoal, T *xActual, T *P, T *Pp, 
                          T *p, T *pp, T *du, T *AB, int *err, int *alphaIndex, T dt, std::thread *threads, int shiftAmount, 
                          int last_successful_solve, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
-                         T *I = nullptr, T *Tbody = nullptr){
+                         T *I = nullptr, T *Tbody = nullptr, int clear_vars = 0){
         // note since we assume that we will reach the desired states to start later blocks the
         // control will remain the same as will the states outside of the first block
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
@@ -650,7 +650,7 @@
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
         threads[2] = std::thread(&shiftAndCopy<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS>, std::ref(d), shiftAmount, ld_d, nullptr);
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
-        if (last_successful_solve <= SOLVES_TO_RESET){
+        if (last_successful_solve <= SOLVES_TO_RESET && !clear_vars){
             threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c,NUM_TIME_STEPS-1>, std::ref(u), shiftAmount, ld_u, std::ref(up));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
             threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1>, std::ref(KT), shiftAmount, ld_KT, nullptr);
@@ -765,41 +765,39 @@
         (cv->threads)[2].join();
         (tv->lock)->unlock();
     }
-                
 
     template <typename T>
     __host__ __forceinline__
     int getHardwareControls(double *q_out, double *u_out, T *x, T *u, T *KT, double t0, 
-                            const double *qActual, const double *qdActual, double tActual, int ld_x, int ld_u, int ld_KT){
+                            const double *qActual, const double *qdActual, double tActual, 
+                            int ld_x, int ld_u, int ld_KT, 
+                            double *q_prev = nullptr, double *u_prev = nullptr, double alpha = 0){
         int start, delta; singleLoopVals(&start,&delta);    T dx[STATE_SIZE];
         // compute index in current traj we want to use (both round down for zoh and fraction for foh)
         double dt = get_time_steps_us_d(t0,tActual); int ind_rd = static_cast<int>(dt); double fraction = dt - static_cast<double>(ind_rd);
-        // printf("Sending ind_rd[%d] w/ fraction[%f] for t0[%f] vs tActual[%f]\n",ind_rd,fraction,t0,tActual);
         // see if beyond bounds and fail
         if (ind_rd >= NUM_TIME_STEPS-2 || ind_rd < 0){return 1;}
         // u,KT do zoh so take rd
         T *uk = &u[ind_rd*ld_u];             T *KTk = &KT[ind_rd*ld_KT*DIM_KT_c];
         // foh for xk
         T *xk_u = &x[(ind_rd+1)*ld_x];       T *xk_d = &x[ind_rd*ld_x];
-        // then compute the state delta
-        #pragma unroll
+        // then compute the state delta (and desired pos)
         for (int ind = start; ind < STATE_SIZE; ind += delta){
             T val = (static_cast<T>(1.0-fraction)*xk_d[ind] + static_cast<T>(fraction)*xk_u[ind]);
             dx[ind] = (ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]) - val;
-            //printf("dx[%f] for val[%f] vs prev[%f]\n",dx[ind],(ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]),val);
-            if(ind < NUM_POS){q_out[ind] = val; if(!isfinite(q_out[ind])){q_out[ind] = 0;}}    //else{qd_out[ind-NUM_POS] = val;}
+            if(ind < NUM_POS){q_out[ind] = static_cast<double>(val);}
         }
-        hd__syncthreads();
-        // printf("dx[%f %f %f %f %f %f %f][%f %f %f %f %f %f %f]\n",dx[0],dx[1],dx[2],dx[3],dx[4],dx[5],dx[6],dx[7],dx[8],dx[9],dx[10],dx[11],dx[12],dx[13]);
-        // and formulate the control from that delta (and save out KT -> K)
-        #pragma unroll
+        // and formulate the control from that delta
         for (int r = start; r < CONTROL_SIZE; r += delta){
             T val = uk[r];
             #pragma unroll
             for (int c = 0; c < STATE_SIZE; c++){val -= KTk[c + r*ld_KT]*dx[c];}
             u_out[r] = static_cast<double>(val);
-            //if(!isfinite(u_out[r])){u_out[r] = 0;}
-            //printf("u_out[%f] vs. u_in[%f] for ind[%d]\n",u_out[r],uk[r],r);
+        }
+        // smooth if asked
+        if (q_prev != nullptr && u_prev != nullptr){
+            for (int i = start; i < CONTROL_SIZE; i += delta){u_out[i] = (1-alpha)*u_out[i] + alpha*u_prev[i]; u_prev[i] = u_out[i];}
+            for (int i = start; i < NUM_POS; i += delta){     q_out[i] = (1-alpha)*q_out[i] + alpha*q_prev[i]; q_prev[i] = q_out[i];}
         }
         return 0;
     }
@@ -810,12 +808,12 @@
     __host__ __forceinline__
     void runiLQR_MPC_GPU(trajVars<T> *tv, GPUVars<T> *gv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         int max_iter = MAX_ITER, double time_budget = MAX_SOLVER_TIME){
+                         int max_iter = MAX_ITER, double time_budget = MAX_SOLVER_TIME, int clear_vars = 0){
         // INITIALIZE THE ALGORITHM //
             struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
-            T prevJ, dJ, z;     int iter = 1;   T rho = RHO_INIT;   T drho = 1.0;   //*(gv->alphaIndex) = 0;
+            T prevJ, dJ, z;     int iter = 1;   T rho = RHO_INIT;   T drho = 1.0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   T Jout[MAX_ITER+1];   int alphaOut[MAX_ITER+1];
-            // printf("current t0_plant entering MPC: %ld\n",tv->t0_plant);
+            printf("Last Successful Solve: %d\n",tv->last_successful_solve);
 
             // define kernel dimms
             dim3 ADimms(DIM_A_r,1);//DIM_A_c);
@@ -827,7 +825,7 @@
             loadVarsGPU_MPC<T>(gv->d_x_old,gv->d_u_old,gv->d_KT_old,gv->h_d_x, gv->d_xp, gv->h_d_u, gv->d_up, gv->h_d_d, gv->d_KT, gv->d_xGoal, gv->xGoal, gv->d_xActual, gv->xActual,
                                gv->d_P, gv->d_Pp, gv->d_p, gv->d_pp, gv->d_du, gv->d_AB, gv->d_H, gv->d_dT, gv->d_err, gv->alphaIndex,(T)TIME_STEP, gv->streams, dynDimms,
                                shiftAmount, tv->last_successful_solve, md->ld_x, md->ld_u, md->ld_d, md->ld_KT, md->ld_P, md->ld_p, md->ld_du, md->ld_AB,
-                               gv->d_I, gv->d_Tbody);
+                               gv->d_I, gv->d_Tbody, clear_vars);
             gettimeofday(&end2,NULL);
             (data->initTime).push_back(time_delta_ms(start2,end2));
             // do initial "next iteration setup"
@@ -951,7 +949,7 @@
     __host__ __forceinline__
     void runiLQR_MPC_CPU(trajVars<T> *tv, CPUVars<T> *cv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER){
+                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0){
         // INITIALIZE THE ALGORITHM //
             struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
             T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
@@ -961,7 +959,7 @@
             // load in vars and init the alg
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
                                cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
-                               md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody);
+                               md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody,clear_vars);
             gettimeofday(&end2,NULL);
             (data->initTime).push_back(time_delta_ms(start2,end2));
 
@@ -1065,7 +1063,7 @@
     __host__ __forceinline__
     void runiLQR_MPC_CPU2(trajVars<T> *tv, CPUVars<T> *cv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER){
+                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0){
         // INITIALIZE THE ALGORITHM //
             struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
             T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
@@ -1075,7 +1073,7 @@
             // load in vars and init the alg
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
                                cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
-                               md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody);
+                               md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody,clear_vars);
             gettimeofday(&end2,NULL);
             (data->initTime).push_back(time_delta_ms(start2,end2));
 

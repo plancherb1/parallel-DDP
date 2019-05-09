@@ -6,7 +6,7 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define USE_SMOOTH_ABS 0
 // default cost terms for the start of the goal to drop the arm from the initial point to the start of the fig 8
 // delta xyz, delta rpy, u, xzyrpyd, xyzrpy
-#define SMALL 0.00001
+#define SMALL 0//0.00001
 #define _Q_EE1 50.0
 #define _Q_EE2 SMALL
 #define _R_EE 0.001
@@ -17,15 +17,15 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define _Q_xEE SMALL
 #define _QF_xEE SMALL
 // new cost terms for the actual fig 8 tracking
-#define _Q_EE1_fig8 150.0 //(_Q_EE1*2)
-#define _Q_EE2_fig8 _Q_EE2
-#define _R_EE_fig8 _R_EE
-#define _QF_EE1_fig8 150.0 //_QF_EE1
-#define _QF_EE2_fig8 _QF_EE2
-#define _Q_xdEE_fig8 _Q_xdEE
-#define _QF_xdEE_fig8 _QF_xdEE
-#define _Q_xEE_fig8 _Q_xEE
-#define _QF_xEE_fig8 _Q_xEE
+#define _Q_EE1_fig8 250.0
+#define _Q_EE2_fig8 SMALL
+#define _R_EE_fig8 0.001
+#define _QF_EE1_fig8 250.0
+#define _QF_EE2_fig8 SMALL
+#define _Q_xdEE_fig8 10.0
+#define _QF_xdEE_fig8 10.0
+#define _Q_xEE_fig8 SMALL
+#define _QF_xEE_fig8 SMALL
 
 #define USE_EE_VEL_COST 0
 #define _Q_EEV1 0.0
@@ -41,7 +41,7 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define MPC_MODE 1
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
-#define HARDWARE_MODE 0
+#define HARDWARE_MODE 1
 
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
@@ -50,6 +50,7 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 
 #define E_NORM_LIM 0.05
 #define V_NORM_LIM 0.05
+#define TRAJ_RUNNER_ALPHA 0.5 // smoothing on torque and pos commands per command
 
 #include "../config.cuh"
 
@@ -57,11 +58,11 @@ template <typename T>
 class LCM_Fig8Goal_Handler {
     public:
     	double totalTime;	double zeroTime;	int inFig8;
-    	double eNormLim;	double vNormLim;
+    	double eNormLim;	double vNormLim;	int costSent;
     	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
 
     	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim) : totalTime(tTime), eNormLim(eLim), vNormLim(vLim) {
-    		zeroTime = 0;	inFig8 = 0;		if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
+    		zeroTime = 0;	inFig8 = 0;		costSent = 0;	if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
     	}
     	~LCM_Fig8Goal_Handler(){}
 
@@ -105,28 +106,31 @@ class LCM_Fig8Goal_Handler {
 				// and publish it to goal channel
 			    lcm_ptr.publish(ARM_GOAL_CHANNEL,&dataOut);
 			}
-			// else check to see if we should update goal next time
-			else if (eNorm < eNormLim && vNorm < vNormLim){
-				// reset the zeroTime and set that we are inFig8
-				zeroTime = msg->utime;		inFig8 = 1;
-				// also update the solver params
-				kuka::lcmt_solver_params dataOut;	dataOut.utime = msg->utime;
-				dataOut.timeLimit = 100;			dataOut.iterLimit = 1;
-				lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut);
-			}
-			// else if close but not there yet update the cost func to care more about moving to goals
-			else if (eNorm < 2*eNormLim && vNorm < 2*vNormLim){
-				kuka::lcmt_cost_params dataOut;	dataOut.utime = msg->utime;
-				dataOut.q_ee1 = _Q_EE1_fig8;	dataOut.q_ee2 = _Q_EE2_fig8;
-				dataOut.qf_ee1 = _QF_EE1_fig8;	dataOut.qf_ee2 = _QF_EE2_fig8;
-				dataOut.q_eev1 = _Q_EEV1;		dataOut.q_eev2 = _Q_EEV2;
-				dataOut.qf_eev1 = _QF_EEV1;		dataOut.qf_eev2 = _QF_EEV2;
-				dataOut.q_xdee = _Q_xdEE_fig8;	dataOut.qf_xdee = _QF_xdEE_fig8;
-				dataOut.q_xee = _Q_xEE_fig8;	dataOut.qf_xee = _QF_xEE_fig8;
-				dataOut.r_ee = _R_EE_fig8;		dataOut.r = _R;
-				dataOut.q1 = _Q1; 				dataOut.q2 = _Q2;
-				dataOut.qf1 = _QF1; 			dataOut.qf2 = _QF2;
-				lcm_ptr.publish(COST_PARAMS_CHANNEL,&dataOut);
+			else {
+				// else check to see if we should update goal next time
+				if (eNorm < eNormLim && vNorm < vNormLim){
+					// reset the zeroTime and set that we are inFig8
+					zeroTime = msg->utime;		inFig8 = 1;
+					// also update the solver params
+					// kuka::lcmt_solver_params dataOut;	dataOut.utime = msg->utime;
+					// dataOut.timeLimit = 1000;			dataOut.iterLimit = 5;		dataOut.clearVars = 0;
+					// lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut);
+				}
+				// else if close but not there yet update the cost func to care more about moving to goals
+				else if (!costSent && eNorm < 2*eNormLim && vNorm < 2*vNormLim){
+					kuka::lcmt_cost_params dataOut;	dataOut.utime = msg->utime;
+					dataOut.q_ee1 = _Q_EE1_fig8;	dataOut.q_ee2 = _Q_EE2_fig8;
+					dataOut.qf_ee1 = _QF_EE1_fig8;	dataOut.qf_ee2 = _QF_EE2_fig8;
+					dataOut.q_eev1 = _Q_EEV1;		dataOut.q_eev2 = _Q_EEV2;
+					dataOut.qf_eev1 = _QF_EEV1;		dataOut.qf_eev2 = _QF_EEV2;
+					dataOut.q_xdee = _Q_xdEE_fig8;	dataOut.qf_xdee = _QF_xdEE_fig8;
+					dataOut.q_xee = _Q_xEE_fig8;	dataOut.qf_xee = _QF_xEE_fig8;
+					dataOut.r_ee = _R_EE_fig8;		dataOut.r = _R;
+					dataOut.q1 = _Q1; 				dataOut.q2 = _Q2;
+					dataOut.qf1 = _QF1; 			dataOut.qf2 = _QF2;
+					lcm_ptr.publish(COST_PARAMS_CHANNEL,&dataOut);
+					costSent = 1;
+				}
 			}
 			
 		}
@@ -182,7 +186,7 @@ int runMPC_LCM(char mode, T *xInit){
     // launch the goal monitor
     std::thread goalThread = std::thread(&runFig8GoalLCM<T>, goalhandler);
     // launch the trajRunner
-    std::thread trajThread = std::thread(&runTrajRunner<T>, dimms);
+    std::thread trajThread = std::thread(&runTrajRunner<T>, dimms, TRAJ_RUNNER_ALPHA);
     // launch the status filter if needed
     #if USE_VELOCITY_FILTER
     	std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<T>);

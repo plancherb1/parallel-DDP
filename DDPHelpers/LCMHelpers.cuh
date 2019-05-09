@@ -101,15 +101,18 @@ class LCM_TrajRunner {
         int64_t t0; // t0 for the current traj
         lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
         int ready;
+        double *q_prev, *u_prev; // previous commands for smoothing
+        double alpha; // smoothing parameter (1 = all old, 0 = all new)
 
         // init local vars to match size of passed in vars and get LCM
-        LCM_TrajRunner(int _ld_x, int _ld_u, int _ld_KT) : ld_x(_ld_x), ld_u(_ld_u), ld_KT(_ld_KT) {
+        LCM_TrajRunner(int _ld_x, int _ld_u, int _ld_KT, T a = 0.5) : ld_x(_ld_x), ld_u(_ld_u), ld_KT(_ld_KT), alpha(a) {
             x = (T *)malloc(ld_u*NUM_TIME_STEPS*sizeof(T));                 u = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));
             KT = (T *)malloc(ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));      ready = 0;
+            q_prev = (double *)calloc(NUM_POS,sizeof(double));              u_prev = (double *)calloc(CONTROL_SIZE,sizeof(double));
             if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
         } 
         // free and delete
-        ~LCM_TrajRunner(){free(x); free(u); free(KT); /*delete lcm_ptr;*/}
+        ~LCM_TrajRunner(){free(x); free(u); free(KT); free(q_prev); free(u_prev);}
         
         // lcm new traj callback function
         void newTrajCallback_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){
@@ -145,7 +148,8 @@ class LCM_TrajRunner {
             int err = getHardwareControls<T>(&(dataOut.joint_position[0]), &(dataOut.joint_torque[0]), 
                                              x, u, KT, static_cast<double>(t0), 
                                              &(msg->joint_position_measured[0]), &(msg->joint_velocity_estimated[0]),  
-                                             static_cast<double>(msg->utime), ld_x, ld_u, ld_KT);
+                                             static_cast<double>(msg->utime), ld_x, ld_u, ld_KT,
+                                             q_prev, u_prev, alpha);            
             // then publish
             if (!err){lcm_ptr.publish(ARM_COMMAND_CHANNEL,&dataOut);}
             else{printf("[!]CRITICAL ERROR: Asked to execute beyond bounds of current traj.\n");}
@@ -207,10 +211,10 @@ class LCM_TrajRunner {
 
 template <typename T>
 __host__
-void runTrajRunner(matDimms *dimms){
+void runTrajRunner(matDimms *dimms, double alpha = 0.5){
     // init LCM and allocate a traj runner
     lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner main loop\n");}
-    LCM_TrajRunner<T> tr = LCM_TrajRunner<T>(dimms->ld_x, dimms->ld_u, dimms->ld_KT);
+    LCM_TrajRunner<T> tr = LCM_TrajRunner<T>(dimms->ld_x, dimms->ld_u, dimms->ld_KT, alpha);
     // subscribe to everything
     lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_TrajRunner<T>::statusCallback, &tr);
     lcm::Subscription *trajSub;
@@ -232,16 +236,16 @@ class LCM_MPCLoop_Handler {
         trajVars<T> *tvars; // local pointer to the global traj variables
         algTrace<T> *data; // local pointer to the global algorithm trace data stuff
         costParams<T> *cst; // local pointer to the global cost parameters
-        int iterLimit; int timeLimit; bool mode; // limits for solves and cpu/gpu mode
+        int iterLimit; int timeLimit; int clearVars; bool mode; // limits for solves and cpu/gpu mode
         lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
 
         // init and store the global location
         LCM_MPCLoop_Handler(GPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL) : 
                             gvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL) {
-                            if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} cvars = nullptr; mode = 1;}
+                            if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} cvars = nullptr; mode = 1; clearVars = 0;}
         LCM_MPCLoop_Handler(CPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL) : 
                             cvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL) {
-                            if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} gvars = nullptr; mode = 0;}
+                            if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} gvars = nullptr; mode = 0; clearVars = 0;}
         ~LCM_MPCLoop_Handler(){} // do nothing in the destructor
 
         // lcm callback function for new arm goal (eePos)
@@ -263,7 +267,7 @@ class LCM_MPCLoop_Handler {
 
         // lcm callback for new solver params
         void handleSolverParams(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_solver_params *msg){
-            iterLimit = msg->iterLimit;     timeLimit = msg->timeLimit;
+            iterLimit = msg->iterLimit;     timeLimit = msg->timeLimit;     clearVars = msg->clearVars;
         }
     
         // lcm callback function for new arm status
@@ -291,8 +295,8 @@ class LCM_MPCLoop_Handler {
                 if(mode){gpuErrchk(cudaMemcpy(gvars->d_xActual, gvars->xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice));}
             }
             // run iLQR
-            if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (gvars->lock)->unlock();}
-            else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit);  (cvars->lock)->unlock();}
+            if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars);  (gvars->lock)->unlock();}
+            else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars);  (cvars->lock)->unlock();}
             // publish to trajRunner
             if (std::is_same<T, float>::value){
                 drake::lcmt_trajectory_f dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(float);
