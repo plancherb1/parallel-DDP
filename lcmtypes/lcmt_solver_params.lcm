@@ -7,4 +7,5 @@ struct lcmt_solver_params
 	// The data
 	int32_t iterLimit;
 	int32_t timeLimit;
+	int32_t clearVars;
 }

@@ -44,8 +44,12 @@
 	#define NUM_POS 7
 	#define STATE_SIZE (2*NUM_POS)
 	#define CONTROL_SIZE 7
-	#define TOTAL_TIME 0.5
-	#define NUM_TIME_STEPS 64
+ 	#ifndef TOTAL_TIME
+		#define TOTAL_TIME 0.5
+ 	#endif
+ 	#ifndef NUM_TIME_STEPS
+		#define NUM_TIME_STEPS 64
+ 	#endif
 	#define ALPHA_BASE 0.5
 	#define NUM_ALPHA 16
 	#define MAX_DEFECT_SIZE 1.0
