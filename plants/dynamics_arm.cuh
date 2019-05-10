@@ -47,7 +47,22 @@
 /*** PLANT SPECIFIC RBDYN HELPERS ***/
 #define EE_ON_LINK_X (static_cast<T>(0))
 #define EE_ON_LINK_Y (static_cast<T>(0))
-#define EE_ON_LINK_Z (static_cast<T>(0.1524)) // flange plus peg is 6 inches
+#ifndef EE_TYPE
+    #define EE_TYPE 1 // by default the arm has a flange and no end effector
+#endif
+#if EE_TYPE == 0 // no ee
+    #define EE_ON_LINK_Z (static_cast<T>(0))
+    #define INERTIA_MODIFIER 1
+    #define WEIGHT_MODIFIER 0
+#elif EE_TYPE == 1 // flange only (2.5 inches)
+    #define EE_ON_LINK_Z (static_cast<T>(0.0635))
+    #define INERTIA_MODIFIER 3
+    #define WEIGHT_MODIFIER 0.03
+#elif EE_TYPE == 2 // flange + peg (6 inches)
+    #define EE_ON_LINK_Z (static_cast<T>(0.1524))
+    #define INERTIA_MODIFIER 5
+    #define WEIGHT_MODIFIER 0.5
+#endif
 
 template <typename T>
 __host__ __device__ 
@@ -438,18 +453,16 @@ void initI(T *s_I){
         s_I[208] = 1.8;
         s_I[210] = 0.00108;
         s_I[215] = 1.8;
-        
-        #define MODIFIER 5
-        s_I[216] = 0.00148*MODIFIER;
-        s_I[220] = -0.024*MODIFIER;
-        s_I[223] = 0.00148*MODIFIER;
-        s_I[225] = 0.024*MODIFIER;
-        s_I[230] = 0.001*MODIFIER;
-        s_I[235] = 0.024*MODIFIER;
-        s_I[237] = 1.2;
-        s_I[240] = -0.024*MODIFIER;
-        s_I[244] = 1.2;
-        s_I[251] = 1.2;
+        s_I[216] = 0.00148*INERTIA_MODIFIER;
+        s_I[220] = -0.024*INERTIA_MODIFIER;
+        s_I[223] = 0.00148*INERTIA_MODIFIER;
+        s_I[225] = 0.024*INERTIA_MODIFIER;
+        s_I[230] = 0.001*INERTIA_MODIFIER;
+        s_I[235] = 0.024*INERTIA_MODIFIER;
+        s_I[237] = 1.2+WEIGHT_MODIFIER;
+        s_I[240] = -0.024*INERTIA_MODIFIER;
+        s_I[244] = 1.2+WEIGHT_MODIFIER;
+        s_I[251] = 1.2+WEIGHT_MODIFIER;
     #endif
 }
 

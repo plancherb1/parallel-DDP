@@ -808,12 +808,13 @@
     __host__ __forceinline__
     void runiLQR_MPC_GPU(trajVars<T> *tv, GPUVars<T> *gv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         int max_iter = MAX_ITER, double time_budget = MAX_SOLVER_TIME, int clear_vars = 0){
+                         int max_iter = MAX_ITER, double time_budget = MAX_SOLVER_TIME, int clear_vars = 0, bool use_cost_shift = 0){
         // INITIALIZE THE ALGORITHM //
             struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
             T prevJ, dJ, z;     int iter = 1;   T rho = RHO_INIT;   T drho = 1.0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   T Jout[MAX_ITER+1];   int alphaOut[MAX_ITER+1];
-            printf("Last Successful Solve: %d\n",tv->last_successful_solve);
+            int finalCostShift = use_cost_shift ? shiftAmount : 0;
+            // printf("Last Successful Solve: %d\n",tv->last_successful_solve);
 
             // define kernel dimms
             dim3 ADimms(DIM_A_r,1);//DIM_A_c);
@@ -834,7 +835,7 @@
                           gv->d_g,gv->d_KT,gv->d_du,gv->d_JT,&prevJ,gv->d_xGoal,gv->d_alpha,gv->alphaIndex,alphaOut,Jout,gv->streams,dynDimms,
                           intDimms,0,md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,gv->d_I,gv->d_Tbody,
                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
             gettimeofday(&end2,NULL);
             (data->nisTime).push_back(time_delta_ms(start2,end2));
         // INITIALIZE THE ALGORITHM //
@@ -887,7 +888,7 @@
                                      gv->dJexp,gv->d_dJexp,gv->J,gv->d_JT,gv->d_xGoal,&dJ,&z,prevJ,gv->streams,dynDimms,FPBlocks,
                                      gv->alphaIndex,&ignoreFirstDefectFlag,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,gv->d_I,gv->d_Tbody,
                                      cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                     cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                                     cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
                     gettimeofday(&end2,NULL);
                     (data->simTime).push_back(time_delta_ms(start2,end2));
                 // FORWARD SIM //
@@ -912,7 +913,7 @@
                                          gv->d_g,gv->d_P,gv->d_p,gv->d_Pp,gv->d_pp,gv->d_xGoal,gv->alphaIndex,gv->streams,dynDimms,intDimms,
                                          md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,gv->d_I,gv->d_Tbody,
                                          cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);                
+                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);                
                 gettimeofday(&end2,NULL);
                 (data->nisTime).push_back(time_delta_ms(start2,end2));
             // NEXT ITERATION SETUP //
@@ -949,12 +950,13 @@
     __host__ __forceinline__
     void runiLQR_MPC_CPU(trajVars<T> *tv, CPUVars<T> *cv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0){
+                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0, bool use_cost_shift = 0){
         // INITIALIZE THE ALGORITHM //
             struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
             T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
             T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
+            int finalCostShift = use_cost_shift ? shiftAmount : 0;
             
             // load in vars and init the alg
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
@@ -968,7 +970,7 @@
             initAlgCPU<T>(cv->x,cv->xp,cv->xp2,cv->u,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->d,cv->JT,Jout,&prevJ,cv->alpha,alphaOut,
                           cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
             gettimeofday(&end2,NULL);
             (data->nisTime).push_back(time_delta_ms(start2,end2));
         // INITIALIZE THE ALGORITHM //
@@ -1008,7 +1010,7 @@
                                                    (cv->alpha)[alphaIndex],cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
                                                    cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                                                    cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                                   cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                                                   cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
                         gettimeofday(&end2,NULL);   
                         (data->simTime).back() += time_delta_ms(start2,end2);
                         if(err){if (alphaIndex < NUM_ALPHA - 1){(alphaIndex)++; continue;} else{alphaIndex = -1; break;}} else{break;}
@@ -1032,7 +1034,7 @@
                 nextIterationSetupCPU<T>(cv->x,cv->xp,cv->u,cv->up,cv->d,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
                                          md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody,
                                          cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
                 gettimeofday(&end2,NULL);
                 (data->nisTime).push_back(time_delta_ms(start2,end2));
             // NEXT ITERATION SETUP //
@@ -1063,12 +1065,13 @@
     __host__ __forceinline__
     void runiLQR_MPC_CPU2(trajVars<T> *tv, CPUVars<T> *cv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0){
+                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0, bool use_cost_shift = 0){
         // INITIALIZE THE ALGORITHM //
             struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
             T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
             T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
+            int finalCostShift = use_cost_shift ? shiftAmount : 0;
             
             // load in vars and init the alg
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
@@ -1082,7 +1085,7 @@
             initAlgCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,(cv->JTs)[0],Jout,&prevJ,cv->alpha,alphaOut,
                            cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                            cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                           cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                           cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
             gettimeofday(&end2,NULL);
             (data->nisTime).push_back(time_delta_ms(start2,end2));
         // INITIALIZE THE ALGORITHM //
@@ -1122,7 +1125,7 @@
                                                               cv->alpha,alphaIndex,cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
                                                               cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                                                               cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                                              cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                                                              cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
                         gettimeofday(&end2,NULL);   
                         (data->simTime).back() += time_delta_ms(start2,end2);
                         if(alphaIndexOut == -1){ // failed
@@ -1151,7 +1154,7 @@
                 nextIterationSetupCPU2<T>(cv->xs,cv->xp,cv->us,cv->up,cv->ds,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
                                           &alphaIndex,md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody,
                                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2);
+                                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
                 gettimeofday(&end2,NULL);
                 (data->nisTime).push_back(time_delta_ms(start2,end2));
             // NEXT ITERATION SETUP //

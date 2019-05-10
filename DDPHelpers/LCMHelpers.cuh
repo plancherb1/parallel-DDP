@@ -236,15 +236,15 @@ class LCM_MPCLoop_Handler {
         trajVars<T> *tvars; // local pointer to the global traj variables
         algTrace<T> *data; // local pointer to the global algorithm trace data stuff
         costParams<T> *cst; // local pointer to the global cost parameters
-        int iterLimit; int timeLimit; int clearVars; bool mode; // limits for solves and cpu/gpu mode
+        int iterLimit; int timeLimit; int clearVars; bool mode; bool useCostShift; // limits for solves and cpu/gpu mode
         lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
 
         // init and store the global location
-        LCM_MPCLoop_Handler(GPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL) : 
-                            gvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL) {
+        LCM_MPCLoop_Handler(GPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL, bool cS = 0) : 
+                            gvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL), useCostShift(cS) {
                             if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} cvars = nullptr; mode = 1; clearVars = 0;}
-        LCM_MPCLoop_Handler(CPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL) : 
-                            cvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL) {
+        LCM_MPCLoop_Handler(CPUVars<T> *avIn, trajVars<T> *tvarsIn, matDimms *dimmsIn, algTrace<T> *dataIn, costParams<T> *cstIn, int iL, int tL, bool cS = 0) : 
+                            cvars(avIn), tvars(tvarsIn), dimms(dimmsIn), data(dataIn), cst(cstIn), iterLimit(iL), timeLimit(tL), useCostShift(cS) {
                             if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");} gvars = nullptr; mode = 0; clearVars = 0;}
         ~LCM_MPCLoop_Handler(){} // do nothing in the destructor
 
@@ -267,7 +267,7 @@ class LCM_MPCLoop_Handler {
 
         // lcm callback for new solver params
         void handleSolverParams(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const kuka::lcmt_solver_params *msg){
-            iterLimit = msg->iterLimit;     timeLimit = msg->timeLimit;     clearVars = msg->clearVars;
+            iterLimit = msg->iterLimit;     timeLimit = msg->timeLimit;     clearVars = msg->clearVars;     useCostShift = static_cast<bool>(msg->useCostShift);
         }
     
         // lcm callback function for new arm status
@@ -295,8 +295,8 @@ class LCM_MPCLoop_Handler {
                 if(mode){gpuErrchk(cudaMemcpy(gvars->d_xActual, gvars->xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice));}
             }
             // run iLQR
-            if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars);  (gvars->lock)->unlock();}
-            else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars);  (cvars->lock)->unlock();}
+            if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);  (gvars->lock)->unlock();}
+            else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);  (cvars->lock)->unlock();}
             // publish to trajRunner
             if (std::is_same<T, float>::value){
                 drake::lcmt_trajectory_f dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(float);

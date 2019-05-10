@@ -8,4 +8,5 @@ struct lcmt_solver_params
 	int32_t iterLimit;
 	int32_t timeLimit;
 	int32_t clearVars;
+	int32_t useCostShift;
 }
