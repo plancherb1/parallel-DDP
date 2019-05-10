@@ -8,17 +8,17 @@ nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.
 // default cost terms for the start of the goal to drop the arm from 0 vector to the start of the fig 8
 // delta xyz, delta rpy, u, xzyrpyd, xyzrpy
 #define SMALL 0//0.00001
-#define _Q_EE1 10.0
+#define _Q_EE1 25.0
 #define _Q_EE2 SMALL
-#define _R_EE 0.0005
-#define _QF_EE1 100.0
+#define _R_EE 0.001
+#define _QF_EE1 250.0
 #define _QF_EE2 SMALL
 #define _Q_xdEE 10.0
 #define _QF_xdEE 10.0
 #define _Q_xEE SMALL
 #define _QF_xEE SMALL
 #define _Q_EE1_CLOSE 75.0
-#define _QF_EE1_CLOSE 100.0
+#define _QF_EE1_CLOSE 500.0
 #define _Q_EE1_BIG 75.0
 #define _QF_EE1_BIG 200.0
 
@@ -44,9 +44,9 @@ nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.
 #define PLANT 4
 #define PI 3.14159
 
-#define E_NORM_LIM 0.05
-#define V_NORM_LIM 0.05
-#define TRAJ_RUNNER_ALPHA 0.5 // smoothing on torque and pos commands per command
+#define E_NORM_LIM 0.10
+#define V_NORM_LIM 0.10
+#define TRAJ_RUNNER_ALPHA 0.5 // smoothing on torque and pos commands per command [0-1] for percent new
 
 #define TOTAL_TIME 1.0
 #define NUM_TIME_STEPS 128
@@ -101,31 +101,34 @@ class LCM_PickAndPlaceGoal_Handler {
             // then figure out if we are ready to change the goal
 			if (eNorm < eNormLim && vNorm < vNormLim){
 				updateGoal(); // first get a new goal and update the eNormMax
-                evNorm(msg,curr_goal,&eNorm,&vNorm); eNormMax = eNorm; closeCstSent = 0; cstSent = 0; varsSent = 0;
+                evNorm(msg,curr_goal,&eNorm,&vNorm); eNormMax = eNorm;
 				// then construct a goal message
 				kuka::lcmt_target_twist dataOut;               					dataOut.utime = msg->utime;
 				for (int i = 0; i < 3; i++){dataOut.position[i] = curr_goal[i];	dataOut.velocity[i] = 0;	
 											dataOut.orientation[i] = 0;			dataOut.angular_velocity[i] = 0;}
 				dataOut.orientation[3] = 0;
-                // and construct a message to clearVars for the big shift (and do one long solve)
-                kuka::lcmt_solver_params dataOut2;   dataOut2.utime = msg->utime;
-                dataOut2.timeLimit = time*10;        dataOut2.iterLimit = iters;        dataOut2.clearVars = 1;
-                // and send a larger Q/QF so that it can solve for a new traj
-                setDefaultCost(msg); defaultCst.q_xdee = 1.0; defaultCst.qf_xdee = 1.0; defaultCst.r_ee = 0.0001;
+                // and construct a message to clearVars for the goal shift
+                kuka::lcmt_solver_params dataOut2;  dataOut2.utime = msg->utime;
+                dataOut2.timeLimit = time*10;       dataOut2.iterLimit = iters;        
+                dataOut2.clearVars = 1;             dataOut2.useCostShift = 0;
+                // // and send a larger Q/QF so that it can solve for a new traj
+                setDefaultCost(msg); //defaultCst.q_xdee = 1.0; defaultCst.qf_xdee = 1.0; defaultCst.r_ee = 0.0001;
+                // // reset publishing vars for next pass
+                closeCstSent = 0; cstSent = 0; varsSent = 0;
                 // and publish all of them
                 lcm_ptr.publish(ARM_GOAL_CHANNEL,&dataOut);     lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut2);   lcm_ptr.publish(COST_PARAMS_CHANNEL,&defaultCst);
 			}
             // if close do the close cost
-            else if (!closeCstSent && eNorm < 4*eNormLim){
+            else if (!closeCstSent && eNorm < 2*eNormLim){
                 setDefaultCost(msg);    defaultCst.q_ee1 = _Q_EE1_CLOSE;    defaultCst.qf_ee1 = _QF_EE1_CLOSE;
                 closeCstSent = 1;       lcm_ptr.publish(COST_PARAMS_CHANNEL,&defaultCst);
             }
-            // as we start to move update the cost function so it isn't too aggressive again
-            else if (!cstSent && eNorm < 0.8*eNormMax){setDefaultCost(msg);    cstSent = 1;    lcm_ptr.publish(COST_PARAMS_CHANNEL,&defaultCst);}
-            // if just did a new traj solve then need to reset limits for MPC mode
-            else if (!varsSent){
+            // // as we start to move update the cost function so it isn't too aggressive again
+            // else if (!cstSent && eNorm < 0.8*eNormMax){setDefaultCost(msg);    cstSent = 1;    lcm_ptr.publish(COST_PARAMS_CHANNEL,&defaultCst);}
+            // // if just did a new traj solve then need to reset limits for MPC mode
+            else if (!varsSent && eNorm < 0.95*eNormMax){
                 kuka::lcmt_solver_params dataOut;   dataOut.utime = msg->utime;
-                dataOut.timeLimit = time;           dataOut.iterLimit = iters;        dataOut.clearVars = 0;
+                dataOut.timeLimit = time;           dataOut.iterLimit = iters;        dataOut.clearVars = 0;    dataOut.useCostShift = 1;
                 varsSent = 1;                       lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut);
             }
 		}
@@ -148,6 +151,7 @@ int runMPC_LCM(char mode, T *xInit){
 	int itersToDo = getInt(1000, 1);
 	printf("What should the MPC time budget be (in ms)? (q to exit)?\n");
 	int timeLimit = getInt(1000, 1); //note in ms
+    bool useCostShift = true;
 	// allocate variables and load inital variables
 	trajVars<T> *tvars = new trajVars<T>; matDimms *dimms = new matDimms; algTrace<T> *atrace = new algTrace<T>;
 	costParams<T> *cst = new costParams<T>;	loadCost(cst); // load in default cost to start
@@ -169,7 +173,7 @@ int runMPC_LCM(char mode, T *xInit){
     	// load initial goal and run to full convergence to warm start
     	goalhandler->loadInitialGoal(cvars->xGoal); runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,cst,0,0,1);
 		// then create the handler and launch the MPC thread
-		mpchandler = new LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
+		mpchandler = new LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo,timeLimit,useCostShift);
      	mpcThread  = std::thread(&runMPCHandler<T>, mpchandler);    
      	if(FORCE_CORE_SWITCHES){setCPUForThread(&mpcThread, 1);} // move to another CPU
     }

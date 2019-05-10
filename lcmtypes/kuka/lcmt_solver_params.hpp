@@ -24,6 +24,8 @@ class lcmt_solver_params
 
         int32_t    clearVars;
 
+        int32_t    useCostShift;
+
     public:
         /**
          * Encode a message into binary form.
@@ -132,6 +134,9 @@ int lcmt_solver_params::_encodeNoHash(void *buf, int offset, int maxlen) const
     tlen = __int32_t_encode_array(buf, offset + pos, maxlen - pos, &this->clearVars, 1);
     if(tlen < 0) return tlen; else pos += tlen;
 
+    tlen = __int32_t_encode_array(buf, offset + pos, maxlen - pos, &this->useCostShift, 1);
+    if(tlen < 0) return tlen; else pos += tlen;
+
     return pos;
 }
 
@@ -151,6 +156,9 @@ int lcmt_solver_params::_decodeNoHash(const void *buf, int offset, int maxlen)
     tlen = __int32_t_decode_array(buf, offset + pos, maxlen - pos, &this->clearVars, 1);
     if(tlen < 0) return tlen; else pos += tlen;
 
+    tlen = __int32_t_decode_array(buf, offset + pos, maxlen - pos, &this->useCostShift, 1);
+    if(tlen < 0) return tlen; else pos += tlen;
+
     return pos;
 }
 
@@ -161,12 +169,13 @@ int lcmt_solver_params::_getEncodedSizeNoHash() const
     enc_size += __int32_t_encoded_array_size(NULL, 1);
     enc_size += __int32_t_encoded_array_size(NULL, 1);
     enc_size += __int32_t_encoded_array_size(NULL, 1);
+    enc_size += __int32_t_encoded_array_size(NULL, 1);
     return enc_size;
 }
 
 uint64_t lcmt_solver_params::_computeHash(const __lcm_hash_ptr *)
 {
-    uint64_t hash = 0x17710c3482aa52ecLL;
+    uint64_t hash = 0xd006b8facf346777LL;
     return (hash<<1) + ((hash>>63)&1);
 }
 

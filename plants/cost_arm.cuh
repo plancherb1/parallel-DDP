@@ -202,13 +202,13 @@
 	template <typename T>
 	__host__ __device__ __forceinline__
 	T eeCost(T *s_eePos, T *d_eeGoal, int k, T *s_eeVel = nullptr, T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2,
-											 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2){
+											 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, int timeShift = 0){
 		T cost = 0.0;
 	 	for (int i = 0; i < 6; i ++){
-	    	T delta = s_eePos[i] - d_eeGoal[i];
-	    	cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*delta;
+	    	T delta = s_eePos[i] - d_eeGoal[i]; bool flag = k >= NUM_TIME_STEPS-1-timeShift;
+	    	cost += 0.5*(flag ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*delta;
 	    	#if USE_EE_VEL_COST
-    			if (s_eeVel != nullptr){cost += 0.5*(k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*s_eeVel[i];}
+    			if (s_eeVel != nullptr){cost += 0.5*(flag ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*s_eeVel[i];}
     		#endif
 	 	}
 	 	#if USE_SMOOTH_ABS
@@ -220,28 +220,28 @@
 	template <typename T>
 	__host__ __device__ __forceinline__
 	T deeCost(T *s_eePos, T *s_deePos, T *d_eeGoal, int k, int r, T *s_eeVel = nullptr, T *s_deePosVel = nullptr, T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
-											 					  T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2){
-		T val = 0.0;	T deePos;
+											 					  T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, int timeShift = 0){
+		T val = 0.0;	T deePos;	bool flag = k >= NUM_TIME_STEPS-1-timeShift;
 	 	#pragma unroll
 	 	for (int i = 0; i < 6; i++){
 	 		T delta = s_eePos[i]-d_eeGoal[i];
 	    	#if USE_EE_VEL_COST
     			if (s_eeVel != nullptr){
     				T deeVel = s_deePosVel[r*12+i+6];	deePos = s_deePosVel[r*12+i];
-    				val += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*deeVel;
+    				val += (flag ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*deeVel;
     			}
 			#else
     			deePos = s_deePos[r*6+i];
 			#endif
-    		val += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*deePos;
+    		val += (flag ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*deePos;
 	 	}
 	 	#if USE_SMOOTH_ABS
 			T val2 = 0.0;
 	    	#pragma unroll
 	    	for (int i = 0; i < 6; i++){
 	    		T delta = s_eePos[i]-d_eeGoal[i];
-	       		val2 += (k == NUM_TIME_STEPS - 1 ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*delta;
-       			if (USE_EE_VEL_COST && s_eeVel != nullptr){val2 += (k == NUM_TIME_STEPS-1 ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*s_eeVel[i];}
+	       		val2 += (flag ? (i < 3 ? QF_EE1 : QF_EE2) : (i < 3 ? Q_EE1 : Q_EE2))*delta*delta;
+       			if (USE_EE_VEL_COST && s_eeVel != nullptr){val2 += (flag ? (i < 3 ? QF_EEV1 : QF_EEV2) : (i < 3 ? Q_EEV1 : Q_EEV2))*s_eeVel[i]*s_eeVel[i];}
 	    	}
 	    	val2 += SMOOTH_ABS_ALPHA*SMOOTH_ABS_ALPHA;
 	    	val /= sqrt(val2);
@@ -255,12 +255,12 @@
 	void costFunc(T *s_cost, T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr, 
 				  T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
 				  T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, 
-				  T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE){
+				  T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, int timeShift = 0){
 		int start, delta; singleLoopVals(&start,&delta);
 		#pragma unroll
 	    for (int ind = start; ind < NUM_POS; ind += delta){
 	    	T cost = 0.0;
-	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);} // compute in one thread for smooth abs
+	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);} // compute in one thread for smooth abs
 	    	// in all cases add on u cost and state cost
 	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
 	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xEE : Q_xEE)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
@@ -281,11 +281,11 @@
 	T costFunc(T *s_eePos, T *d_eeGoal, T *s_x, T *s_u, int k, T *s_eeVel = nullptr,
 			   T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
 			   T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, 
-			   T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE){
+			   T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, int timeShift = 0){
 		T cost = 0.0;
 		#pragma unroll
 	    for (int ind = 0; ind < NUM_POS; ind ++){
-	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);} // compute in one thread for smooth abs
+	    	if(ind == 0){cost += eeCost(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);} // compute in one thread for smooth abs
 	    	// in all cases add on u cost and state cost
 	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
 	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xEE : Q_xEE)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
@@ -307,7 +307,7 @@
 				  T *d_JT = nullptr, int tid = -1, T *s_eeVel = nullptr, T *s_deePosVel = nullptr,
 				  T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, 
 				  T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, 
-				  T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE){
+				  T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, int timeShift = 0){
 		// then to get the gradient and Hessian we need to compute the following for the state block (and also standard control block)
 		// J = \sum_i Q_i*pow(hand_delta_i,2) + other stuff
 		// dJ/dx = g = \sum_i Q_i*hand_delta_i*dh_i/dx + other stuff
@@ -317,9 +317,9 @@
 		for (int r = start; r < DIM_g_r; r += delta){
 		  	T val = 0.0;
 		  	#if USE_EE_VEL_COST 
-		  		if (s_deePosVel != nullptr && r < STATE_SIZE){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deePosVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);}
+		  		if (s_deePosVel != nullptr && r < STATE_SIZE){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,s_eeVel,s_deePosVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);}
 	  		#else
-		  		if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,nullptr,nullptr,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2);}
+		  		if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,nullptr,nullptr,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);}
 	  		#endif
 		  	// add on the joint level state cost (tend to zero regularizer) and control cost
 		  	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xEE : Q_xEE)*s_x[r];}
@@ -373,9 +373,9 @@
 		bool flag = d_JT != nullptr; int ind = (tid != -1 ? tid : k);
 		#ifdef __CUDA_ARCH__
 			if(threadIdx.x != 0 || threadIdx.y != 0){flag = 0;}
-			if (flag){d_JT[ind] = costFunc(s_eePos,d_eeGoal,s_x,s_u,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
+			if (flag){d_JT[ind] = costFunc(s_eePos,d_eeGoal,s_x,s_u,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,timeShift);}
 		#else
-			if (flag){d_JT[ind] += costFunc(s_eePos,d_eeGoal,s_x,s_u,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
+			if (flag){d_JT[ind] += costFunc(s_eePos,d_eeGoal,s_x,s_u,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,timeShift);}
 		#endif
 	}
 #endif

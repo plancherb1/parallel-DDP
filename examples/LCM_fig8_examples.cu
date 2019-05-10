@@ -17,10 +17,10 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define _Q_xEE SMALL
 #define _QF_xEE SMALL
 // new cost terms for the actual fig 8 tracking
-#define _Q_EE1_fig8 250.0
+#define _Q_EE1_fig8 300.0
 #define _Q_EE2_fig8 SMALL
-#define _R_EE_fig8 0.001
-#define _QF_EE1_fig8 250.0
+#define _R_EE_fig8 0.0005 // make 0.001 for the move to inital goal and then to 0.0005 for motion
+#define _QF_EE1_fig8 300.0
 #define _QF_EE2_fig8 SMALL
 #define _Q_xdEE_fig8 10.0
 #define _QF_xdEE_fig8 10.0
@@ -59,10 +59,12 @@ class LCM_Fig8Goal_Handler {
     public:
     	double totalTime;	double zeroTime;	int inFig8;
     	double eNormLim;	double vNormLim;	int costSent;
+    	double totalError;	int numIters;		int currRep;
     	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
 
     	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim) : totalTime(tTime), eNormLim(eLim), vNormLim(vLim) {
-    		zeroTime = 0;	inFig8 = 0;		costSent = 0;	if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
+    		zeroTime = 0; inFig8 = 0; costSent = 0;	totalError = 0;	numIters = 0; currRep = 0;
+    		if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
     	}
     	~LCM_Fig8Goal_Handler(){}
 
@@ -86,16 +88,18 @@ class LCM_Fig8Goal_Handler {
 		// update goal based on status
 		void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
 			// get current goal
-			T goal[3];	double time = inFig8 ? msg->utime - zeroTime : 0;	loadFig8Goal(goal,time);
+			T goal[3]; double time = inFig8 ? msg->utime - zeroTime : 0; int rep = loadFig8Goal(goal,time);
 			// compute the position error norm and velocity norm
 			T eNorm; T vNorm; T currX[STATE_SIZE]; T eePos[NUM_POS];
 			for(int i=0; i < STATE_SIZE; i++){
 				if(i < NUM_POS){currX[i] = static_cast<T>(msg->joint_position_measured[i]);}
 				else{			currX[i] = static_cast<T>(msg->joint_velocity_estimated[i-NUM_POS]);}
 			}
-			evNorm<T>(currX, goal, &eNorm, &vNorm, eePos);
+			evNorm<T>(currX, goal, &eNorm, &vNorm, eePos);		totalError += static_cast<double>(eNorm);	numIters++;
 			// debug print
 			printf("[%f] eNorm[%f] vNorm[%f] for goal[%f %f %f] and Pos[%f %f %f]\n",static_cast<double>(msg->utime),eNorm,vNorm,goal[0],goal[1],goal[2],eePos[0],eePos[1],eePos[2]);
+			// print the error for each rep
+			if(rep > currRep){printf("\n[!] Rep [%d] has total error [%f]\n\n",rep,totalError/numIters); totalError = 0; numIters = 0; currRep++;}
 			// then figure out if we are in the goal moving time
 			if(inFig8){
 				// then load in goal pos and zero out vel, orientation, angularVelocity (for now) -- note orientation is size 4 (quat)
@@ -110,14 +114,15 @@ class LCM_Fig8Goal_Handler {
 				// else check to see if we should update goal next time
 				if (eNorm < eNormLim && vNorm < vNormLim){
 					// reset the zeroTime and set that we are inFig8
-					zeroTime = msg->utime;		inFig8 = 1;
+					zeroTime = msg->utime;		inFig8 = 1;		totalError = 0;		numIters = 0;
 					// also update the solver params
 					// kuka::lcmt_solver_params dataOut;	dataOut.utime = msg->utime;
-					// dataOut.timeLimit = 1000;			dataOut.iterLimit = 5;		dataOut.clearVars = 0;
+					// dataOut.timeLimit = 1000;			dataOut.iterLimit = 5;		
+					// dataOut.clearVars = 0;               dataOut.useCostShift = 0;
 					// lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut);
 				}
 				// else if close but not there yet update the cost func to care more about moving to goals
-				else if (!costSent && eNorm < 2*eNormLim && vNorm < 2*vNormLim){
+				else if (!costSent && eNorm < 2.5*eNormLim && vNorm < 2.5*vNormLim){
 					kuka::lcmt_cost_params dataOut;	dataOut.utime = msg->utime;
 					dataOut.q_ee1 = _Q_EE1_fig8;	dataOut.q_ee2 = _Q_EE2_fig8;
 					dataOut.qf_ee1 = _QF_EE1_fig8;	dataOut.qf_ee2 = _QF_EE2_fig8;
