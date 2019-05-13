@@ -60,9 +60,11 @@ class LCM_Fig8Goal_Handler {
     	double totalTime;	double zeroTime;	int inFig8;
     	double eNormLim;	double vNormLim;	int costSent;
     	double totalError;	int numIters;		int currRep;
+    	int iterLimit;		int timeLimit;
     	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
 
-    	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim) : totalTime(tTime), eNormLim(eLim), vNormLim(vLim) {
+    	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim, int iL, int tL) : 
+    		totalTime(tTime), eNormLim(eLim), vNormLim(vLim), iterLimit(iL), timeLimit(tL) {
     		zeroTime = 0; inFig8 = 0; costSent = 0;	totalError = 0;	numIters = 0; currRep = 0;
     		if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
     	}
@@ -97,7 +99,7 @@ class LCM_Fig8Goal_Handler {
 			}
 			evNorm<T>(currX, goal, &eNorm, &vNorm, eePos);		totalError += static_cast<double>(eNorm);	numIters++;
 			// debug print
-			printf("[%f] eNorm[%f] vNorm[%f] for goal[%f %f %f] and Pos[%f %f %f]\n",static_cast<double>(msg->utime),eNorm,vNorm,goal[0],goal[1],goal[2],eePos[0],eePos[1],eePos[2]);
+			// printf("[%f] eNorm[%f] vNorm[%f] for goal[%f %f %f] and Pos[%f %f %f]\n",static_cast<double>(msg->utime),eNorm,vNorm,goal[0],goal[1],goal[2],eePos[0],eePos[1],eePos[2]);
 			// print the error for each rep
 			if(rep > currRep){printf("\n[!] Rep [%d] has total error [%f]\n\n",rep,totalError/numIters); totalError = 0; numIters = 0; currRep++;}
 			// then figure out if we are in the goal moving time
@@ -115,11 +117,11 @@ class LCM_Fig8Goal_Handler {
 				if (eNorm < eNormLim && vNorm < vNormLim){
 					// reset the zeroTime and set that we are inFig8
 					zeroTime = msg->utime;		inFig8 = 1;		totalError = 0;		numIters = 0;
-					// also update the solver params
-					// kuka::lcmt_solver_params dataOut;	dataOut.utime = msg->utime;
-					// dataOut.timeLimit = 1000;			dataOut.iterLimit = 5;		
-					// dataOut.clearVars = 0;               dataOut.useCostShift = 0;
-					// lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut);
+					// also update the solver params for this experiment
+					kuka::lcmt_solver_params dataOut;	dataOut.utime = msg->utime;
+					dataOut.timeLimit = timeLimit;		dataOut.iterLimit = iterLimit;		
+					dataOut.clearVars = 0;              dataOut.useCostShift = 0;
+					lcm_ptr.publish(SOLVER_PARAMS_CHANNEL,&dataOut);
 				}
 				// else if close but not there yet update the cost func to care more about moving to goals
 				else if (!costSent && eNorm < 2.5*eNormLim && vNorm < 2.5*vNormLim){
@@ -152,12 +154,16 @@ template <typename T>
 __host__
 int runMPC_LCM(char mode, T *xInit){
 	// launch the simulator
-    printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");
+    // printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");
 	// get the max iters and time per solve
-	printf("What is the maximum number of iterations a solver can take? (q to exit)?\n");
+	// printf("[For the initial step] What is the maximum number of iterations a solver can take? (q to exit)?\n");
+	int itersToDo_init = 1000; //getInt(1000, 1);
+	printf("[For the initial step] What should the MPC time budget be (in ms)? (q to exit)?\n");
+	int timeLimit_init = getInt(1000, 1); //note in ms
+	printf("[For the figure eight] What is the maximum number of iterations a solver can take? (q to exit)?\n");
 	int itersToDo = getInt(1000, 1);
-	printf("What should the MPC time budget be (in ms)? (q to exit)?\n");
-	int timeLimit = getInt(1000, 1); //note in ms
+	// printf("[For the figure eight] What should the MPC time budget be (in ms)? (q to exit)?\n");
+	int timeLimit = 10000; //getInt(1000, 1); //note in ms
 	// get the total traj time
 	printf("How many seconds long should one figure eight of the tracked trajectory be? (q to exit)\n");
 	double totalTime_us = 1000000.0*static_cast<double>(getInt(100, 1));
@@ -169,14 +175,14 @@ int runMPC_LCM(char mode, T *xInit){
     if (mode == 'G'){gvars = new GPUVars<T>; allocateMemory_GPU_MPC<T>(gvars, dimms, tvars);}
     else{		     cvars = new CPUVars<T>; allocateMemory_CPU_MPC<T>(cvars, dimms, tvars);}
     // get the goal handler
-    LCM_Fig8Goal_Handler<T> *goalhandler = new LCM_Fig8Goal_Handler<T>(totalTime_us, E_NORM_LIM, V_NORM_LIM);
+    LCM_Fig8Goal_Handler<T> *goalhandler = new LCM_Fig8Goal_Handler<T>(totalTime_us, E_NORM_LIM, V_NORM_LIM, itersToDo, timeLimit);
     // then load the goals and LCM handlers and launch the MPC threads
     if (mode == 'G'){
     	// load initial traj and goal and run to full convergence to warm start
     	loadTraj<T>(gvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(gvars->xGoal);
     	runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,cst,0,0,1);
 		// then create the handler and launch the MPC thread
-		mpchandler = new LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
+		mpchandler = new LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,cst,itersToDo_init,timeLimit_init);
      	mpcThread  = std::thread(&runMPCHandler<T>, mpchandler);    
     }
     else{
@@ -184,7 +190,7 @@ int runMPC_LCM(char mode, T *xInit){
     	loadTraj<T>(cvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(cvars->xGoal); 
     	runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,cst,0,0,1);
 		// then create the handler and launch the MPC thread
-		mpchandler = new LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo,timeLimit);
+		mpchandler = new LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo_init,timeLimit_init);
      	mpcThread  = std::thread(&runMPCHandler<T>, mpchandler);   
      	if(FORCE_CORE_SWITCHES){setCPUForThread(&mpcThread, 1);} // move to another CPU
     }
