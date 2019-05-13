@@ -44,6 +44,7 @@
 	#define NUM_POS 7
 	#define STATE_SIZE (2*NUM_POS)
 	#define CONTROL_SIZE 7
+ 	#define EE_TYPE 1 // flange but no EE on it
  	#ifndef TOTAL_TIME
 		#define TOTAL_TIME 0.5
  	#endif

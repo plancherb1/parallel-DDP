@@ -46,7 +46,7 @@ nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.
 
 #define E_NORM_LIM 0.10
 #define V_NORM_LIM 0.10
-#define TRAJ_RUNNER_ALPHA 0.5 // smoothing on torque and pos commands per command [0-1] for percent new
+#define TRAJ_RUNNER_ALPHA 0 // smoothing on torque and pos commands per command [0-1] for percent new
 
 #define TOTAL_TIME 1.0
 #define NUM_TIME_STEPS 128
