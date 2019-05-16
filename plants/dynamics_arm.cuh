@@ -2224,7 +2224,7 @@ void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nul
    T invf3 = 1/factor3;
    T invf4 = 1/factor4;
    T invf5 = 1/factor5;
-   T dsqrtTerm = (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])/sqrtf3;
+   // T dsqrtTerm = (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])/sqrtf3;
    if (thread0Flag){
       // then compute ee_pos
       s_eePos[0] = Tee[0]*EE_ON_LINK_X + Tee[4]*EE_ON_LINK_Y + Tee[8]*EE_ON_LINK_Z  + Tee[12];
@@ -2237,9 +2237,11 @@ void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nul
       s_eePosdt[0] = Tee_dt[0]*EE_ON_LINK_X + Tee_dt[4]*EE_ON_LINK_Y + Tee_dt[8]*EE_ON_LINK_Z  + Tee_dt[12];
       s_eePosdt[1] = Tee_dt[1]*EE_ON_LINK_X + Tee_dt[5]*EE_ON_LINK_Y + Tee_dt[9]*EE_ON_LINK_Z  + Tee_dt[13];
       s_eePosdt[2] = Tee_dt[2]*EE_ON_LINK_X + Tee_dt[6]*EE_ON_LINK_Y + Tee_dt[10]*EE_ON_LINK_Z + Tee_dt[14];
-      s_eePosdt[3] = -Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6]; // don't divide by f3 for now as we will use for temp memeory in deriv comp
-      s_eePosdt[4] =  Tee[2]*dsqrtTerm  - sqrtf3*Tee_dt[2];  // don't divide by f4 for now as we will use for temp memeory in deriv comp
-      s_eePosdt[5] = -Tee[1]*Tee_dt[0]  + Tee[0]*Tee_dt[1];  // don't divide by f5 for now as we will use for temp memeory in deriv comp
+      // TODO: something is wrong lets zero out the rpy stuff for now
+      #warning "EE_VEL for rpy is broken at this time please do not use in your algorithm\n"
+      s_eePosdt[3] = 0;//-Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6]; // don't divide by f3 for now as we will use for temp memeory in deriv comp
+      s_eePosdt[4] = 0;// Tee[2]*dsqrtTerm  - sqrtf3*Tee_dt[2];  // don't divide by f4 for now as we will use for temp memeory in deriv comp
+      s_eePosdt[5] = 0;//-Tee[1]*Tee_dt[0]  + Tee[0]*Tee_dt[1];  // don't divide by f5 for now as we will use for temp memeory in deriv comp
    }
    hd__syncthreads();
    if (derivFlag){
@@ -2254,26 +2256,26 @@ void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nul
             s_eePosVeldx[k*ld_grad + 1]  = T_dx[1]*EE_ON_LINK_X + T_dx[5]*EE_ON_LINK_Y + T_dx[9]*EE_ON_LINK_Z  + T_dx[13];
             s_eePosVeldx[k*ld_grad + 2]  = T_dx[2]*EE_ON_LINK_X + T_dx[6]*EE_ON_LINK_Y + T_dx[10]*EE_ON_LINK_Z + T_dx[14];
             // then the positional derivs for rpy
-            s_eePosVeldx[k*ld_grad + 3]  = (-Tee[6]*T_dx[10] + Tee[10]*T_dx[6])*invf3;
-            T sqrtf3_dx = (Tee[6]*T_dx[6] + Tee[10]*T_dx[10])/sqrtf3;
-            s_eePosVeldx[k*ld_grad + 4]  = (Tee[2]*sqrtf3_dx -  sqrtf3*T_dx[2])*invf4;
-            s_eePosVeldx[k*ld_grad + 5]  = (-Tee[1]*T_dx[0]  +  Tee[0]*T_dx[1])*invf5;
+            s_eePosVeldx[k*ld_grad + 3]  = 0;//(-Tee[6]*T_dx[10] + Tee[10]*T_dx[6])*invf3;
+            // T sqrtf3_dx = (Tee[6]*T_dx[6] + Tee[10]*T_dx[10])/sqrtf3;
+            s_eePosVeldx[k*ld_grad + 4]  = 0;//(Tee[2]*sqrtf3_dx -  sqrtf3*T_dx[2])*invf4;
+            s_eePosVeldx[k*ld_grad + 5]  = 0;//(-Tee[1]*T_dx[0]  +  Tee[0]*T_dx[1])*invf5;
             // then the velcity derivs for xyz
             s_eePosVeldx[k*ld_grad + 6]  = T_dtdx[0]*EE_ON_LINK_X + T_dtdx[4]*EE_ON_LINK_Y + T_dtdx[8]*EE_ON_LINK_Z  + T_dtdx[12];
             s_eePosVeldx[k*ld_grad + 7]  = T_dtdx[1]*EE_ON_LINK_X + T_dtdx[5]*EE_ON_LINK_Y + T_dtdx[9]*EE_ON_LINK_Z  + T_dtdx[13];
             s_eePosVeldx[k*ld_grad + 8]  = T_dtdx[2]*EE_ON_LINK_X + T_dtdx[6]*EE_ON_LINK_Y + T_dtdx[10]*EE_ON_LINK_Z + T_dtdx[14];
             // and final velocity for rpy
-            T r_1 = (-T_dx[6]*Tee_dt[10] - Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])*invf3;
-            T r_2 = s_eePosdt[3]*2*(Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf3*invf3;
-            T dsqrtTerm_dx = (T_dx[6]*Tee_dt[10] + Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])/sqrtf3 + 
-                             (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])*sqrtf3_dx;
-            T p_1 = (T_dx[2]*dsqrtTerm + Tee[2]*dsqrtTerm_dx - sqrtf3_dx*Tee_dt[2] - sqrtf3*T_dtdx[2])*invf4;
-            T p_2 = s_eePosdt[4]*2*(Tee[2]*T_dx[2] + Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf4*invf4;
-            T y_1 = (-T_dx[1]*Tee_dt[0] - Tee[1]*T_dtdx[0] + T_dx[0]*Tee_dt[1] + Tee[0]*T_dtdx[1])*invf5;
-            T y_2 = s_eePosdt[5]*2*(Tee[1]*T_dx[1] + Tee[0]*T_dx[0])*invf5*invf5;
-            s_eePosVeldx[k*ld_grad + 9]  = r_1 - r_2;
-            s_eePosVeldx[k*ld_grad + 10] = p_1 - p_2;
-            s_eePosVeldx[k*ld_grad + 11] = y_1 - y_2;
+            // T r_1 = (-T_dx[6]*Tee_dt[10] - Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])*invf3;
+            // T r_2 = s_eePosdt[3]*2*(Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf3*invf3;
+            // T dsqrtTerm_dx = (T_dx[6]*Tee_dt[10] + Tee[6]*T_dtdx[10] + T_dx[10]*Tee_dt[6] + Tee[10]*T_dtdx[6])/sqrtf3 + 
+            //                  (Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6])*sqrtf3_dx;
+            // T p_1 = (T_dx[2]*dsqrtTerm + Tee[2]*dsqrtTerm_dx - sqrtf3_dx*Tee_dt[2] - sqrtf3*T_dtdx[2])*invf4;
+            // T p_2 = s_eePosdt[4]*2*(Tee[2]*T_dx[2] + Tee[6]*T_dx[6] + Tee[10]*T_dx[10])*invf4*invf4;
+            // T y_1 = (-T_dx[1]*Tee_dt[0] - Tee[1]*T_dtdx[0] + T_dx[0]*Tee_dt[1] + Tee[0]*T_dtdx[1])*invf5;
+            // T y_2 = s_eePosdt[5]*2*(Tee[1]*T_dx[1] + Tee[0]*T_dx[0])*invf5*invf5;
+            s_eePosVeldx[k*ld_grad + 9]  = 0;//r_1 - r_2;
+            s_eePosVeldx[k*ld_grad + 10] = 0;//p_1 - p_2;
+            s_eePosVeldx[k*ld_grad + 11] = 0;//y_1 - y_2;
          }
          // for the pos gradient is zero wrt qd and T_dx is zero wrt qd as well
          else{
@@ -2286,10 +2288,10 @@ void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nul
             s_eePosVeldx[k*ld_grad + 6]  = T_dtdx[0]*EE_ON_LINK_X + T_dtdx[4]*EE_ON_LINK_Y + T_dtdx[8]*EE_ON_LINK_Z  + T_dtdx[12];
             s_eePosVeldx[k*ld_grad + 7]  = T_dtdx[1]*EE_ON_LINK_X + T_dtdx[5]*EE_ON_LINK_Y + T_dtdx[9]*EE_ON_LINK_Z  + T_dtdx[13];
             s_eePosVeldx[k*ld_grad + 8]  = T_dtdx[2]*EE_ON_LINK_X + T_dtdx[6]*EE_ON_LINK_Y + T_dtdx[10]*EE_ON_LINK_Z + T_dtdx[14];
-            s_eePosVeldx[k*ld_grad + 9]  = (-Tee[6]*T_dtdx[10] + Tee[10]*T_dtdx[6])*invf3;
-            T dsqrtTerm_dx = (Tee[6]*T_dtdx[10] + Tee[10]*T_dtdx[6])/sqrtf3;
-            s_eePosVeldx[k*ld_grad + 10] = (Tee[2]*dsqrtTerm_dx - sqrtf3*T_dtdx[2])*invf4;
-            s_eePosVeldx[k*ld_grad + 11] = (-Tee[1]*T_dtdx[0] + Tee[0]*T_dtdx[1])*invf5;
+            s_eePosVeldx[k*ld_grad + 9]  = 0;//(-Tee[6]*T_dtdx[10] + Tee[10]*T_dtdx[6])*invf3;
+            // T dsqrtTerm_dx = (Tee[6]*T_dtdx[10] + Tee[10]*T_dtdx[6])/sqrtf3;
+            s_eePosVeldx[k*ld_grad + 10] = 0;//(Tee[2]*dsqrtTerm_dx - sqrtf3*T_dtdx[2])*invf4;
+            s_eePosVeldx[k*ld_grad + 11] = 0;//(-Tee[1]*T_dtdx[0] + Tee[0]*T_dtdx[1])*invf5;
          }
       }
    }

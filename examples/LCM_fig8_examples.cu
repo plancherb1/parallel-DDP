@@ -4,33 +4,11 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define USE_WAFR_URDF 0
 #define EE_COST 1
 #define USE_SMOOTH_ABS 0
-// default cost terms for the start of the goal to drop the arm from the initial point to the start of the fig 8
-// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
-#define SMALL 0//0.00001
-#define _Q_EE1 50.0
-#define _Q_EE2 SMALL
-#define _R_EE 0.001
-#define _QF_EE1 100.0
-#define _QF_EE2 SMALL
-#define _Q_xdEE 10.0
-#define _QF_xdEE 10.0
-#define _Q_xEE SMALL
-#define _QF_xEE SMALL
-// new cost terms for the actual fig 8 tracking
-#define _Q_EE1_fig8 300.0
-#define _Q_EE2_fig8 SMALL
-#define _R_EE_fig8 0.0005 // make 0.001 for the move to inital goal and then to 0.0005 for motion
-#define _QF_EE1_fig8 300.0
-#define _QF_EE2_fig8 SMALL
-#define _Q_xdEE_fig8 10.0
-#define _QF_xdEE_fig8 10.0
-#define _Q_xEE_fig8 SMALL
-#define _QF_xEE_fig8 SMALL
 
 #define USE_EE_VEL_COST 0
-#define _Q_EEV1 0.0
+#define _Q_EEV1 10.0
 #define _Q_EEV2 0.0
-#define _QF_EEV1 0.0
+#define _QF_EEV1 10.0
 #define _QF_EEV2 0.0
 
 #define USE_LIMITS_FLAG 0
@@ -42,6 +20,8 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define USE_LCM 1
 #define USE_VELOCITY_FILTER 0
 #define HARDWARE_MODE 1
+#define USE_ALG_TRACE 0
+#define USE_MAX_SOLVER_TIME 0
 
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
@@ -50,7 +30,55 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 
 #define E_NORM_LIM 0.05
 #define V_NORM_LIM 0.05
-#define TRAJ_RUNNER_ALPHA 0.5 // smoothing on torque and pos commands per command
+#define TRAJ_RUNNER_ALPHA 0 // smoothing on torque and pos commands per command
+
+#if USE_EE_VEL_COST
+	// default cost terms for the start of the goal to drop the arm from the initial point to the start of the fig 8
+	// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
+	#define SMALL 0//0.00001
+	#define _Q_EE1 50.0
+	#define _Q_EE2 SMALL
+	#define _R_EE 0.001
+	#define _QF_EE1 100.0
+	#define _QF_EE2 SMALL
+	#define _Q_xdEE 10.0
+	#define _QF_xdEE 10.0
+	#define _Q_xEE SMALL
+	#define _QF_xEE SMALL
+	// new cost terms for the actual fig 8 tracking
+	#define _Q_EE1_fig8 300.0
+	#define _Q_EE2_fig8 SMALL
+	#define _R_EE_fig8 0.0005 // make 0.001 for the move to inital goal and then to 0.0005 for motion
+	#define _QF_EE1_fig8 300.0
+	#define _QF_EE2_fig8 SMALL
+	#define _Q_xdEE_fig8 10.0
+	#define _QF_xdEE_fig8 10.0
+	#define _Q_xEE_fig8 SMALL
+	#define _QF_xEE_fig8 SMALL
+#else
+	// default cost terms for the start of the goal to drop the arm from the initial point to the start of the fig 8
+	// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
+	#define SMALL 0//0.00001
+	#define _Q_EE1 50.0
+	#define _Q_EE2 SMALL
+	#define _R_EE 0.001
+	#define _QF_EE1 100.0
+	#define _QF_EE2 SMALL
+	#define _Q_xdEE 10.0
+	#define _QF_xdEE 10.0
+	#define _Q_xEE SMALL
+	#define _QF_xEE SMALL
+	// new cost terms for the actual fig 8 tracking
+	#define _Q_EE1_fig8 300.0
+	#define _Q_EE2_fig8 SMALL
+	#define _R_EE_fig8 0.0005 // make 0.001 for the move to inital goal and then to 0.0005 for motion
+	#define _QF_EE1_fig8 300.0
+	#define _QF_EE2_fig8 SMALL
+	#define _Q_xdEE_fig8 10.0
+	#define _QF_xdEE_fig8 10.0
+	#define _Q_xEE_fig8 SMALL
+	#define _QF_xEE_fig8 SMALL
+#endif
 
 #include "../config.cuh"
 
@@ -101,7 +129,7 @@ class LCM_Fig8Goal_Handler {
 			// debug print
 			// printf("[%f] eNorm[%f] vNorm[%f] for goal[%f %f %f] and Pos[%f %f %f]\n",static_cast<double>(msg->utime),eNorm,vNorm,goal[0],goal[1],goal[2],eePos[0],eePos[1],eePos[2]);
 			// print the error for each rep
-			if(rep > currRep){printf("\n[!] Rep [%d] has total error [%f]\n\n",rep,totalError/numIters); totalError = 0; numIters = 0; currRep++;}
+			if(rep > currRep){printf("[!] Rep [%d] has total error [%f]\n",rep,totalError/numIters); totalError = 0; numIters = 0; currRep++;}
 			// then figure out if we are in the goal moving time
 			if(inFig8){
 				// then load in goal pos and zero out vel, orientation, angularVelocity (for now) -- note orientation is size 4 (quat)
@@ -148,6 +176,7 @@ void runFig8GoalLCM(LCM_Fig8Goal_Handler<T> *handler){
 	lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_Fig8Goal_Handler<T>::handleStatus, handler);
     sub->setQueueCapacity(1);
     while(0 == lcm_ptr.handle());
+    // while(1){lcm_ptr.handle();usleep(5000);}
 }
 
 template <typename T>
@@ -156,10 +185,10 @@ int runMPC_LCM(char mode, T *xInit){
 	// launch the simulator
     // printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");
 	// get the max iters and time per solve
-	// printf("[For the initial step] What is the maximum number of iterations a solver can take? (q to exit)?\n");
-	int itersToDo_init = 1000; //getInt(1000, 1);
-	printf("[For the initial step] What should the MPC time budget be (in ms)? (q to exit)?\n");
-	int timeLimit_init = getInt(1000, 1); //note in ms
+	printf("[For the initial step] What is the maximum number of iterations a solver can take? (q to exit)?\n");
+	int itersToDo_init = getInt(1000, 1);
+	// printf("[For the initial step] What should the MPC time budget be (in ms)? (q to exit)?\n");
+	int timeLimit_init = 1000; //getInt(1000, 1); //note in ms
 	printf("[For the figure eight] What is the maximum number of iterations a solver can take? (q to exit)?\n");
 	int itersToDo = getInt(1000, 1);
 	// printf("[For the figure eight] What should the MPC time budget be (in ms)? (q to exit)?\n");

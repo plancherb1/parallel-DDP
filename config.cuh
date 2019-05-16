@@ -62,6 +62,9 @@
 
 // optiomizer options
 #define DEBUG_SWITCH 0 // 1 for on 0 for off
+#ifndef USE_ALG_TRACE
+	#define USE_ALG_TRACE 1 // 1 for on 0 for off
+#endif
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
 #define FINITE_DIFF_EPSILON 0.00001
 // define if we are working in doubles or floats
@@ -179,6 +182,11 @@ typedef float algType;
 #endif
 #ifndef MPC_MODE
 	#define MPC_MODE 0 // sets gravity to 0
+#endif
+
+// MPC options
+#ifndef USE_MAX_SOLVER_TIME
+	#define USE_MAX_SOLVER_TIME 1
 #endif
 
 // Matrix Dimms

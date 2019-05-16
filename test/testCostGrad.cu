@@ -471,7 +471,7 @@ void testPos(){
 
 template <typename T>
 __host__
-void testVel(){
+void testVel(int rpyFlag = 0){
 	// allocate
 	int ld_grad = 12;
 	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
@@ -490,6 +490,7 @@ void testVel(){
 		for (int c = 0; c < STATE_SIZE; c++){
 			#pragma unroll
 			for (int r = 0; r < 12; r++){
+				if (!rpyFlag && ((r >= 3 && r < 6) || (r >=9))){continue;}
 				int ind = c*ld_grad + r;
 				T delta = abs(grad[ind] - grad2[ind]);
 				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
