@@ -18,6 +18,7 @@
 #include "../lcmtypes/kuka/lcmt_cost_params.hpp"
 #include "../lcmtypes/kuka/lcmt_solver_params.hpp"
 #include <type_traits>
+#include <unistd.h>
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
 const char *ARM_TRAJ_CHANNEL    = "TRAJ_CHANNEL";
@@ -225,6 +226,7 @@ void runTrajRunner(matDimms *dimms, double alpha = 0.5){
     statusSub->setQueueCapacity(1); trajSub->setQueueCapacity(1);
     // handle forever
     while(0 == lcm_ptr.handle());
+    // while(1){lcm_ptr.handle();usleep(1000);}
 }
 
 template <typename T>
@@ -274,8 +276,8 @@ class LCM_MPCLoop_Handler {
         void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
             // determine if GPU or CPU mode and save down time and state pointers and try to get the 
             //    global lock and compute a new MPC iter if ready else return
-            if(mode){if (!((gvars->lock)->try_lock())){return;}}             
-               else {if (!((cvars->lock)->try_lock())){return;}}       
+            // if(mode){if (!((gvars->lock)->try_lock())){return;}}             
+            //    else {if (!((cvars->lock)->try_lock())){return;}}       
             int64_t tActual_plant = msg->utime;           
             struct timeval sys_t; gettimeofday(&sys_t,NULL);        int64_t tActual_sys = get_time_us_i64(sys_t);
             
@@ -295,8 +297,8 @@ class LCM_MPCLoop_Handler {
                 if(mode){gpuErrchk(cudaMemcpy(gvars->d_xActual, gvars->xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice));}
             }
             // run iLQR
-            if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);  (gvars->lock)->unlock();}
-            else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);  (cvars->lock)->unlock();}
+            if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);}  //(gvars->lock)->unlock();}
+            else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);}  //(cvars->lock)->unlock();}
             // publish to trajRunner
             if (std::is_same<T, float>::value){
                 drake::lcmt_trajectory_f dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(float);
@@ -332,6 +334,7 @@ void runMPCHandler(LCM_MPCLoop_Handler<T> *handler){
     lcm::Subscription *sub4 = lcm_ptr.subscribe(SOLVER_PARAMS_CHANNEL, &LCM_MPCLoop_Handler<T>::handleSolverParams, handler);
     sub->setQueueCapacity(1); sub2->setQueueCapacity(1); sub3->setQueueCapacity(1); sub4->setQueueCapacity(1);
     while(0 == lcm_ptr.handle());
+    // while(1){lcm_ptr.handle();usleep(1000);}
 }
 
 template <typename T>

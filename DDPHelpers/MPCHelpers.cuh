@@ -810,15 +810,20 @@
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
                          int max_iter = MAX_ITER, double time_budget = MAX_SOLVER_TIME, int clear_vars = 0, bool use_cost_shift = 0){
         // INITIALIZE THE ALGORITHM //
-            struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
+            #if USE_MAX_SOLVER_TIME || USE_ALG_TRACE
+                struct timeval start, end;    gettimeofday(&start,NULL);
+            #endif
+            #if USE_ALG_TRACE
+                struct timeval start2, end2;    gettimeofday(&start2,NULL);
+            #endif
             T prevJ, dJ, z;     int iter = 1;   T rho = RHO_INIT;   T drho = 1.0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   T Jout[MAX_ITER+1];   int alphaOut[MAX_ITER+1];
             int finalCostShift = use_cost_shift ? shiftAmount : 0;
             // printf("Last Successful Solve: %d\n",tv->last_successful_solve);
 
             // define kernel dimms
-            dim3 ADimms(DIM_A_r,1);//DIM_A_c);
-            dim3 bpDimms(8,7);              dim3 dynDimms(8,7);//(36,7);
+            dim3 ADimms(DIM_A_r,DIM_A_c);
+            dim3 bpDimms(DIM_H_r,DIM_H_c);  dim3 dynDimms(36,7);
             dim3 FPBlocks(M_F,NUM_ALPHA);   dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);     dim3 intDimms(NUM_TIME_STEPS-1,1);
             if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
 
@@ -827,32 +832,40 @@
                                gv->d_P, gv->d_Pp, gv->d_p, gv->d_pp, gv->d_du, gv->d_AB, gv->d_H, gv->d_dT, gv->d_err, gv->alphaIndex,(T)TIME_STEP, gv->streams, dynDimms,
                                shiftAmount, tv->last_successful_solve, md->ld_x, md->ld_u, md->ld_d, md->ld_KT, md->ld_P, md->ld_p, md->ld_du, md->ld_AB,
                                gv->d_I, gv->d_Tbody, clear_vars);
-            gettimeofday(&end2,NULL);
-            (data->initTime).push_back(time_delta_ms(start2,end2));
+            #if USE_ALG_TRACE
+                gettimeofday(&end2,NULL);
+                (data->initTime).push_back(time_delta_ms(start2,end2));
+                gettimeofday(&start2,NULL);
+            #endif
             // do initial "next iteration setup"
-            gettimeofday(&start2,NULL);
             initAlgGPU<T>(gv->d_x,gv->h_d_x,gv->d_xp,gv->d_xp2,gv->d_u,gv->h_d_u,gv->d_up,gv->d_d,gv->h_d_d,gv->d_dp,gv->d_dT,gv->d_AB,gv->d_H,
                           gv->d_g,gv->d_KT,gv->d_du,gv->d_JT,&prevJ,gv->d_xGoal,gv->d_alpha,gv->alphaIndex,alphaOut,Jout,gv->streams,dynDimms,
                           intDimms,0,md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,gv->d_I,gv->d_Tbody,
                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                           cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
-            gettimeofday(&end2,NULL);
-            (data->nisTime).push_back(time_delta_ms(start2,end2));
+            #if USE_ALG_TRACE
+                gettimeofday(&end2,NULL);
+                (data->nisTime).push_back(time_delta_ms(start2,end2));
+            #endif
         // INITIALIZE THE ALGORITHM //
 
         // debug print
-        if (DEBUG_SWITCH){
+        #if DEBUG_SWITCH
             gpuErrchk(cudaMemcpy(&prevJ, &((gv->d_JT)[*(gv->alphaIndex)]), sizeof(T), cudaMemcpyDeviceToHost));
             T xPrint[STATE_SIZE];
             gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
             printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho);
-        }
+        #endif
 
         // now start computing iterates
         while(1){
-            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #if USE_MAX_SOLVER_TIME
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #endif
             // BACKWARD PASS //
-                gettimeofday(&start2,NULL);
+                #if USE_ALG_TRACE
+                    gettimeofday(&start2,NULL);
+                #endif
                 // run full backward pass if it fails we have maxed our regularizer and need to exit
                 if (backwardPassGPU<T>(gv->d_AB,gv->d_P,gv->d_p,gv->d_Pp,gv->d_pp,gv->d_H,gv->d_g,gv->d_KT,gv->d_du,
                                        (gv->h_d_d)[*(gv->alphaIndex)],gv->d_ApBK,gv->d_Bdu,(gv->h_d_x)[*(gv->alphaIndex)],
@@ -863,87 +876,116 @@
                 }
                 // make sure everything that was supposed to finish did by now (incuding previous NIS stuff)
                 gpuErrchk(cudaDeviceSynchronize());
-                gettimeofday(&end2,NULL);
-                (data->bpTime).push_back(time_delta_ms(start2,end2));
+                #if USE_ALG_TRACE
+                    gettimeofday(&end2,NULL);
+                    (data->bpTime).push_back(time_delta_ms(start2,end2));
+                #endif
             // BACKWARD PASS //
 
-            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #if USE_MAX_SOLVER_TIME
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #endif
             // FORWARD PASS //
                 // FORWARD SWEEP //
-                    gettimeofday(&start2,NULL);
+                    #if USE_ALG_TRACE
+                        gettimeofday(&start2,NULL);
+                    #endif
                     // Sweep forward with all alpha in parallel if applicable
                     if (M_F > 1){
                         forwardSweepKern<T><<<NUM_ALPHA,ADimms,0,(gv->streams)[0]>>>(gv->d_x,gv->d_ApBK,gv->d_Bdu,gv->h_d_d[*(gv->alphaIndex)],
                                                                                gv->d_xp,gv->d_alpha,md->ld_x,md->ld_d,md->ld_A);
                         gpuErrchk(cudaPeekAtLastError());   gpuErrchk(cudaDeviceSynchronize());
                     }
-                    gettimeofday(&end2,NULL);
-                    (data->sweepTime).push_back(time_delta_ms(start2,end2));
+                    #if USE_ALG_TRACE
+                        gettimeofday(&end2,NULL);
+                        (data->sweepTime).push_back(time_delta_ms(start2,end2));
+                    #endif
                 // FORWARD SWEEP //
 
                 // FORWARD SIM //
-                    gettimeofday(&start2,NULL);
+                    #if USE_ALG_TRACE
+                        gettimeofday(&start2,NULL);
+                    #endif
                     // Simulate forward with all alpha in parallel with MS, compute costs and line search
                     forwardSimGPU<T>(gv->d_x,gv->d_xp,gv->d_xp2,gv->d_u,gv->d_KT,gv->d_du,gv->alpha,gv->d_alpha,gv->d,gv->d_d,gv->d_dT,
                                      gv->dJexp,gv->d_dJexp,gv->J,gv->d_JT,gv->d_xGoal,&dJ,&z,prevJ,gv->streams,dynDimms,FPBlocks,
                                      gv->alphaIndex,&ignoreFirstDefectFlag,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,gv->d_I,gv->d_Tbody,
                                      cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                                      cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
-                    gettimeofday(&end2,NULL);
-                    (data->simTime).push_back(time_delta_ms(start2,end2));
+                    #if USE_ALG_TRACE
+                        gettimeofday(&end2,NULL);
+                        (data->simTime).push_back(time_delta_ms(start2,end2));
+                    #endif
                 // FORWARD SIM //
             // FORWARD PASS //
 
             // NEXT ITERATION SETUP //
-                gettimeofday(&start2,NULL);
+                #if USE_ALG_TRACE
+                    gettimeofday(&start2,NULL);
+                #endif
                 // process accept or reject of traj and test for exit
                 bool exitFlag = acceptRejectTrajGPU<T>(gv->h_d_x,gv->d_xp,gv->h_d_u,gv->d_up,gv->h_d_d,gv->d_dp,gv->J,
                                                        &prevJ,&dJ,&rho,&drho,gv->alphaIndex,alphaOut,Jout,&iter,gv->streams,
                                                        md->ld_x,md->ld_u,md->ld_d,max_iter);
-                if(alphaOut[iter - !exitFlag] > 0){if (DEBUG_SWITCH){printf("successful iter w/ alpha[%d]\n",alphaOut[iter - !exitFlag]);}tv->last_successful_solve = 0;} // note that we were able to take a step
+                if(alphaOut[iter - !exitFlag] > 0){
+                    #if DEBUG_SWITCH
+                        printf("successful iter w/ alpha[%d]\n",alphaOut[iter - !exitFlag]);
+                    #endif
+                    tv->last_successful_solve = 0; // note that we were able to take a step
+                } 
                 if (exitFlag){
-                    gettimeofday(&end2,NULL);
-                    (data->nisTime).push_back(time_delta_ms(start2,end2));
+                    #if USE_ALG_TRACE
+                        gettimeofday(&end2,NULL);
+                        (data->nisTime).push_back(time_delta_ms(start2,end2));
+                    #endif
                     break;
                 }
 
                 // if we have gotten here then prep for next pass
-                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                #if USE_MAX_SOLVER_TIME
+                    gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                #endif
                 nextIterationSetupGPU<T>(gv->d_x,gv->h_d_x,gv->d_xp,gv->d_u,gv->h_d_u,gv->d_up,gv->d_d,gv->h_d_d,gv->d_dp,gv->d_AB,gv->d_H,
                                          gv->d_g,gv->d_P,gv->d_p,gv->d_Pp,gv->d_pp,gv->d_xGoal,gv->alphaIndex,gv->streams,dynDimms,intDimms,
                                          md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,gv->d_I,gv->d_Tbody,
                                          cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);                
-                gettimeofday(&end2,NULL);
-                (data->nisTime).push_back(time_delta_ms(start2,end2));
+                #if USE_ALG_TRACE
+                    gettimeofday(&end2,NULL);
+                    (data->nisTime).push_back(time_delta_ms(start2,end2));
+                #endif
             // NEXT ITERATION SETUP //
             // debug print
-            if (DEBUG_SWITCH){
+            #if DEBUG_SWITCH
                 T xPrint[STATE_SIZE];
                 gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
                 printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
                         iter-1,xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho,dJ,z,gv->d[*(gv->alphaIndex)]);
-            }
+            #endif
         }
 
         // EXIT Handling
             // on exit make sure everything finishes
             gpuErrchk(cudaDeviceSynchronize());
-            if (DEBUG_SWITCH){
+            #if DEBUG_SWITCH
                 T xPrint[STATE_SIZE];
                 gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
                 printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
                     iter,xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho,dJ,z,gv->d[*(gv->alphaIndex)]);
-            }
+            #endif
 
             // Bring back the final state and control (and save trace)
-            gettimeofday(&start2,NULL);
+            #if USE_ALG_TRACE
+                gettimeofday(&start2,NULL);
+            #endif
             storeVarsGPU_MPC<T>(gv,tv,md,tActual_sys,tActual_plant,prevJ,0);
-            for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
-            gettimeofday(&end2,NULL);
-            gettimeofday(&end,NULL);
-            (data->initTime).back() += time_delta_ms(start2,end2);
-            (data->tTime).push_back(time_delta_ms(start,end));
+            #if USE_ALG_TRACE
+                for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
+                gettimeofday(&end2,NULL);
+                gettimeofday(&end,NULL);
+                (data->initTime).back() += time_delta_ms(start2,end2);
+                (data->tTime).push_back(time_delta_ms(start,end));
+            #endif
     }
         
     template <typename T>

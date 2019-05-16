@@ -228,7 +228,8 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 					 T *s_cost = nullptr, T *s_eePos = nullptr, T *d_xGoal = nullptr, T *s_eeVel = nullptr, \
 					 T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
 					 T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
-					 T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, int finalCostShift = 0){
+					 T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE,
+					 int finalCostShift = 0, T *xTarget = nullptr){
 	int start, delta; singleLoopVals(&start,&delta);
 	int kStart = bInd * N_F;
 	unsigned int iters = EE_COST ? N_F : (bInd < M_F - 1 ? N_F : N_F - 1);
@@ -258,8 +259,8 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 		#if EE_COST
 			// Also compute running / final cost if needed (note not on defect "final" states)
 			if (k < N_F - 1 || bInd == M_F - 1){
-				if(tempFlag){costFunc(s_cost,s_eePos,d_xGoal,s_x,s_u,bInd*N_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift);}
-				else{		 costFunc(s_cost,s_eePos,d_xGoal,xk,uk,bInd*N_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift);}
+				if(tempFlag){costFunc(s_cost,s_eePos,d_xGoal,s_x,s_u,bInd*N_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);}
+				else{		 costFunc(s_cost,s_eePos,d_xGoal,xk,uk,bInd*N_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);}
 			}
 		#endif
 		// update the offsets for the next pass
@@ -280,7 +281,8 @@ void forwardSimKern(T **d_x, T **d_u, T *d_KT, T *d_du, T **d_d, T *d_alpha, \
 					T *d_I = nullptr, T *d_Tbody = nullptr, T *d_xGoal = nullptr, T *d_JT = nullptr,
 					T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
 					T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
-					T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, int finalCostShift = 0){
+					T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE,
+					int finalCostShift = 0, T *xTarget = nullptr){
 	__shared__ T s_x[STATE_SIZE];	__shared__ T s_u[NUM_POS];	__shared__ T s_qdd[NUM_POS];	__shared__ T s_dx[STATE_SIZE];
 	int alphaInd = blockIdx.y;		int bInd = blockIdx.x;
 	// zero out the cost and set up to track eePos if in EE_COST scenario
@@ -292,7 +294,7 @@ void forwardSimKern(T **d_x, T **d_u, T *d_KT, T *d_du, T **d_d, T *d_alpha, \
 	// loop forward and compute new states and controls
 	forwardSimInner(d_x[alphaInd],d_u[alphaInd],d_KT,d_du,d_d[alphaInd],d_alpha[alphaInd],d_xp,s_dx,s_qdd,
 					(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,s_x,s_u,s_cost,s_eePos,d_xGoal,s_eeVel,
-					Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift);
+					Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);
 	#if EE_COST // sum up the total cost
 		if (threadIdx.y == 0 && threadIdx.x == 0){d_JT[bInd + alphaInd*M_F] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];}
 	#endif
@@ -305,7 +307,8 @@ void forwardSim(threadDesc_t desc, T *x, T *u, T *KT, T *du, T *d, T alpha, T *x
 				T *I = nullptr, T *Tbody = nullptr, T *xGoal = nullptr, T *JT = nullptr,
 				T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
 				T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
-				T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, int finalCostShift = 0){
+				T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE,
+				int finalCostShift = 0, T *xTarget = nullptr){
 	T *s_x = nullptr;		T *s_u = nullptr;		T s_qdd [NUM_POS];		T s_dx[STATE_SIZE];
 	// zero out the cost and set up to track eePos if EE_COST scenario
 	#if EE_COST
@@ -317,7 +320,7 @@ void forwardSim(threadDesc_t desc, T *x, T *u, T *KT, T *du, T *d, T alpha, T *x
 	for (unsigned int i=0; i<desc.reps; i++){
   		int bInd = (desc.tid+i*desc.dim);
 		forwardSimInner(x,u,KT,du,d,alpha,xp,s_dx,s_qdd,(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody,s_x,s_u,s_cost,s_eePos,xGoal,s_eeVel,
-						Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift);
+						Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);
 	}
 	#if EE_COST // sum up the total cost
 		JT[desc.tid] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];
@@ -358,10 +361,10 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
                    int *ignore_defect, int ld_x, int ld_u, int ld_KT, int ld_du, int ld_d, T *d_I = nullptr, T *d_Tbody = nullptr, \
                    T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, \
                    T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, \
-                   T QF_xEE = _QF_xEE, T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2, int finalCostShift = 0){
+                   T QF_xEE = _QF_xEE, T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2, int finalCostShift = 0, T *xTarget = nullptr){
 	// ACTUAL FORWARD SIM //
 	forwardSimKern<T><<<FPBlocks,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,d_xGoal,d_JT,
-														  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift);
+														  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);
 	gpuErrchk(cudaPeekAtLastError());
 
 	// while we are doing these (very expensive) operation save xp into xp2 which we'll need for the backward pass linear transform on the next iter
@@ -415,7 +418,7 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
                   T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
                   T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
                   T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
-                  T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2, int finalCostShift = 0){
+                  T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2, int finalCostShift = 0, T *xTarget = nullptr){
 
 	// ACTUAL FORWARD SIM //
 	// printf("computing alpha[%f]\n",alpha);
@@ -424,7 +427,7 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
         desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_THREADS,M_F);
     	threads[thread_i] = std::thread(&forwardSim<T>, desc, std::ref(x), std::ref(u), std::ref(KT), std::ref(du), std::ref(d), alpha, std::ref(xp), 
     													ld_x, ld_u, ld_KT, ld_du, ld_d, std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JT),
-    													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift);
+    													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,std::ref(xTarget));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, thread_i);}
     }
     // while we are doing these (very expensive) operation save xp into xp2 which we'll need for the backward pass linear transform
@@ -491,7 +494,7 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
 				   T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
                    T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
                    T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
-                   T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2, int finalCostShift = 0){
+                   T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2, int finalCostShift = 0, T *xTarget = nullptr){
 	// ACTUAL FORWARD SIM //
 	*J = 0; 	T Js[FSIM_ALPHA_THREADS];		for(unsigned int i = 0; i < FSIM_ALPHA_THREADS; i++){Js[i] = 0;}
 	threadDesc_t desc; 		desc.dim = FSIM_ALPHA_THREADS;	unsigned int threads_launched = 0;
@@ -501,7 +504,7 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
 	        desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_ALPHA_THREADS,M_F);
 	    	threads[alpha_i*FSIM_ALPHA_THREADS+thread_i] = std::thread(&forwardSim<T>, desc, std::ref(xs[alphaInd]), std::ref(us[alphaInd]), std::ref(KT), std::ref(du), std::ref(ds[alphaInd]), alphas[alphaInd], std::ref(xp), 
 	    													ld_x, ld_u, ld_KT, ld_du, ld_d, std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JTs[alphaInd]),
-	    													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift);
+	    													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,std::ref(xTarget));
 	        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, alpha_i*FSIM_ALPHA_THREADS+thread_i);}	threads_launched++;
 	    }
 	}
