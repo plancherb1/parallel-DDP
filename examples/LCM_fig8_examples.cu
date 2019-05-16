@@ -76,8 +76,8 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 	#define _QF_EE2_fig8 SMALL
 	#define _Q_xdEE_fig8 10.0
 	#define _QF_xdEE_fig8 10.0
-	#define _Q_xEE_fig8 SMALL
-	#define _QF_xEE_fig8 SMALL
+	#define _Q_xEE_fig8 1.0
+	#define _QF_xEE_fig8 1.0
 #endif
 
 #include "../config.cuh"
@@ -109,11 +109,16 @@ class LCM_Fig8Goal_Handler {
 			goal[0] = (1-fraction)*xGoals[rd] + fraction*xGoals[ru];		goal[3] = 0.0;
 			goal[1] = (1-fraction)*yGoals[rd] + fraction*yGoals[ru];		goal[4] = 0.0;
 			goal[2] = (1-fraction)*zGoals[rd] + fraction*zGoals[ru];		goal[5] = 0.0;
+			// goal[1] = goal[1] * 1.75;
+			// goal[2] = goal[2] * 1.25;
 			return rep;
 		}
 
 		// load initial goal
     	void loadInitialGoal(T *goal){loadFig8Goal(goal,0);}
+
+    	// load nominal target
+    	void loadInitialTarget(T *goal, T *target = nullptr){for(int i = 0; i < STATE_SIZE; i++){goal[i] = (target == nullptr) ? 0 : target[i];}}
 
 		// update goal based on status
 		void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
@@ -208,7 +213,7 @@ int runMPC_LCM(char mode, T *xInit){
     // then load the goals and LCM handlers and launch the MPC threads
     if (mode == 'G'){
     	// load initial traj and goal and run to full convergence to warm start
-    	loadTraj<T>(gvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(gvars->xGoal);
+    	loadTraj<T>(gvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(gvars->xGoal);		goalhandler->loadInitialTarget(gvars->xTarget,xInit);
     	runiLQR_MPC_GPU<T>(tvars,gvars,dimms,atrace,cst,0,0,1);
 		// then create the handler and launch the MPC thread
 		mpchandler = new LCM_MPCLoop_Handler<T>(gvars,tvars,dimms,atrace,cst,itersToDo_init,timeLimit_init);
@@ -216,7 +221,7 @@ int runMPC_LCM(char mode, T *xInit){
     }
     else{
     	// load initial goal and run to full convergence to warm start
-    	loadTraj<T>(cvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(cvars->xGoal); 
+    	loadTraj<T>(cvars, tvars, dimms, xInit);	goalhandler->loadInitialGoal(cvars->xGoal);		goalhandler->loadInitialTarget(cvars->xTarget,xInit);
     	runiLQR_MPC_CPU<T>(tvars,cvars,dimms,atrace,cst,0,0,1);
 		// then create the handler and launch the MPC thread
 		mpchandler = new LCM_MPCLoop_Handler<T>(cvars,tvars,dimms,atrace,cst,itersToDo_init,timeLimit_init);
