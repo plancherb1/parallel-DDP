@@ -64,6 +64,10 @@
     #define WEIGHT_MODIFIER 0.5
 #endif
 
+#if USE_EE_VEL_COST
+    #warning "EE_VEL for rpy is broken at this time please do not use in your algorithm\n"
+#endif
+
 template <typename T>
 __host__ __device__ 
 void initI(T *s_I){
@@ -2238,7 +2242,6 @@ void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nul
       s_eePosdt[1] = Tee_dt[1]*EE_ON_LINK_X + Tee_dt[5]*EE_ON_LINK_Y + Tee_dt[9]*EE_ON_LINK_Z  + Tee_dt[13];
       s_eePosdt[2] = Tee_dt[2]*EE_ON_LINK_X + Tee_dt[6]*EE_ON_LINK_Y + Tee_dt[10]*EE_ON_LINK_Z + Tee_dt[14];
       // TODO: something is wrong lets zero out the rpy stuff for now
-      #warning "EE_VEL for rpy is broken at this time please do not use in your algorithm\n"
       s_eePosdt[3] = 0;//-Tee[6]*Tee_dt[10] + Tee[10]*Tee_dt[6]; // don't divide by f3 for now as we will use for temp memeory in deriv comp
       s_eePosdt[4] = 0;// Tee[2]*dsqrtTerm  - sqrtf3*Tee_dt[2];  // don't divide by f4 for now as we will use for temp memeory in deriv comp
       s_eePosdt[5] = 0;//-Tee[1]*Tee_dt[0]  + Tee[0]*Tee_dt[1];  // don't divide by f5 for now as we will use for temp memeory in deriv comp

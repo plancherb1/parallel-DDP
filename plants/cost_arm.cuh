@@ -4,6 +4,10 @@
  * TBD NEED TO ADD DOC HERE
  *****************************************************************/
 
+#if USE_EE_VEL_COST
+	#warning "Also the Hessian comp using even EE_VEL xyz is bad so don't use EE_VEL_COST yet\n"
+#endif
+
 // Also define limits on torque, pos, velocity and Q/Rs for those
 #define SAFETY_FACTOR_P 0.8
 #define SAFETY_FACTOR_V 0.8
@@ -350,7 +354,7 @@
 		     	#if USE_EE_VEL_COST
 			     	if (s_deePosVel != nullptr && r < STATE_SIZE && c < STATE_SIZE){
 				     	#pragma unroll
-			        	for (int j = 0; j < 9; j++){//for (int j = 0; j < 12; j++){
+			        	for (int j = 0; j < 12; j++){//for (int j = 0; j < 12; j++){
 			        		//T factor = (k == NUM_TIME_STEPS - 1 ? (j < 3 ? QF_EE1 : (j < 6 ? QF_EE2 : (j < 9 ? QF_EEV1 : QF_EEV2))) : (j < 3 ? Q_EE1 : (j < 6 ? Q_EE2 : (j < 9 ? Q_EEV1 : Q_EEV2))));
 			        		val += s_deePosVel[r*12+j]*s_deePosVel[c*12+j];//*factor;
 			        	}

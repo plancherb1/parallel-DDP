@@ -4,17 +4,8 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define USE_WAFR_URDF 0
 #define EE_COST 1
 #define USE_SMOOTH_ABS 0
-
 #define USE_EE_VEL_COST 0
-#define _Q_EEV1 10.0
-#define _Q_EEV2 0.0
-#define _QF_EEV1 10.0
-#define _QF_EEV2 0.0
-
 #define USE_LIMITS_FLAG 0
-#define R_TL 0.0
-#define Q_PL 0.0
-#define Q_VL 0.0
 
 #define MPC_MODE 1
 #define USE_LCM 1
@@ -45,6 +36,10 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 	#define _QF_xdEE 10.0
 	#define _Q_xEE SMALL
 	#define _QF_xEE SMALL
+	#define _Q_EEV1 0.0
+	#define _Q_EEV2 0.0
+	#define _QF_EEV1 0.0
+	#define _QF_EEV2 0.0
 	// new cost terms for the actual fig 8 tracking
 	#define _Q_EE1_fig8 300.0
 	#define _Q_EE2_fig8 SMALL
@@ -53,8 +48,12 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 	#define _QF_EE2_fig8 SMALL
 	#define _Q_xdEE_fig8 10.0
 	#define _QF_xdEE_fig8 10.0
-	#define _Q_xEE_fig8 SMALL
-	#define _QF_xEE_fig8 SMALL
+	#define _Q_xEE_fig8 1.0
+	#define _QF_xEE_fig8 1.0
+	#define _Q_EEV1_fig8 0
+	#define _Q_EEV2_fig8 0
+	#define _QF_EEV1_fig8 0
+	#define _QF_EEV2_fig8 0
 #else
 	// default cost terms for the start of the goal to drop the arm from the initial point to the start of the fig 8
 	// delta xyz, delta rpy, u, xzyrpyd, xyzrpy
@@ -158,16 +157,16 @@ class LCM_Fig8Goal_Handler {
 				}
 				// else if close but not there yet update the cost func to care more about moving to goals
 				else if (!costSent && eNorm < 2.5*eNormLim && vNorm < 2.5*vNormLim){
-					kuka::lcmt_cost_params dataOut;	dataOut.utime = msg->utime;
-					dataOut.q_ee1 = _Q_EE1_fig8;	dataOut.q_ee2 = _Q_EE2_fig8;
-					dataOut.qf_ee1 = _QF_EE1_fig8;	dataOut.qf_ee2 = _QF_EE2_fig8;
-					dataOut.q_eev1 = _Q_EEV1;		dataOut.q_eev2 = _Q_EEV2;
-					dataOut.qf_eev1 = _QF_EEV1;		dataOut.qf_eev2 = _QF_EEV2;
-					dataOut.q_xdee = _Q_xdEE_fig8;	dataOut.qf_xdee = _QF_xdEE_fig8;
-					dataOut.q_xee = _Q_xEE_fig8;	dataOut.qf_xee = _QF_xEE_fig8;
-					dataOut.r_ee = _R_EE_fig8;		dataOut.r = _R;
-					dataOut.q1 = _Q1; 				dataOut.q2 = _Q2;
-					dataOut.qf1 = _QF1; 			dataOut.qf2 = _QF2;
+					kuka::lcmt_cost_params dataOut;		dataOut.utime = msg->utime;
+					dataOut.q_ee1 = _Q_EE1_fig8;		dataOut.q_ee2 = _Q_EE2_fig8;
+					dataOut.qf_ee1 = _QF_EE1_fig8;		dataOut.qf_ee2 = _QF_EE2_fig8;
+					dataOut.q_eev1 = _Q_EEV1_fig8;		dataOut.q_eev2 = _Q_EEV2_fig8;
+					dataOut.qf_eev1 = _QF_EEV1_fig8;	dataOut.qf_eev2 = _QF_EEV2_fig8;
+					dataOut.q_xdee = _Q_xdEE_fig8;		dataOut.qf_xdee = _QF_xdEE_fig8;
+					dataOut.q_xee = _Q_xEE_fig8;		dataOut.qf_xee = _QF_xEE_fig8;
+					dataOut.r_ee = _R_EE_fig8;			dataOut.r = _R;
+					dataOut.q1 = _Q1; 					dataOut.q2 = _Q2;
+					dataOut.qf1 = _QF1; 				dataOut.qf2 = _QF2;
 					lcm_ptr.publish(COST_PARAMS_CHANNEL,&dataOut);
 					costSent = 1;
 				}
