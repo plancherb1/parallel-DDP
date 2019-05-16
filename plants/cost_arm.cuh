@@ -281,11 +281,8 @@
 	    	T cost = 0.0;
 	    	if(ind == 0){cost += eeCost<T>(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);} // compute in one thread incase smooth abs (for EEcost)
 	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xEE : Q_xEE)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
-			cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xdEE : Q_xdEE)*s_x[ind + NUM_POS]*s_x[ind + NUM_POS]; // add on the state tend to zero cost  
-	      	// cost += nominalStateCost<T>(s_x,ind,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE); // add on the nominal state target cost
-	      	// add on any limit costs if needed
-	      	#if USE_LIMITS_FLAG
+	      	cost += nominalStateCost<T>(s_x,ind,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE); // add on the nominal state target cost
+	      	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      		cost += limitCosts<T,0>(s_x,s_u,ind,k); cost += limitCosts<T,0>(s_x,s_u,ind+NUM_POS,k); cost += limitCosts<T,0>(s_x,s_u,ind+STATE_SIZE,k);
 	  		#endif
 	      	s_cost[ind] += cost;
@@ -305,11 +302,8 @@
 	    for (int ind = 0; ind < NUM_POS; ind ++){
 	      	if(ind == 0){cost += eeCost<T>(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);} // compute in one thread incase smooth abs (for EEcost)
 	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? 0.0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
-	      	cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xEE : Q_xEE)*s_x[ind]*s_x[ind]; // add on the state tend to zero cost            
-			cost += 0.5*(k == NUM_TIME_STEPS-1 ? QF_xdEE : Q_xdEE)*s_x[ind + NUM_POS]*s_x[ind + NUM_POS]; // add on the state tend to zero cost  
-	      	// cost += nominalStateCost<T>(s_x,ind,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE); // add on the nominal state target cost
-	      	// add on any limit costs if needed
-	      	#if USE_LIMITS_FLAG
+	      	cost += nominalStateCost<T>(s_x,ind,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE); // add on the nominal state target cost
+	      	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      		cost += limitCosts<T,0>(s_x,s_u,ind,k); cost += limitCosts<T,0>(s_x,s_u,ind+NUM_POS,k); cost += limitCosts<T,0>(s_x,s_u,ind+STATE_SIZE,k);
 	  		#endif
 	   	}
@@ -338,12 +332,9 @@
 	  		#else
 		  		if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,nullptr,nullptr,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);}
 	  		#endif
-	  		if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xEE : Q_xEE)*s_x[r];}
-			else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdEE : Q_xdEE)*s_x[r];}
-			// if (r < STATE_SIZE){val += dNominalStateCost<T,1>(s_x,r,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE);} // nominal state target cost
-			else{val += (k == NUM_TIME_STEPS - 1 ? 0 : R_EE)*s_u[r-STATE_SIZE];}
-		  	// add on any limit costs if needed
-		  	#if USE_LIMITS_FLAG
+			if (r < STATE_SIZE){val += dNominalStateCost<T,1>(s_x,r,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE);} // nominal state target cost
+			else{val += (k == NUM_TIME_STEPS - 1 ? 0 : R_EE)*s_u[r-STATE_SIZE];} // control cost
+		  	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      		val += limitCosts<T,1>(s_x,s_u,r,k);
 	  		#endif
 		  	gk[r] = val;
@@ -373,14 +364,10 @@
 			           	}
 		           	}
 	           	#endif
-			    // if applicable add on the control cost and nominal state target cost
 			    if (r == c){
-			    	if (r < NUM_POS){val += (k == NUM_TIME_STEPS - 1 ? QF_xEE : Q_xEE);}
-					else if (r < STATE_SIZE){val += (k == NUM_TIME_STEPS - 1 ? QF_xdEE : Q_xdEE);}
-					// if (r < STATE_SIZE){val += dNominalStateCost<T,2>(s_x,r,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE);}
-		        	else {val += (k== NUM_TIME_STEPS - 1) ? 0.0 : R_EE;}
-		        	// add on any limit costs if needed
-		        	#if USE_LIMITS_FLAG
+					if (r < STATE_SIZE){val += dNominalStateCost<T,2>(s_x,r,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE);} // nominal state target cost
+		        	else {val += (k== NUM_TIME_STEPS - 1) ? 0.0 : R_EE;} // control cost
+		        	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      				val += limitCosts<T,2>(s_x,s_u,r,k);
 	  				#endif
 		     	}

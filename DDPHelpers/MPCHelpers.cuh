@@ -68,7 +68,7 @@
         T *xGoal;   T *xActual;
         std::thread *threads;
         std::mutex *lock;
-        T **xs;     T **us; T **ds; T **JTs;
+        T **xs;     T **us; T **ds; T **JTs; T *xTarget;
     };
 
     template <typename T>
@@ -85,6 +85,7 @@
         T *xGoal;  T *d_xGoal;  T *xActual;  T *d_xActual;
         cudaStream_t *streams;
         std::mutex *lock;
+        T *xTarget; T *d_xTarget;
     };
 
     struct matDimms{
@@ -163,10 +164,12 @@
         gpuErrchk(cudaMemcpy(gv->d_x, gv->h_d_x, NUM_ALPHA*sizeof(T*), cudaMemcpyHostToDevice));
         gpuErrchk(cudaMemcpy(gv->d_u, gv->h_d_u, NUM_ALPHA*sizeof(T*), cudaMemcpyHostToDevice));
 
-        // and for the xGoal
-        int goalSize = EE_COST ? 6 : STATE_SIZE;
+        // and for the xGoal and nominal target
+        int goalSize = EE_COST ? 6 : (md->ld_x);
         gv->xGoal = (T *)malloc(goalSize*sizeof(T));
         gpuErrchk(cudaMalloc((void**)&(gv->d_xGoal),goalSize*sizeof(T)));
+        gv->xTarget = (T *)malloc((md->ld_x)*sizeof(T));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_xTarget),(md->ld_x)*sizeof(T)));
 
         // allocate memory with pitched malloc and thus collect the lds (for now just set to DIM_<>_r)
         md->ld_P = DIM_P_r;    md->ld_p = DIM_p_r;    md->ld_AB = DIM_AB_r;  md->ld_H = DIM_H_r;    md->ld_g = DIM_g_r;
@@ -243,12 +246,12 @@
         for (int i=0; i<NUM_ALPHA; i++){
             gpuErrchk(cudaFree((gv->h_d_x)[i]));  gpuErrchk(cudaFree((gv->h_d_u)[i]));  gpuErrchk(cudaFree((gv->h_d_d)[i]));
         }
-        gpuErrchk(cudaFree(gv->d_x));           free(gv->h_d_x);        gpuErrchk(cudaFree(gv->d_xp));  gpuErrchk(cudaFree(gv->d_x_old));   gpuErrchk(cudaFree(gv->d_xp2)); 
-        gpuErrchk(cudaFree(gv->d_u));           free(gv->h_d_u);        gpuErrchk(cudaFree(gv->d_up));  gpuErrchk(cudaFree(gv->d_u_old));
-        gpuErrchk(cudaFree(gv->d_xGoal));       free(gv->xGoal);   
-        gpuErrchk(cudaFree(gv->d_P));   gpuErrchk(cudaFree(gv->d_Pp));  gpuErrchk(cudaFree(gv->d_p));   gpuErrchk(cudaFree(gv->d_pp));  
-        gpuErrchk(cudaFree(gv->d_AB));  gpuErrchk(cudaFree(gv->d_H));   gpuErrchk(cudaFree(gv->d_g));   gpuErrchk(cudaFree(gv->d_KT));      gpuErrchk(cudaFree(gv->d_KT_old));  gpuErrchk(cudaFree(gv->d_du));
-        gpuErrchk(cudaFree(gv->d_d));           free(gv->h_d_d);        gpuErrchk(cudaFree(gv->d_dp));  gpuErrchk(cudaFree(gv->d_dT));      gpuErrchk(cudaFree(gv->d_dM));  
+        gpuErrchk(cudaFree(gv->d_x));           free(gv->h_d_x);        gpuErrchk(cudaFree(gv->d_xp));      gpuErrchk(cudaFree(gv->d_x_old));   gpuErrchk(cudaFree(gv->d_xp2)); 
+        gpuErrchk(cudaFree(gv->d_u));           free(gv->h_d_u);        gpuErrchk(cudaFree(gv->d_up));      gpuErrchk(cudaFree(gv->d_u_old));
+        gpuErrchk(cudaFree(gv->d_xGoal));       free(gv->xGoal);        gpuErrchk(cudaFree(gv->d_xTarget)); free(gv->xTarget);   
+        gpuErrchk(cudaFree(gv->d_P));   gpuErrchk(cudaFree(gv->d_Pp));  gpuErrchk(cudaFree(gv->d_p));       gpuErrchk(cudaFree(gv->d_pp));  
+        gpuErrchk(cudaFree(gv->d_AB));  gpuErrchk(cudaFree(gv->d_H));   gpuErrchk(cudaFree(gv->d_g));       gpuErrchk(cudaFree(gv->d_KT));      gpuErrchk(cudaFree(gv->d_KT_old));  gpuErrchk(cudaFree(gv->d_du));
+        gpuErrchk(cudaFree(gv->d_d));           free(gv->h_d_d);        gpuErrchk(cudaFree(gv->d_dp));      gpuErrchk(cudaFree(gv->d_dT));      gpuErrchk(cudaFree(gv->d_dM));  
         free(gv->d);                    gpuErrchk(cudaFree(gv->d_Bdu)); gpuErrchk(cudaFree(gv->d_ApBK));
         gpuErrchk(cudaFree(gv->d_JT));          free(gv->J);            gpuErrchk(cudaFree(gv->d_dJexp));   free(gv->dJexp);    
         free(gv->alpha);                gpuErrchk(cudaFree(gv->d_alpha));   free(gv->alphaIndex);
@@ -271,6 +274,7 @@
         cv->up = (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
         cv->u_old = (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
         int goalSize = EE_COST ? 6 : STATE_SIZE;    cv->xGoal = (T *)malloc(goalSize*sizeof(T));
+        cv->xTarget = (T *)malloc((md->ld_x)*sizeof(T));
         // allocate memory for vars with pitched malloc and thus collect the lds (for now just set ld = DIM_<>_r)
         md->ld_AB = DIM_AB_r;  md->ld_P = DIM_P_r;    md->ld_p = DIM_p_r;    md->ld_H = DIM_H_r;
         md->ld_g = DIM_g_r;    md->ld_KT = DIM_KT_r;  md->ld_du = DIM_du_r;  md->ld_d = DIM_d_r;    md->ld_A = DIM_A_r;
@@ -333,7 +337,7 @@
         free(cv->AB);       free(cv->H);        free(cv->g);        free(cv->KT);       free(cv->KT_old);   free(cv->du);   
         free(cv->d);        free(cv->dp);       free(cv->Bdu);      free(cv->ApBK); 
         free(cv->dJexp);    free(cv->err);      free(cv->alpha);    free(cv->JT);   
-        free(cv->I);        free(cv->Tbody);    free(cv->xGoal);    free(cv->xActual);
+        free(cv->I);        free(cv->Tbody);    free(cv->xGoal);    free(cv->xTarget);  free(cv->xActual);
         delete[] cv->threads;
         delete cv->lock;
     }
@@ -586,31 +590,32 @@
     void loadVarsGPU_MPC(T *x_old, T *u_old, T *KT_old, T **h_d_x, T *d_xp, T **h_d_u, T *d_up, T **h_d_d, T *d_KT, T *d_xGoal, T *xGoal, T *d_xActual, T *xActual,
                          T *d_P, T *d_Pp, T *d_p, T *d_pp, T *d_du, T *d_AB, T *d_H, T *d_dT, int *d_err, int *alphaIndex, T dt, cudaStream_t *streams, dim3 dynDimms,
                          int shiftAmount, int last_successful_solve, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
-                         T *d_I = nullptr, T *d_Tbody = nullptr, int clear_vars = 0){
+                         T *d_I = nullptr, T *d_Tbody = nullptr, int clear_vars = 0, T *xTarget = nullptr, T *d_xTarget = nullptr){
         // note since we assume that we will reach the desired states to start later blocks the
         // control will remain the same as will the states outside of the first block
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
         // note in <x/u/d>[*alphaIndex], P, p, KT are all of the ones from the last run
-        int goalSize;   if (!EE_COST){goalSize = STATE_SIZE;}   else{goalSize = 6;}
+        int goalSize;   if (!EE_COST){goalSize = ld_x;}   else{goalSize = 6;}
         gpuErrchk(cudaMemcpyAsync(d_xGoal, xGoal, goalSize*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
-        gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice, streams[1]));
-        shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[2]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
-        shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[4]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
+        gpuErrchk(cudaMemcpyAsync(d_xTarget, xTarget, ld_x*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
+        gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
+        shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[1]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
+        shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[2]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
         if (last_successful_solve <= SOLVES_TO_RESET && !clear_vars){
             shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
-            shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[5]>>>(d_KT,shiftAmount,ld_KT);
-            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_P,shiftAmount,ld_P);
-            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[7]>>>(d_p,shiftAmount,ld_p);
-            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[6]>>>(d_Pp,shiftAmount,ld_P);
-            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[7]>>>(d_pp,shiftAmount,ld_p);     
+            shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[4]>>>(d_KT,shiftAmount,ld_KT);
+            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[5]>>>(d_P,shiftAmount,ld_P);
+            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_p,shiftAmount,ld_p);
+            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[7]>>>(d_Pp,shiftAmount,ld_P);
+            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_pp,shiftAmount,ld_p);     
         }
         else{
             gpuErrchk(cudaMemsetAsync(h_d_u[*alphaIndex],0,ld_u*NUM_TIME_STEPS*sizeof(T),streams[3]));
-            gpuErrchk(cudaMemsetAsync(d_KT,0,ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T),streams[5]));
-            gpuErrchk(cudaMemsetAsync(d_P,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[6]));
-            gpuErrchk(cudaMemsetAsync(d_p,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[7]));
-            gpuErrchk(cudaMemsetAsync(d_Pp,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[6]));
-            gpuErrchk(cudaMemsetAsync(d_pp,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[7]));
+            gpuErrchk(cudaMemsetAsync(d_KT,0,ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T),streams[4]));
+            gpuErrchk(cudaMemsetAsync(d_P,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[5]));
+            gpuErrchk(cudaMemsetAsync(d_p,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[6]));
+            gpuErrchk(cudaMemsetAsync(d_Pp,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[7]));
+            gpuErrchk(cudaMemsetAsync(d_pp,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[6]));
         }
         gpuErrchk(cudaMemsetAsync(d_du,0,ld_du*NUM_TIME_STEPS*sizeof(T),streams[8]));
         gpuErrchk(cudaMemsetAsync(d_err,0,M_B*sizeof(int),streams[9]));
@@ -620,7 +625,7 @@
         // sync on the ones we need for the rollout
         gpuErrchk(cudaStreamSynchronize(streams[0]));   gpuErrchk(cudaStreamSynchronize(streams[1]));
         gpuErrchk(cudaStreamSynchronize(streams[2]));   gpuErrchk(cudaStreamSynchronize(streams[3]));
-        gpuErrchk(cudaStreamSynchronize(streams[4]));   gpuErrchk(cudaStreamSynchronize(streams[5]));
+        gpuErrchk(cudaStreamSynchronize(streams[4]));
         // do the rollout
         #if FULL_ROLLOUT
             rolloutMPCKern<T,NUM_TIME_STEPS><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
@@ -831,7 +836,7 @@
             loadVarsGPU_MPC<T>(gv->d_x_old,gv->d_u_old,gv->d_KT_old,gv->h_d_x, gv->d_xp, gv->h_d_u, gv->d_up, gv->h_d_d, gv->d_KT, gv->d_xGoal, gv->xGoal, gv->d_xActual, gv->xActual,
                                gv->d_P, gv->d_Pp, gv->d_p, gv->d_pp, gv->d_du, gv->d_AB, gv->d_H, gv->d_dT, gv->d_err, gv->alphaIndex,(T)TIME_STEP, gv->streams, dynDimms,
                                shiftAmount, tv->last_successful_solve, md->ld_x, md->ld_u, md->ld_d, md->ld_KT, md->ld_P, md->ld_p, md->ld_du, md->ld_AB,
-                               gv->d_I, gv->d_Tbody, clear_vars);
+                               gv->d_I, gv->d_Tbody, clear_vars, gv->xTarget, gv->d_xTarget);
             #if USE_ALG_TRACE
                 gettimeofday(&end2,NULL);
                 (data->initTime).push_back(time_delta_ms(start2,end2));
@@ -842,7 +847,7 @@
                           gv->d_g,gv->d_KT,gv->d_du,gv->d_JT,&prevJ,gv->d_xGoal,gv->d_alpha,gv->alphaIndex,alphaOut,Jout,gv->streams,dynDimms,
                           intDimms,0,md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,gv->d_I,gv->d_Tbody,
                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift,gv->d_xTarget);
             #if USE_ALG_TRACE
                 gettimeofday(&end2,NULL);
                 (data->nisTime).push_back(time_delta_ms(start2,end2));
@@ -911,7 +916,8 @@
                                      gv->dJexp,gv->d_dJexp,gv->J,gv->d_JT,gv->d_xGoal,&dJ,&z,prevJ,gv->streams,dynDimms,FPBlocks,
                                      gv->alphaIndex,&ignoreFirstDefectFlag,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,gv->d_I,gv->d_Tbody,
                                      cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                     cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                                     cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
+                                     finalCostShift,gv->d_xTarget);
                     #if USE_ALG_TRACE
                         gettimeofday(&end2,NULL);
                         (data->simTime).push_back(time_delta_ms(start2,end2));
@@ -949,7 +955,8 @@
                                          gv->d_g,gv->d_P,gv->d_p,gv->d_Pp,gv->d_pp,gv->d_xGoal,gv->alphaIndex,gv->streams,dynDimms,intDimms,
                                          md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,gv->d_I,gv->d_Tbody,
                                          cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);                
+                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
+                                         finalCostShift,gv->d_xTarget);                
                 #if USE_ALG_TRACE
                     gettimeofday(&end2,NULL);
                     (data->nisTime).push_back(time_delta_ms(start2,end2));
@@ -1012,7 +1019,7 @@
             initAlgCPU<T>(cv->x,cv->xp,cv->xp2,cv->u,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->d,cv->JT,Jout,&prevJ,cv->alpha,alphaOut,
                           cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift,cv->xTarget);
             gettimeofday(&end2,NULL);
             (data->nisTime).push_back(time_delta_ms(start2,end2));
         // INITIALIZE THE ALGORITHM //
@@ -1052,7 +1059,8 @@
                                                    (cv->alpha)[alphaIndex],cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
                                                    cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                                                    cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                                   cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                                                   cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
+                                                   finalCostShift,cv->xTarget);
                         gettimeofday(&end2,NULL);   
                         (data->simTime).back() += time_delta_ms(start2,end2);
                         if(err){if (alphaIndex < NUM_ALPHA - 1){(alphaIndex)++; continue;} else{alphaIndex = -1; break;}} else{break;}
@@ -1076,7 +1084,8 @@
                 nextIterationSetupCPU<T>(cv->x,cv->xp,cv->u,cv->up,cv->d,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
                                          md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody,
                                          cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                                         cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
+                                         finalCostShift,cv->xTarget);
                 gettimeofday(&end2,NULL);
                 (data->nisTime).push_back(time_delta_ms(start2,end2));
             // NEXT ITERATION SETUP //
@@ -1127,7 +1136,7 @@
             initAlgCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,(cv->JTs)[0],Jout,&prevJ,cv->alpha,alphaOut,
                            cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                            cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                           cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                           cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift,cv->xTarget);
             gettimeofday(&end2,NULL);
             (data->nisTime).push_back(time_delta_ms(start2,end2));
         // INITIALIZE THE ALGORITHM //
@@ -1167,7 +1176,8 @@
                                                               cv->alpha,alphaIndex,cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
                                                               cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                                                               cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                                              cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                                                              cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
+                                                              finalCostShift,cv->xTarget);
                         gettimeofday(&end2,NULL);   
                         (data->simTime).back() += time_delta_ms(start2,end2);
                         if(alphaIndexOut == -1){ // failed
@@ -1196,7 +1206,8 @@
                 nextIterationSetupCPU2<T>(cv->xs,cv->xp,cv->us,cv->up,cv->ds,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
                                           &alphaIndex,md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody,
                                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
-                                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift);
+                                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
+                                          finalCostShift,cv->xTarget);
                 gettimeofday(&end2,NULL);
                 (data->nisTime).push_back(time_delta_ms(start2,end2));
             // NEXT ITERATION SETUP //
