@@ -18,7 +18,7 @@
 #include "../lcmtypes/kuka/lcmt_cost_params.hpp"
 #include "../lcmtypes/kuka/lcmt_solver_params.hpp"
 #include <type_traits>
-#include <unistd.h>
+// #include <unistd.h>
 
 const char *ARM_GOAL_CHANNEL    = "GOAL_CHANNEL";
 const char *ARM_TRAJ_CHANNEL    = "TRAJ_CHANNEL";
@@ -33,6 +33,9 @@ const char *SOLVER_PARAMS_CHANNEL = "SOLVER_PARAMS_CHANNEL";
 #endif
 #ifndef HARDWARE_MODE
     #define HARDWARE_MODE 0
+#endif
+#ifndef USE_FEEDBACK_IN_TRAJ_RUNNER
+    #define USE_FEEDBACK_IN_TRAJ_RUNNER 1
 #endif
 // #define GOAL_PUBLISHER_RATE_MS 30
 // #define TEST_DELTA 0 // random small delta to keep things interesting (in ms) for tests
@@ -117,18 +120,10 @@ class LCM_TrajRunner {
         
         // lcm new traj callback function
         void newTrajCallback_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){
-            memcpy(x, &(msg->x[0]), ld_x*NUM_TIME_STEPS*sizeof(float));
-            memcpy(u, &(msg->u[0]), ld_u*NUM_TIME_STEPS*sizeof(float));
-            memcpy(KT,&(msg->KT[0]),ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(float));
-            t0 = msg->utime;
-            ready = 1;
+            t0 = msg->utime;    ready = 1;  memcpy(u, &(msg->u[0]), msg->u_size);   memcpy(x, &(msg->x[0]), msg->x_size);   memcpy(KT,&(msg->KT[0]),msg->KT_size);
         }
         void newTrajCallback_d(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_d *msg){
-            memcpy(x, &(msg->x[0]), ld_x*NUM_TIME_STEPS*sizeof(double));
-            memcpy(u, &(msg->u[0]), ld_u*NUM_TIME_STEPS*sizeof(double));
-            memcpy(KT,&(msg->KT[0]),ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(double));
-            t0 = msg->utime;
-            ready = 1;
+            t0 = msg->utime;    ready = 1;  memcpy(u, &(msg->u[0]), msg->u_size);   memcpy(x, &(msg->x[0]), msg->x_size);   memcpy(KT,&(msg->KT[0]),msg->KT_size);
         }
 
         // lcm STATUS callback function
@@ -279,41 +274,46 @@ class LCM_MPCLoop_Handler {
             // if(mode){if (!((gvars->lock)->try_lock())){return;}}             
             //    else {if (!((cvars->lock)->try_lock())){return;}}       
             int64_t tActual_plant = msg->utime;           
-            struct timeval sys_t; gettimeofday(&sys_t,NULL);        int64_t tActual_sys = get_time_us_i64(sys_t);
+            // struct timeval sys_t; gettimeofday(&sys_t,NULL);        int64_t tActual_sys = get_time_us_i64(sys_t);
+            int64_t tActual_sys = 0;
             
             // if first load initialize timers and keep inital traj (so set xActual to x)
-            T *xActual_load = mode == 1 ? gvars->xActual : cvars->xActual;
+            T *xActual_load = mode == 1 ? gvars->xActual : cvars->xActual;  //T *xTarget_load = mode == 1 ? gvars->xTarget : cvars->xTarget;
             if (tvars->first_pass){
                 //printf("fist pass MPC loop\n");
                 tvars->t0_plant = tActual_plant;    tvars->t0_sys = tActual_sys;     tvars->first_pass = false;
                 #pragma unroll
                 for (int i=0; i<STATE_SIZE; i++){xActual_load[i] = (T)(tvars->x)[i];}
             }
-            // else update xActual
+            // else update xActual and qdTarget (leave q target where it is as that is an algorithmic bias)
             else{
                 #pragma unroll
                 for (int i=0; i<NUM_POS; i++){xActual_load[i]         = (T)(msg->joint_position_measured)[i]; 
                                               xActual_load[i+NUM_POS] = (T)(msg->joint_velocity_estimated)[i];}
-                if(mode){gpuErrchk(cudaMemcpy(gvars->d_xActual, gvars->xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice));}
+                                              // xTarget_load[i+NUM_POS] = (T)(msg->joint_velocity_estimated)[i];}
             }
             // run iLQR
             if(mode){runiLQR_MPC_GPU(tvars,gvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);}  //(gvars->lock)->unlock();}
             else{    runiLQR_MPC_CPU(tvars,cvars,dimms,data,cst,tActual_sys,tActual_plant,0,iterLimit,timeLimit,clearVars,useCostShift);}  //(cvars->lock)->unlock();}
             // publish to trajRunner
             if (std::is_same<T, float>::value){
-                drake::lcmt_trajectory_f dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(float);
-                int xSize = (dimms->ld_x)*stepsSize;            int uSize = (dimms->ld_u)*stepsSize;            int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;
-                dataOut.x_size = xSize;                         dataOut.u_size = uSize;                         dataOut.KT_size = KTSize;
-                dataOut.x.resize(dataOut.x_size);               dataOut.u.resize(dataOut.u_size);               dataOut.KT.resize(dataOut.KT_size);
-                memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);   memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);   memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
+                drake::lcmt_trajectory_f dataOut;       dataOut.utime = tvars->t0_plant;    int stepsSize = TRAJ_RUNNER_TIME_STEPS*sizeof(float);
+                int uSize = (dimms->ld_u)*stepsSize;    dataOut.u_size = uSize;             dataOut.u.resize(dataOut.u_size);       memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);
+                if (USE_FEEDBACK_IN_TRAJ_RUNNER){
+                    int xSize = (dimms->ld_x)*stepsSize;                dataOut.x_size = xSize;     dataOut.x.resize(dataOut.x_size);       memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);
+                    int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;     dataOut.KT_size = KTSize;   dataOut.KT.resize(dataOut.KT_size);     memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
+                }
+                else{dataOut.x_size = 0;    dataOut.KT_size = 0;    dataOut.x.resize(dataOut.x_size);   dataOut.KT.resize(dataOut.KT_size);}
                 lcm_ptr.publish(ARM_TRAJ_CHANNEL,&dataOut);
             }
             else if (std::is_same<T, double>::value){
-                drake::lcmt_trajectory_d dataOut;               dataOut.utime = tvars->t0_plant;                int stepsSize = NUM_TIME_STEPS*sizeof(double);   
-                int xSize = (dimms->ld_x)*stepsSize;            int uSize = (dimms->ld_u)*stepsSize;            int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;
-                dataOut.x_size = xSize;                         dataOut.u_size = uSize;                         dataOut.KT_size = KTSize;
-                dataOut.x.resize(dataOut.x_size);               dataOut.u.resize(dataOut.u_size);               dataOut.KT.resize(dataOut.KT_size);
-                memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);   memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);   memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
+                drake::lcmt_trajectory_d dataOut;       dataOut.utime = tvars->t0_plant;    int stepsSize = TRAJ_RUNNER_TIME_STEPS*sizeof(double);   
+                int uSize = (dimms->ld_u)*stepsSize;    dataOut.u_size = uSize;             dataOut.u.resize(dataOut.u_size);       memcpy(&(dataOut.u[0]),&(tvars->u[0]),uSize);
+                if (USE_FEEDBACK_IN_TRAJ_RUNNER){
+                    int xSize = (dimms->ld_x)*stepsSize;                dataOut.x_size = xSize;     dataOut.x.resize(dataOut.x_size);       memcpy(&(dataOut.x[0]),&(tvars->x[0]),xSize);
+                    int KTSize = (dimms->ld_KT)*DIM_KT_c*stepsSize;     dataOut.KT_size = KTSize;   dataOut.KT.resize(dataOut.KT_size);     memcpy(&(dataOut.KT[0]),&(tvars->KT[0]),KTSize);
+                }
+                else{dataOut.x_size = 0;    dataOut.KT_size = 0;    dataOut.x.resize(dataOut.x_size);   dataOut.KT.resize(dataOut.KT_size);}
                 lcm_ptr.publish(ARM_TRAJ_CHANNEL,&dataOut);
             }
             else{printf("MPC Loop Handler only defined for float and double\n");}

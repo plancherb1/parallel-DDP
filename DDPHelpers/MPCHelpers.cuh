@@ -37,6 +37,12 @@
 #ifndef FULL_ROLLOUT
     #define FULL_ROLLOUT 1
 #endif
+#ifndef PD_GAINS_ON_STATE
+    #define PD_GAINS_ON_STATE 0
+#endif
+#ifndef TRAJ_RUNNER_TIME_STEPS
+    #define TRAJ_RUNNER_TIME_STEPS NUM_TIME_STEPS
+#endif
 
 // 1: Variable Wrappers (structs) and memory allocators/freers //
     template <typename T>
@@ -781,29 +787,35 @@
         // compute index in current traj we want to use (both round down for zoh and fraction for foh)
         double dt = get_time_steps_us_d(t0,tActual); int ind_rd = static_cast<int>(dt); double fraction = dt - static_cast<double>(ind_rd);
         // see if beyond bounds and fail
-        if (ind_rd >= NUM_TIME_STEPS-2 || ind_rd < 0){return 1;}
-        // u,KT do zoh so take rd
-        T *uk = &u[ind_rd*ld_u];             T *KTk = &KT[ind_rd*ld_KT*DIM_KT_c];
-        // foh for xk
-        T *xk_u = &x[(ind_rd+1)*ld_x];       T *xk_d = &x[ind_rd*ld_x];
-        // then compute the state delta (and desired pos)
-        for (int ind = start; ind < STATE_SIZE; ind += delta){
-            T val = (static_cast<T>(1.0-fraction)*xk_d[ind] + static_cast<T>(fraction)*xk_u[ind]);
-            dx[ind] = (ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]) - val;
-            if(ind < NUM_POS){q_out[ind] = static_cast<double>(val);}
+        if (ind_rd >= TRAJ_RUNNER_TIME_STEPS-2 || ind_rd < 0){return 1;}
+        T *uk = &u[ind_rd*ld_u]; // u,KT do zoh so take rd
+        if(USE_FEEDBACK_IN_TRAJ_RUNNER){
+            T *KTk = &KT[ind_rd*ld_KT*DIM_KT_c]; // u,KT do zoh so take rd
+            T *xk_u = &x[(ind_rd+1)*ld_x];       T *xk_d = &x[ind_rd*ld_x]; // foh for xk
+            // then compute the state delta (using the foh)
+            for (int ind = start; ind < STATE_SIZE; ind += delta){
+                T val = (static_cast<T>(1.0-fraction)*xk_d[ind] + static_cast<T>(fraction)*xk_u[ind]);
+                dx[ind] = (ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]) - val;
+                if(PD_GAINS_ON_STATE && ind < NUM_POS){q_out[ind] = static_cast<double>(val);}
+            }
+            hd__syncthreads();
+            // and formulate the control from that delta (using the zoh u and K)
+            for (int r = start; r < CONTROL_SIZE; r += delta){
+                T val = uk[r];
+                #pragma unroll
+                for (int c = 0; c < STATE_SIZE; c++){val -= KTk[c + r*ld_KT]*dx[c];}
+                u_out[r] = static_cast<double>(val);
+            }
         }
-        // and formulate the control from that delta
-        for (int r = start; r < CONTROL_SIZE; r += delta){
-            T val = uk[r];
-            #pragma unroll
-            for (int c = 0; c < STATE_SIZE; c++){val -= KTk[c + r*ld_KT]*dx[c];}
-            u_out[r] = static_cast<double>(val);
-        }
+        // else just use the u directly
+        else{for (int i = start; i < CONTROL_SIZE; i += delta){u_out[i] = uk[i];}}
+        // always return the measured state if pd gains on state are 0
+        if(!PD_GAINS_ON_STATE){for (int i = start; i < NUM_POS; i += delta){q_out[i] = qActual[i];}}
+        hd__syncthreads();
         // smooth if asked
-        if (q_prev != nullptr && u_prev != nullptr){
-            for (int i = start; i < CONTROL_SIZE; i += delta){u_out[i] = (1-alpha)*u_out[i] + alpha*u_prev[i]; u_prev[i] = u_out[i];}
-            for (int i = start; i < NUM_POS; i += delta){     q_out[i] = (1-alpha)*q_out[i] + alpha*q_prev[i]; q_prev[i] = q_out[i];}
-        }
+        if(q_prev != nullptr && u_prev != nullptr && alpha > 0){for (int i = start; i < CONTROL_SIZE; i += delta){u_out[i] = (1-alpha)*u_out[i] + alpha*u_prev[i]; u_prev[i] = u_out[i];}}
+        // for (int i = start; i < NUM_POS; i += delta){     q_out[i] = (1-alpha)*q_out[i] + alpha*q_prev[i]; q_prev[i] = q_out[i];}
+        hd__syncthreads();
         return 0;
     }
 // 2: MPC Alg Helpers //

@@ -13,6 +13,9 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 #define HARDWARE_MODE 1
 #define USE_ALG_TRACE 0
 #define USE_MAX_SOLVER_TIME 0
+#define USE_FEEDBACK_IN_TRAJ_RUNNER 1
+#define TRAJ_RUNNER_TIME_STEPS NUM_TIME_STEPS/4
+#define PD_GAINS_ON_STATE 0
 
 #define IGNORE_MAX_ROX_EXIT 0
 #define TOL_COST 0.00001
@@ -70,13 +73,17 @@ nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/
 	// new cost terms for the actual fig 8 tracking
 	#define _Q_EE1_fig8 300.0
 	#define _Q_EE2_fig8 SMALL
-	#define _R_EE_fig8 0.0005 // make 0.001 for the move to inital goal and then to 0.0005 for motion
+	#define _R_EE_fig8 0.001 // make 0.001 for the move to inital goal and then to 0.0005 for motion
 	#define _QF_EE1_fig8 300.0
 	#define _QF_EE2_fig8 SMALL
-	#define _Q_xdEE_fig8 10.0
-	#define _QF_xdEE_fig8 10.0
-	#define _Q_xEE_fig8 1.0
-	#define _QF_xEE_fig8 1.0
+	#define _Q_xdEE_fig8 5.0
+	#define _QF_xdEE_fig8 5.0
+	#define _Q_xEE_fig8 5.0
+	#define _QF_xEE_fig8 5.0
+	#define _Q_EEV1_fig8 0
+	#define _Q_EEV2_fig8 0
+	#define _QF_EEV1_fig8 0
+	#define _QF_EEV2_fig8 0
 #endif
 
 #include "../config.cuh"
@@ -89,6 +96,7 @@ class LCM_Fig8Goal_Handler {
     	double totalError;	int numIters;		int currRep;
     	int iterLimit;		int timeLimit;
     	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
+    	struct timeval start, end; int timeCount; double timeTotal;
 
     	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim, int iL, int tL) : 
     		totalTime(tTime), eNormLim(eLim), vNormLim(vLim), iterLimit(iL), timeLimit(tL) {
@@ -119,6 +127,14 @@ class LCM_Fig8Goal_Handler {
     	// load nominal target
     	void loadInitialTarget(T *goal, T *target = nullptr){for(int i = 0; i < STATE_SIZE; i++){goal[i] = (target == nullptr) ? 0 : target[i];}}
 
+    	// keep track of traj times
+    	void newTrajCallback_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){
+            if (inFig8){gettimeofday(&end,NULL); timeCount++; timeTotal += time_delta_ms(start,end);} gettimeofday(&start,NULL);
+        }
+        void newTrajCallback_d(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_d *msg){
+            if (inFig8){gettimeofday(&end,NULL); timeCount++; timeTotal += time_delta_ms(start,end);} gettimeofday(&start,NULL);
+        }
+
 		// update goal based on status
 		void handleStatus(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){
 			// get current goal
@@ -133,7 +149,10 @@ class LCM_Fig8Goal_Handler {
 			// debug print
 			// printf("[%f] eNorm[%f] vNorm[%f] for goal[%f %f %f] and Pos[%f %f %f]\n",static_cast<double>(msg->utime),eNorm,vNorm,goal[0],goal[1],goal[2],eePos[0],eePos[1],eePos[2]);
 			// print the error for each rep
-			if(rep > currRep){printf("[!] Rep [%d] has total error [%f]\n",rep,totalError/numIters); totalError = 0; numIters = 0; currRep++;}
+			if(rep > currRep){
+				printf("[!] Rep [%d] has total error [%f] with time [%f]\n",rep,totalError/numIters,timeTotal/timeCount); 
+				totalError = 0; numIters = 0; currRep++; timeCount = 0; timeTotal = 0;
+			}
 			// then figure out if we are in the goal moving time
 			if(inFig8){
 				// then load in goal pos and zero out vel, orientation, angularVelocity (for now) -- note orientation is size 4 (quat)
@@ -177,8 +196,11 @@ class LCM_Fig8Goal_Handler {
 template <typename T>
 void runFig8GoalLCM(LCM_Fig8Goal_Handler<T> *handler){
 	lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to init in goal handler\n");}
-	lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_Fig8Goal_Handler<T>::handleStatus, handler);
-    sub->setQueueCapacity(1);
+	lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_Fig8Goal_Handler<T>::handleStatus, handler); lcm::Subscription *sub2;
+	if (std::is_same<T, float>::value){sub2 = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_Fig8Goal_Handler<T>::newTrajCallback_f, handler);}
+    else if (std::is_same<T, double>::value){sub2 = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_Fig8Goal_Handler<T>::newTrajCallback_d, handler);}
+    else{printf("Timing only defined for floats and doubles\n");}
+    sub->setQueueCapacity(1); sub2->setQueueCapacity(1);
     while(0 == lcm_ptr.handle());
     // while(1){lcm_ptr.handle();usleep(5000);}
 }
