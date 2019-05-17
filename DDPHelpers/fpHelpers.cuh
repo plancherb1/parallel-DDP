@@ -140,7 +140,7 @@ T defectComp(T *d, int ld_d){
 	      	#pragma unroll
 	      	for (int k = threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x){
 	      		T *xk = &xa[k*ld_x]; 	T *uk = &ua[k*ld_u];
-	      		s_J[threadIdx.x] += costFunc<T>(xk,uk,d_xg,k,Q1,Q2,R,QF1,QF2,finalCostShift);
+	      		s_J[threadIdx.x] += costFunc<T>(xk,uk,d_xg,k,Q1,Q2,R,QF1,QF2);
 	      	}
 	      	__syncthreads();
 	   		// then sum it all up per alpha with a reduce pattern
@@ -158,7 +158,7 @@ T defectComp(T *d, int ld_d){
 		for (unsigned int i=0; i<desc.reps; i++){
 			int k = desc.tid + i*desc.dim;
 			T *xk = &x[k*ld_x]; 	T *uk = &u[k*ld_u];
-	  		JT[desc.tid] += costFunc(xk,uk,xg,k,Q1,Q2,R,QF1,QF2,finalCostShift);
+	  		JT[desc.tid] += costFunc(xk,uk,xg,k,Q1,Q2,R,QF1,QF2);
 	  	}
 	}
 

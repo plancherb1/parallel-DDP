@@ -87,7 +87,7 @@ void costGradientHessianKern(T *d_x, T *d_u, T *d_g, T *d_H, T *d_xg, int ld_x, 
 		for (int k = blockIdx.x*blockDim.x+threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x*gridDim.x){
 			T *xk = &d_x[k*ld_x];			T *uk = &d_u[k*ld_u];
 			T *Hk = &d_H[k*ld_H*DIM_H_c];	T *gk = &d_g[k*ld_g];
-	    	costGrad(Hk,gk,xk,uk,d_xg,k,ld_H,Q1,Q2,R,QF1,QF2,finalCostShift);
+	    	costGrad(Hk,gk,xk,uk,d_xg,k,ld_H,Q1,Q2,R,QF1,QF2);
 	 	}
 	#endif
 }
@@ -130,7 +130,7 @@ void costGradientHessianThreaded(threadDesc_t desc, T *x, T *u, T *g, T *H, T *x
 							Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);
 			#endif
 		#else // simple
-			costGrad(Hk,gk,xk,uk,xg,kInd,ld_H,Q1,Q2,R,QF1,QF2,finalCostShift);
+			costGrad(Hk,gk,xk,uk,xg,kInd,ld_H,Q1,Q2,R,QF1,QF2);
     	#endif
 	}
 }
@@ -719,13 +719,13 @@ void loadVarsCPU(T *x, T *xp, T *x0, T *u, T *up, T *u0, T *P, T *Pp, T *P0, T *
                 threads[thread_i] = std::thread(&forwardSim<T>, desc, std::ref(x), std::ref(u), std::ref(KT), std::ref(du), std::ref(d), alpha[0], 
                                                         			  std::ref(xp), ld_x, ld_u, ld_KT, ld_du, ld_d, 
                                                         			  std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JT),
-                                                        			  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
+                                                        			  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,0,nullptr);
             
             #else
                 threads[thread_i] = std::thread(&forwardSim<T>, desc, std::ref(x), std::ref(u), std::ref(KT), std::ref(du), std::ref(d), alpha[0], 
                                                         			  std::ref(xp), ld_x, ld_u, ld_KT, ld_du, ld_d, 
                                                         			  std::ref(I), std::ref(Tbody), nullptr, nullptr,
-                                                        			  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);
+                                                        			  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,0,nullptr);
             #endif
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, thread_i);}
         }
