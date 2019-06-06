@@ -2,7 +2,7 @@
 
 ### Releases
 **```v0.1: WAFR 2018 Release```**
-holds the code supporting "[A Performance Analysis of Differential Dynamic Programming on a GPU](https://agile.seas.harvard.edu/publications/performance-analysis-parallel-differential-dynamic-programming-gpu)."
+holds the code for "[A Performance Analysis of Differential Dynamic Programming on a GPU](https://agile.seas.harvard.edu/publications/performance-analysis-parallel-differential-dynamic-programming-gpu)."
 
 **```v0.2: ICRA 2019 Release```** extends the previous work by integrating LCM for hardware experiments and cleaning up the code base / interface. <!--An extended abstract describing the hardware experiments can be found [here]().-->
 
