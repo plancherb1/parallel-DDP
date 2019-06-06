@@ -551,7 +551,7 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
 		T cJ = Js[alpha_i];		cdJ = prevJ - cJ;					JFlag = cdJ >= 0.0 && cdJ > *dJ;
 		cz = cdJ / (alpha*dJexp[0] + alpha*alpha/2.0*dJexp[1]); 	zFlag = !USE_EXP_RED || (EXP_RED_MIN < cz && cz < EXP_RED_MAX);
 	    if (M_F > 1){cd = defectComp(ds[alphaInd],ld_d); dFlag = cd < MAX_DEFECT_SIZE;} else{dFlag = 1;}
-	    // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]f[%d]\n",alpha,cJ,cdJ,cz,cd,JFlag,zFlag,dFlag);
+	    // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d]\n",alpha,cJ,cdJ,cz,cd,JFlag,zFlag,dFlag);
 	    if(JFlag && zFlag && dFlag){
 			if (*ignore_defect && cd < USE_MAX_DEFECT){*ignore_defect = 0;} // update the ignore defect
 			alphaIndex = alphaInd; *dJ = cdJ; *z = cz; *J = Js[alpha_i]; *maxd = cd; // update current best index, dJ, z, J, maxd

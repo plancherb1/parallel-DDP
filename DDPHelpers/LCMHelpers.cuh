@@ -34,9 +34,6 @@ const char *SOLVER_PARAMS_CHANNEL = "SOLVER_PARAMS_CHANNEL";
 #ifndef HARDWARE_MODE
     #define HARDWARE_MODE 0
 #endif
-#ifndef USE_FEEDBACK_IN_TRAJ_RUNNER
-    #define USE_FEEDBACK_IN_TRAJ_RUNNER 1
-#endif
 // #define GOAL_PUBLISHER_RATE_MS 30
 // #define TEST_DELTA 0 // random small delta to keep things interesting (in ms) for tests
 

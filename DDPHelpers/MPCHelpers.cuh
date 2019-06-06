@@ -43,6 +43,9 @@
 #ifndef TRAJ_RUNNER_TIME_STEPS
     #define TRAJ_RUNNER_TIME_STEPS NUM_TIME_STEPS
 #endif
+#ifndef USE_FEEDBACK_IN_TRAJ_RUNNER
+    #define USE_FEEDBACK_IN_TRAJ_RUNNER 1
+#endif
 
 // 1: Variable Wrappers (structs) and memory allocators/freers //
     template <typename T>
@@ -750,15 +753,25 @@
 
     template <typename T>
     __host__ __forceinline__
-    void storeVarsCPU_MPC(CPUVars<T> *cv, trajVars<T> *tv, matDimms *md, int64_t tActual_sys, int64_t tActual_plant, int defectFlag, T *maxd){
+    void storeVarsCPU_MPC(CPUVars<T> *cv, trajVars<T> *tv, matDimms *md, int64_t tActual_sys, int64_t tActual_plant, int defectFlag, T *maxd, int alphaIndex = -2){
         (tv->lock)->lock();             tv->t0_sys = tActual_sys;         tv->t0_plant = tActual_plant;
         tv->last_successful_solve++;    // increment failure counter by 1 since now last solve at 1 iter ago minimum
         if (tv->last_successful_solve == 1){
-            if (defectFlag){*maxd = defectComp(cv->d,md->ld_d);}
-            (cv->threads)[0] = std::thread(memcpy, std::ref(tv->x), std::ref(cv->x), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
-            if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 0);}
-            (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->u), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
-            if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 1);}
+            if (alphaIndex == -2){ // serial line search
+                if (defectFlag){*maxd = defectComp(cv->d,md->ld_d);}
+                (cv->threads)[0] = std::thread(memcpy, std::ref(tv->x), std::ref(cv->x), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+                if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 0);}
+                (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->u), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+                if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 1);}
+            }
+            else{ // parallel line search
+                if (alphaIndex == -1){alphaIndex = 0;}
+                if (defectFlag){*maxd = defectComp(cv->ds[alphaIndex],md->ld_d);}
+                (cv->threads)[0] = std::thread(memcpy, std::ref(tv->x), std::ref(cv->xs[alphaIndex]), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+                if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 0);}
+                (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->us[alphaIndex]), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+                if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 1);}
+            }
             (cv->threads)[2] = std::thread(memcpy, std::ref(tv->KT), std::ref(cv->KT), (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 2);}
         }
@@ -771,10 +784,7 @@
             (cv->threads)[2] = std::thread(memcpy, std::ref(cv->KT), std::ref(cv->KT_old), (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 2);}
         }
-        (cv->threads)[0].join();
-        (cv->threads)[1].join();
-        (cv->threads)[2].join();
-        (tv->lock)->unlock();
+        (cv->threads)[0].join();    (cv->threads)[1].join();    (cv->threads)[2].join();    (tv->lock)->unlock();
     }
 
     template <typename T>
@@ -839,8 +849,8 @@
             // printf("Last Successful Solve: %d\n",tv->last_successful_solve);
 
             // define kernel dimms
-            dim3 ADimms(DIM_A_r,DIM_A_c);
-            dim3 bpDimms(DIM_H_r,DIM_H_c);  dim3 dynDimms(36,7);
+            dim3 ADimms(DIM_A_r,1);//DIM_A_c);
+            dim3 bpDimms(8,7);  dim3 dynDimms(8,7);//dim3 bpDimms(DIM_H_r,DIM_H_c);  dim3 dynDimms(36,7);
             dim3 FPBlocks(M_F,NUM_ALPHA);   dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);     dim3 intDimms(NUM_TIME_STEPS-1,1);
             if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
 
@@ -877,7 +887,7 @@
         // now start computing iterates
         while(1){
             #if USE_MAX_SOLVER_TIME
-                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
             #endif
             // BACKWARD PASS //
                 #if USE_ALG_TRACE
@@ -900,7 +910,7 @@
             // BACKWARD PASS //
 
             #if USE_MAX_SOLVER_TIME
-                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
             #endif
             // FORWARD PASS //
                 // FORWARD SWEEP //
@@ -961,7 +971,7 @@
 
                 // if we have gotten here then prep for next pass
                 #if USE_MAX_SOLVER_TIME
-                    gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                    gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
                 #endif
                 nextIterationSetupGPU<T>(gv->d_x,gv->h_d_x,gv->d_xp,gv->d_u,gv->h_d_u,gv->d_up,gv->d_d,gv->h_d_d,gv->d_dp,gv->d_AB,gv->d_H,
                                          gv->d_g,gv->d_P,gv->d_p,gv->d_Pp,gv->d_pp,gv->d_xGoal,gv->alphaIndex,gv->streams,dynDimms,intDimms,
@@ -987,7 +997,6 @@
             // on exit make sure everything finishes
             gpuErrchk(cudaDeviceSynchronize());
             #if DEBUG_SWITCH
-                T xPrint[STATE_SIZE];
                 gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
                 printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
                     iter,xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho,dJ,z,gv->d[*(gv->alphaIndex)]);
@@ -1011,9 +1020,14 @@
     __host__ __forceinline__
     void runiLQR_MPC_CPU(trajVars<T> *tv, CPUVars<T> *cv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0, bool use_cost_shift = 0){
+                         int max_iter = MAX_ITER, double time_budget = MAX_SOLVER_TIME, int clear_vars = 0, bool use_cost_shift = 0){
         // INITIALIZE THE ALGORITHM //
-            struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
+            #if USE_MAX_SOLVER_TIME || USE_ALG_TRACE
+                struct timeval start, end;    gettimeofday(&start,NULL);
+            #endif
+            #if USE_ALG_TRACE
+                struct timeval start2, end2;    gettimeofday(&start2,NULL);
+            #endif
             T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
             T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
@@ -1023,104 +1037,136 @@
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
                                cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
                                md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody,clear_vars);
-            gettimeofday(&end2,NULL);
-            (data->initTime).push_back(time_delta_ms(start2,end2));
+            #if USE_ALG_TRACE
+                gettimeofday(&end2,NULL);
+                (data->initTime).push_back(time_delta_ms(start2,end2));
+                gettimeofday(&start2,NULL);
+            #endif
 
             // do initial "next iteration setup"
-            gettimeofday(&start2,NULL);
             initAlgCPU<T>(cv->x,cv->xp,cv->xp2,cv->u,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->d,cv->JT,Jout,&prevJ,cv->alpha,alphaOut,
                           cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                           cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift,cv->xTarget);
-            gettimeofday(&end2,NULL);
-            (data->nisTime).push_back(time_delta_ms(start2,end2));
+            #if USE_ALG_TRACE
+                gettimeofday(&end2,NULL);
+                (data->nisTime).push_back(time_delta_ms(start2,end2));
+            #endif
         // INITIALIZE THE ALGORITHM //
         
         // debug print -- so ready to start
-        if (DEBUG_SWITCH){
+        #if DEBUG_SWITCH
             printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",
                         cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
-        }
+        #endif
 
         while(1){
-            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #if USE_MAX_SOLVER_TIME
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
+            #endif
             // BACKWARD PASS //
-                gettimeofday(&start2,NULL);
+                #if USE_ALG_TRACE
+                    gettimeofday(&start2,NULL);
+                #endif
                 backwardPassCPU<T>(cv->AB,cv->P,cv->p,cv->Pp,cv->pp,cv->H,cv->g,cv->KT,cv->du,cv->d,cv->dp,
                                    cv->ApBK,cv->Bdu,cv->x,cv->xp2,cv->dJexp,cv->err,&rho,&drho,cv->threads,
                                    md->ld_AB,md->ld_P,md->ld_p,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_A,md->ld_d,md->ld_x);
-                gettimeofday(&end2,NULL);
-                (data->bpTime).push_back(time_delta_ms(start2,end2));
+                #if USE_ALG_TRACE
+                    gettimeofday(&end2,NULL);
+                    (data->bpTime).push_back(time_delta_ms(start2,end2));
+                #endif
             // BACKWARD PASS //
 
-            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #if USE_MAX_SOLVER_TIME
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
+            #endif
             // FORWARD PASS //
                 dJ = -1.0;  alphaIndex = 0; (data->sweepTime).push_back(0.0);    (data->simTime).push_back(0.0);
                 while(1){
                     // FORWARD SWEEP //
-                        gettimeofday(&start2,NULL);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&start2,NULL);
+                        #endif
                         // Do the forward sweep if applicable
                         if (M_F > 1){forwardSweep<T>(cv->x,cv->ApBK,cv->Bdu,cv->d,cv->xp,(cv->alpha)[alphaIndex],md->ld_x,md->ld_d,md->ld_A);}
-                        gettimeofday(&end2,NULL);
-                        (data->sweepTime).back() += time_delta_ms(start2,end2);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&end2,NULL);
+                            (data->sweepTime).back() += time_delta_ms(start2,end2);
+                        #endif
                     // FORWARD SWEEP //
 
                     // FORWARD SIM //
-                        gettimeofday(&start2,NULL);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&start2,NULL);
+                        #endif
                         int err = forwardSimCPU<T>(cv->x,cv->xp,cv->xp2,cv->u,cv->up,cv->KT,cv->du,cv->d,cv->dp,cv->dJexp,cv->JT,
                                                    (cv->alpha)[alphaIndex],cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
                                                    cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                                                    cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                                                    cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
                                                    finalCostShift,cv->xTarget);
-                        gettimeofday(&end2,NULL);   
-                        (data->simTime).back() += time_delta_ms(start2,end2);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&end2,NULL);   
+                            (data->simTime).back() += time_delta_ms(start2,end2);
+                        #endif
                         if(err){if (alphaIndex < NUM_ALPHA - 1){(alphaIndex)++; continue;} else{alphaIndex = -1; break;}} else{break;}
                     // FORWARD SIM //
                 }
             // FORWARD PASS //
 
             // NEXT ITERATION SETUP //
-                gettimeofday(&start2,NULL);    
+                #if USE_ALG_TRACE
+                    gettimeofday(&start2,NULL);
+                #endif
                 // process accept or reject of traj and test for exit
                 bool exitFlag = acceptRejectTrajCPU<T>(cv->x,cv->xp,cv->u,cv->up,cv->d,cv->dp,J,&prevJ,&dJ,&rho,&drho,&alphaIndex,
                                                        alphaOut,Jout,&iter,cv->threads,md->ld_x,md->ld_u,md->ld_d,max_iter);
                 if(alphaOut[iter - !exitFlag] > 0){if (DEBUG_SWITCH){printf("successful iter w/ alpha[%d]\n",alphaOut[iter - !exitFlag]);}tv->last_successful_solve = 0;} // note that we were able to take a step
                 if (exitFlag){
-                    gettimeofday(&end2,NULL);
-                    (data->nisTime).push_back(time_delta_ms(start2,end2));
+                    #if USE_ALG_TRACE
+                        gettimeofday(&end2,NULL);
+                        (data->nisTime).push_back(time_delta_ms(start2,end2));
+                    #endif
                     break;
                 }
                 // if we have gotten here then prep for next pass
-                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                #if USE_MAX_SOLVER_TIME
+                    gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
+                #endif
                 nextIterationSetupCPU<T>(cv->x,cv->xp,cv->u,cv->up,cv->d,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
                                          md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody,
                                          cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                                          cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
                                          finalCostShift,cv->xTarget);
-                gettimeofday(&end2,NULL);
-                (data->nisTime).push_back(time_delta_ms(start2,end2));
+                #if USE_ALG_TRACE
+                    gettimeofday(&end2,NULL);
+                    (data->nisTime).push_back(time_delta_ms(start2,end2));
+                #endif
             // NEXT ITERATION SETUP //
       
-            if (DEBUG_SWITCH){
+            #if DEBUG_SWITCH
                 printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
                             iter-1,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
-            }
+            #endif
         }
 
         // EXIT Handling
-            if (DEBUG_SWITCH){
+            #if DEBUG_SWITCH
                 printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
                             iter,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
-            }
+            #endif
             // Bring back the final state and control (and compute final d if needed)
-            gettimeofday(&start2,NULL);
+            #if USE_ALG_TRACE
+                gettimeofday(&start2,NULL);
+            #endif
             storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd);
-            for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
-            gettimeofday(&end2,NULL);
-            gettimeofday(&end,NULL);
-            (data->initTime).back() += time_delta_ms(start2,end2);
-            (data->tTime).push_back(time_delta_ms(start,end));
+            #if USE_ALG_TRACE
+                for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
+                gettimeofday(&end2,NULL);
+                gettimeofday(&end,NULL);
+                (data->initTime).back() += time_delta_ms(start2,end2);
+                (data->tTime).push_back(time_delta_ms(start,end));
+            #endif
         // EXIT Handling
     }
 
@@ -1128,9 +1174,14 @@
     __host__ __forceinline__
     void runiLQR_MPC_CPU2(trajVars<T> *tv, CPUVars<T> *cv, matDimms *md, algTrace<T> *data, costParams<T> *cst,
                          int64_t tActual_sys, int64_t tActual_plant, int ignoreFirstDefectFlag, 
-                         double time_budget = MAX_SOLVER_TIME, int max_iter = MAX_ITER, int clear_vars = 0, bool use_cost_shift = 0){
+                         int max_iter = MAX_ITER, double time_budget = MAX_SOLVER_TIME, int clear_vars = 0, bool use_cost_shift = 0){
         // INITIALIZE THE ALGORITHM //
-            struct timeval start, end, start2, end2;    gettimeofday(&start,NULL);  gettimeofday(&start2,NULL);
+            #if USE_MAX_SOLVER_TIME || USE_ALG_TRACE
+                struct timeval start, end;    gettimeofday(&start,NULL);
+            #endif
+            #if USE_ALG_TRACE
+                struct timeval start2, end2;    gettimeofday(&start2,NULL);
+            #endif
             T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
             T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
@@ -1140,58 +1191,78 @@
             loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
                                cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
                                md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody,clear_vars);
-            gettimeofday(&end2,NULL);
-            (data->initTime).push_back(time_delta_ms(start2,end2));
+            #if USE_ALG_TRACE
+                gettimeofday(&end2,NULL);
+                (data->initTime).push_back(time_delta_ms(start2,end2));
+                gettimeofday(&start2,NULL);
+            #endif
 
             // do initial "next iteration setup"
-            gettimeofday(&start2,NULL);
             initAlgCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,(cv->JTs)[0],Jout,&prevJ,cv->alpha,alphaOut,
                            cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                            cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                            cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift,cv->xTarget);
-            gettimeofday(&end2,NULL);
-            (data->nisTime).push_back(time_delta_ms(start2,end2));
+            #if USE_ALG_TRACE
+                gettimeofday(&end2,NULL);
+                (data->nisTime).push_back(time_delta_ms(start2,end2));
+            #endif
         // INITIALIZE THE ALGORITHM //
         
         // debug print -- so ready to start
-        if (DEBUG_SWITCH){
+        #if DEBUG_SWITCH
             printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",
-                        cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
-        }
+                        (cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
+        #endif
 
         while(1){
-            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #if USE_MAX_SOLVER_TIME
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
+            #endif
             // BACKWARD PASS //
-                gettimeofday(&start2,NULL);
+                #if USE_ALG_TRACE
+                    gettimeofday(&start2,NULL);
+                #endif
                 backwardPassCPU<T>(cv->AB,cv->P,cv->p,cv->Pp,cv->pp,cv->H,cv->g,cv->KT,cv->du,cv->d,cv->dp,
                                    cv->ApBK,cv->Bdu,cv->x,cv->xp2,cv->dJexp,cv->err,&rho,&drho,cv->threads,
                                    md->ld_AB,md->ld_P,md->ld_p,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_A,md->ld_d,md->ld_x);
-                gettimeofday(&end2,NULL);
-                (data->bpTime).push_back(time_delta_ms(start2,end2));
+                #if USE_ALG_TRACE
+                    gettimeofday(&end2,NULL);
+                    (data->bpTime).push_back(time_delta_ms(start2,end2));
+                #endif
             // BACKWARD PASS //
 
-            gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+            #if USE_MAX_SOLVER_TIME
+                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
+            #endif
             // FORWARD PASS //
                 dJ = -1.0;  alphaIndex = 0; (data->sweepTime).push_back(0.0);    (data->simTime).push_back(0.0);
                 while(1){
                     // FORWARD SWEEP //
-                        gettimeofday(&start2,NULL);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&start2,NULL);
+                        #endif
                         // Do the forward sweep if applicable
                         if (M_F > 1){forwardSweep2<T>(cv->xs, cv->ApBK, cv->Bdu, cv->ds, cv->xp, cv->alpha, alphaIndex, cv->threads, md->ld_x, md->ld_d, md->ld_A);}
-                        gettimeofday(&end2,NULL);
-                        (data->sweepTime).back() += time_delta_ms(start2,end2);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&end2,NULL);
+                            (data->sweepTime).back() += time_delta_ms(start2,end2);
+                        #endif
                     // FORWARD SWEEP //
 
                     // FORWARD SIM //
-                        gettimeofday(&start2,NULL);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&start2,NULL);
+                        #endif
                         int alphaIndexOut = forwardSimCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->KT,cv->du,cv->ds,cv->dp,cv->dJexp,cv->JTs,
                                                               cv->alpha,alphaIndex,cv->xGoal,&J,&dJ,&z,prevJ,&ignoreFirstDefectFlag,&maxd,
                                                               cv->threads,md->ld_x,md->ld_u,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                                                               cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                                                               cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
                                                               finalCostShift,cv->xTarget);
-                        gettimeofday(&end2,NULL);   
-                        (data->simTime).back() += time_delta_ms(start2,end2);
+                        #if USE_ALG_TRACE
+                            gettimeofday(&end2,NULL);   
+                            (data->simTime).back() += time_delta_ms(start2,end2);
+                        #endif
                         if(alphaIndexOut == -1){ // failed
                             if (alphaIndex < NUM_ALPHA - FSIM_ALPHA_THREADS){alphaIndex += FSIM_ALPHA_THREADS; continue;} // keep searching
                             else{alphaIndex = -1; break;} // note failure
@@ -1202,47 +1273,58 @@
             // FORWARD PASS //
 
             // NEXT ITERATION SETUP //
-                gettimeofday(&start2,NULL);    
+                #if USE_ALG_TRACE
+                    gettimeofday(&start2,NULL);
+                #endif
                 // process accept or reject of traj and test for exit
                 bool exitFlag = acceptRejectTrajCPU2<T>(cv->xs,cv->xp,cv->us,cv->up,cv->ds,cv->dp,J,&prevJ,&dJ,&rho,&drho,&alphaIndex,
                                                         alphaOut,Jout,&iter,cv->threads,md->ld_x,md->ld_u,md->ld_d,max_iter);
                 if(alphaOut[iter - !exitFlag] > 0){if (DEBUG_SWITCH){printf("successful iter w/ alpha[%d]\n",alphaOut[iter - !exitFlag]);}tv->last_successful_solve = 0;} // note that we were able to take a step
                 if (exitFlag){
-                    gettimeofday(&end2,NULL);
-                    (data->nisTime).push_back(time_delta_ms(start2,end2));
-                    if (alphaIndex == -1){alphaIndex = 0;}
+                    #if USE_ALG_TRACE
+                        gettimeofday(&end2,NULL);
+                        (data->nisTime).push_back(time_delta_ms(start2,end2));
+                    #endif
                     break;
                 }
                 // if we have gotten here then prep for next pass
-                gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){break;};
+                #if USE_MAX_SOLVER_TIME
+                    gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
+                #endif
                 nextIterationSetupCPU2<T>(cv->xs,cv->xp,cv->us,cv->up,cv->ds,cv->dp,cv->AB,cv->H,cv->g,cv->P,cv->p,cv->Pp,cv->pp,cv->xGoal,cv->threads,
                                           &alphaIndex,md->ld_x,md->ld_u,md->ld_d,md->ld_AB,md->ld_H,md->ld_g,md->ld_P,md->ld_p,cv->I,cv->Tbody,
                                           cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                                           cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,
                                           finalCostShift,cv->xTarget);
-                gettimeofday(&end2,NULL);
-                (data->nisTime).push_back(time_delta_ms(start2,end2));
+                #if USE_ALG_TRACE
+                    gettimeofday(&end2,NULL);
+                    (data->nisTime).push_back(time_delta_ms(start2,end2));
+                #endif
             // NEXT ITERATION SETUP //
       
-            if (DEBUG_SWITCH){
+            #if DEBUG_SWITCH
                 printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter-1,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
-            }
+                            iter-1,(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+            #endif
         }
 
         // EXIT Handling
-            if (DEBUG_SWITCH){
+            #if DEBUG_SWITCH
                 printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
-            }
+                            iter,(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+            #endif
             // Bring back the final state and control (and compute final d if needed)
-            gettimeofday(&start2,NULL);
-            storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd);
-            for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
-            gettimeofday(&end2,NULL);
-            gettimeofday(&end,NULL);
-            (data->initTime).back() += time_delta_ms(start2,end2);
-            (data->tTime).push_back(time_delta_ms(start,end));
+            #if USE_ALG_TRACE
+                gettimeofday(&start2,NULL);
+            #endif
+            storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd,alphaIndex);
+            #if USE_ALG_TRACE
+                for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
+                gettimeofday(&end2,NULL);
+                gettimeofday(&end,NULL);
+                (data->initTime).back() += time_delta_ms(start2,end2);
+                (data->tTime).push_back(time_delta_ms(start,end));
+            #endif
         // EXIT Handling
     }
 // 3: MPC Main Algorithm Wrappers //
