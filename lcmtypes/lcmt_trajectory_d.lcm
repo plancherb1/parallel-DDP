@@ -1,0 +1,14 @@
+package drake;
+
+struct lcmt_trajectory_d {
+  // The timestamp in microseconds.
+  int64_t utime;
+
+  int32_t x_size;
+  int32_t u_size;
+  int32_t KT_size;
+
+  double x[x_size];
+  double u[u_size];
+  double KT[KT_size];
+}

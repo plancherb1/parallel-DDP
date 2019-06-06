@@ -40,8 +40,31 @@ dy = data[1][breakPoint2::dataStep]
 dz = data[2][breakPoint2::dataStep]
 ax.scatter(dx0,dy0,dz0, c ='r', alpha = 0.8)
 ax.scatter(dx,dy,dz, c ='r', alpha = 0.6)
+def sign(x):
+	return -0.1 if x < 0 else 0.1
+directions0 = [[],[],[]]
+directions = [[],[],[]]
+for i in range(len(dx0)-1):
+	directions0[0] += [0]#[sign(dx0[i+1] - dx0[i])]
+	directions0[1] += [0]#[sign(dy0[i+1] - dy0[i])]
+	directions0[2] += [sign(dz0[i+1] - dz0[i])]
+directions0[0] += [0]#[sign(dx[0] - dx0[-1])]
+directions0[1] += [0]#[sign(dy[0] - dy0[-1])]
+directions0[2] += [sign(dz[0] - dz0[-1])]
+for i in range(len(dx)-1):
+	directions[0] += [0]#[sign(dx[i+1] - dx[i])]
+	directions[1] += [sign(dy[i+1] - dy[i])]
+	directions[2] += [sign(dz[i+1] - dz[i])]
+directions[0] += [0]
+directions[1] += [0]
+directions[2] += [0]
+# x = dx0 + dx
+# y = dy0 + dy
+# z = dz0 + dz
+ax.scatter(dx0[-23],dy0[-23],dz0[-23], c='r', alpha = 1.0, marker = (3, 0, 173), s=100)
+# ax.quiver(dx0[-25],dy0[-25],dz0[-25],directions0[0][-25],directions0[1][-25],directions0[2][-25],color='r',linewidth=5,head_width=7)
 ax.plot(goal[0][::goalStep], goal[1][::goalStep], goal[2][::goalStep], c='b', alpha = 0.5, linewidth=3)
-ax.scatter(goal[0][0],goal[1][0],goal[2][0],c='k')
+# ax.scatter(goal[0][0],goal[1][0],goal[2][0],c='k')
 font = {'family': 'serif',
         'color':  '#222222',
         'weight': 'normal',
@@ -50,9 +73,9 @@ font = {'family': 'serif',
 ax.set_xlabel('X', fontdict=font, labelpad=15)
 ax.set_ylabel('Y', fontdict=font, labelpad=20)
 ax.set_zlabel('Z', fontdict=font, labelpad=8)
-ax.set_ylim(-0.5, 0.5)    
+ax.set_ylim(-0.35,0.35)#(-0.5, 0.5)    
 ax.set_xlim(0.5,0.75)#(0, 0.75)
-ax.set_zlim(0.25, 0.75)#1.25)
+ax.set_zlim(0.25, 0.65)#0.75)#1.25)
 for tick in ax.xaxis.get_major_ticks():
     tick.label.set_fontsize(14) 
     tick.label.set_color('#222222')
@@ -65,5 +88,5 @@ for tick in ax.zaxis.get_major_ticks():
     tick.label.set_fontsize(14) 
     tick.label.set_color('#222222')
     tick.label.set_family('serif')
-ax.view_init(25, -8)
+ax.view_init(13,10)#(25, -8)
 plt.show()

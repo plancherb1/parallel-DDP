@@ -306,7 +306,7 @@ void computeFSVars(T *b_ApBK, T *b_Bdu, T *s_AB, T *s_K, T *s_du, int ld_A){
 				// multiply row kx of B by column ky of du store in (kx,ky) of d
 				val += s_AB[OFFSET_B + kx + DIM_AB_r*j]*s_du[j];
 			}
-			b_Bdu[kx] = -val;
+			b_Bdu[kx] = val;
 		}
 	}
 }
@@ -327,7 +327,7 @@ void computeExpRed(T *s_dJ, T *s_H, T *s_g, T *s_du){
       		s_dJ[ind] 			 += val1;
       		s_dJ[DIM_du_r + ind] += val2;
   		#else
-  			s_dJ[0] += val1; 
+  			  s_dJ[0] += val1; 
       		s_dJ[1] += val2;
   		#endif
   	}

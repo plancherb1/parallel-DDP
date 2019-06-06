@@ -1,14 +1,17 @@
 /***
-nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu utils/cudaUtils.cu utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
+nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define EE_COST 0
 #define TOL_COST 0.0
+#define USE_WAFR_URDF 1
+#define _Q1 0.1 // q
+#define _Q2 0.001 // qd
+#define _R  0.0001
+#define _QF1 1000.0 // q
+#define _QF2 1000.0 // qd
 
-#include "DDPHelpers.cuh"
+#include "../config.cuh"
 #include <random>
-#include <vector>
-#include <algorithm>
-#include <iostream>
 
 #define TEST_ITERS 100
 #define ROLLOUT_FLAG 0
@@ -31,14 +34,23 @@ nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu utils/cudaUtils.cu utils/threa
 #elif PLANT == 4 // arm
 	#define RANDOM_STDEV 0.001
  	#define PI 3.14159
-	#define GOAL_1 0
-	#define GOAL_2 0
-	#define GOAL_3 0
-	#define GOAL_4 -0.25*PI
-	#define GOAL_5 0
-	#define GOAL_6 0.25*PI
-	#define GOAL_7 0.5*PI
-	#define GOAL_O 0.0
+	#if EE_COST
+		#define GOAL_X 0.3638
+		#define GOAL_Y 0.0
+		#define GOAL_Z 1.0628
+		#define GOAL_r (0.5*PI)
+		#define GOAL_p 0.0
+		#define GOAL_y (0.5*PI)
+	#else
+		#define GOAL_1 0
+		#define GOAL_2 0
+		#define GOAL_3 0
+		#define GOAL_4 -0.25*PI
+		#define GOAL_5 0
+		#define GOAL_6 0.25*PI
+		#define GOAL_7 0.5*PI
+		#define GOAL_O 0.0
+	#endif
 #endif
 
 char errMsg[]  = "Error: Unkown code - usage is [C]PU or [G]PU with [CS] for serial line search\n";
@@ -50,21 +62,24 @@ std::normal_distribution<double> randDist(RANDOM_MEAN, RANDOM_STDEV); //mean fol
 
 template <typename T>
 __host__ __forceinline__
+T getRand(){return static_cast<T>(randDist(randEng));}
+
+template <typename T>
+__host__ __forceinline__
 void loadXU(T *x, T *u, T *xGoal, int ld_x, int ld_u){
 	for (int k=0; k<NUM_TIME_STEPS; k++){
 		T *xk = x + k*ld_x;
 		#if PLANT == 1 // pend
-			xk[0] = 0.0;	xk[1] = (T)randDist(randEng);
+			xk[0] = 0.0;	xk[1] = getRand<T>();
 		#elif PLANT == 2 // cart
-		 	xk[0] = 0.0;				xk[1] = 0.0;
-			xk[2] = (T)randDist(randEng);	xk[3] = (T)randDist(randEng);
+		 	xk[0] = 0.0;			xk[1] = 0.0;
+			xk[2] = getRand<T>();	xk[3] = getRand<T>();
 		#elif PLANT == 3 // quad
-			for (int k2=0; k2<STATE_SIZE; k2++){if (k2 == 2){xk[k2] = 0.5;}	else if(k2 >= NUM_POS){xk[k2] = (T)randDist(randEng);}	else{xk[k2] = 0.0;}}
+			for (int k2=0; k2<STATE_SIZE; k2++){if (k2 == 2){xk[k2] = 0.5;}	else if(k2 >= NUM_POS){xk[k2] = getRand<T>();}	else{xk[k2] = 0.0;}}
 		#elif PLANT == 4 // arm
-			xk[0] = (T)-0.5*PI;		xk[1] = (T)0.25*PI;		xk[2] = (T)0.167*PI;
-			xk[3] = (T)-0.167*PI;	xk[4] = (T)0.125*PI;	xk[5] = (T)0.167*PI;	xk[6] = (T)0.5*PI;
-			xk[7] = (T)randDist(randEng);	xk[8] = (T)randDist(randEng);	xk[9] = (T)randDist(randEng);
-			xk[10] = (T)randDist(randEng);	xk[11] = (T)randDist(randEng);	xk[12] = (T)randDist(randEng);	xk[13] = (T)randDist(randEng);
+			xk[0] = -0.5*PI;		xk[1] = 0.25*PI;	xk[2] = 0.167*PI;
+			xk[3] = -0.167*PI;		xk[4] = 0.125*PI;	xk[5] = 0.167*PI;	xk[6] = 0.5*PI;
+			for (int k2=0; k2<NUM_POS; k2++){xk[NUM_POS+k2] = getRand<T>();}
 		#endif
 	}
 	for (int k=0; k<NUM_TIME_STEPS; k++){
@@ -74,8 +89,13 @@ void loadXU(T *x, T *u, T *xGoal, int ld_x, int ld_u){
 		#elif PLANT == 3 // quad
 			for (int k2=0; k2<CONTROL_SIZE; k2++){uk[k2] = 1.22625;}
 		#elif PLANT == 4 // arm
-			uk[0] = 0.0;		uk[1] = -102.9832;	uk[2] = 11.1968;
-			uk[3] = 47.0724;	uk[4] = 2.5993;		uk[5] = -7.0290;	uk[6] = -0.0907;
+			#if USE_WAFR_URDF
+				uk[0] = 0.0;		uk[1] = -102.9832;	uk[2] = 11.1968;
+				uk[3] = 47.0724;	uk[4] = 2.5993;		uk[5] = -7.0290;	uk[6] = -0.0907;
+			#else
+				uk[0] = -0.0000000001;	uk[1] = -62.282937;		uk[2] =  4.172921;
+				uk[3] = 21.513797;		uk[4] = -0.088674;		uk[5] = -0.890626;	uk[6] = 0.0000000001;
+			#endif
 		#endif
 	}
 	#if EE_COST
@@ -339,6 +359,68 @@ void testGPU(){
    	free(u0);
 }
 
+template <typename T>
+__host__
+void testGPU_SLQ(){
+	// GPU VARS	
+	// first integer constants for the leading dimmensions of allocaitons
+	int ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A;
+	// then vars for stream handles
+	cudaStream_t *streams;
+	// algorithm hyper parameters
+	T *alpha, *d_alpha;
+	int *alphaIndex;
+	// then variables defined by blocks for backward pass
+	T *d_P, *d_p, *d_Pp, *d_pp, *d_AB, *d_H, *d_g, *d_KT, *d_du;
+	// variables for forward pass
+	T **d_x, **d_u, **h_d_x, **h_d_u, *d_xp, *d_xp2, *d_up, *d_JT, *J;
+	// variables for forward sweep
+	T **d_d, **h_d_d, *d_dp, *d_dT, *d, *d_ApBK, *d_Bdu, *d_dM;
+	// for checking inversion errors
+	int *err, *d_err;
+	// for expected cost reduction
+	T *dJexp, *d_dJexp;
+	// goal point
+	T *xGoal, *d_xGoal;
+    // Inertias and Tbodybase
+    T *d_I, *d_Tbody;
+
+	// Allocate space and initialize the variables
+   	allocateMemory_GPU<T>(&d_x, &h_d_x, &d_xp, &d_xp2, &d_u, &h_d_u, &d_up, &d_xGoal, &xGoal,
+   					   &d_P, &d_Pp, &d_p, &d_pp, &d_AB, &d_H, &d_g, &d_KT, &d_du,
+   					   &d_d, &h_d_d, &d_dp, &d_dT, &d_dM, &d, &d_ApBK, &d_Bdu,
+   					   &d_JT, &J, &d_dJexp, &dJexp, &alpha, &d_alpha, &alphaIndex, &d_err, &err, 
+   					   &ld_x, &ld_u, &ld_P, &ld_p, &ld_AB, &ld_H, &ld_g, &ld_KT, &ld_du, &ld_d, &ld_A,
+                       &streams, &d_I, &d_Tbody);
+
+   	T *x0 = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));
+   	T *u0 = (T *)malloc(ld_u*NUM_TIME_STEPS*sizeof(T));
+
+   	for (int i=0; i<TEST_ITERS; i++){
+		printf("<<<TESTING GPU SLQ %d/%d>>>\n",i+1,TEST_ITERS);
+		loadXU<T>(x0,u0,xGoal,ld_x,ld_u);
+      	runSLQ_GPU<T>(x0, u0, nullptr, nullptr, nullptr, nullptr, xGoal, &Jout[i*(MAX_ITER+1)], &alphaOut[i*(MAX_ITER+1)], ROLLOUT_FLAG, 1,  1,
+      				&tTime[i], &fsimTime[i*MAX_ITER], &fsweepTime[i*MAX_ITER], &bpTime[i*MAX_ITER], &nisTime[i*MAX_ITER], &initTime[i], streams,
+					d_x, h_d_x, d_xp, d_xp2, d_u, h_d_u, d_up, d_P, d_p, d_Pp, d_pp, d_AB, d_H, d_g, d_KT, d_du,
+					d_d, h_d_d, d_dp, d_dT, d, d_ApBK, d_Bdu, d_dM, alpha, d_alpha, alphaIndex, d_JT, J, dJexp, d_dJexp, d_xGoal,
+					err, d_err, ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A, d_I, d_Tbody);
+   	}
+   	// print final state
+	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
+	// printf("Final xtraj:\n");   for (int i = 0; i < NUM_TIME_STEPS; i++){printMat<T,1,DIM_x_r>(&x0[i*ld_x],1);}
+
+	// print all requested statistics
+   	printJAlphaStats(Jout,alphaOut);
+   	printAllTimingStats(tTime,initTime,fsimTime,fsweepTime,bpTime,nisTime);
+
+	// free those vars
+	freeMemory_GPU<T>(d_x, h_d_x, d_xp, d_xp2, d_u, h_d_u, d_up, xGoal, d_xGoal,  d_P, d_Pp, d_p, d_pp, d_AB, d_H, d_g, d_KT, d_du, 
+				   d_d, h_d_d, d_dp, d_dM, d_dT, d,  d_ApBK, d_Bdu, d_JT, J, d_dJexp, dJexp, alpha, d_alpha, alphaIndex, d_err, err, 
+                   streams, d_I, d_Tbody);
+	free(x0);
+   	free(u0);
+}
+
 int main(int argc, char *argv[])
 {
 	srand(time(NULL));
@@ -349,6 +431,7 @@ int main(int argc, char *argv[])
 	}
 	if (hardware == 'G'){testGPU<algType>();}
 	else if (hardware == 'C'){int flag = (int)(argv[1][1] == 'S'); testCPU<algType>(flag);}
+	else if (hardware == 'S'){testGPU_SLQ<algType>();}
 	else{printf("%s",errMsg);}
 	return 0;
 }

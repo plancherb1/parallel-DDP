@@ -2,7 +2,14 @@
 #define _DDP_CONFIG_
 
 /******************************************************************
- * User defined parameters
+ * Config.cuh
+ *
+ * User defined parameters for the MPC algorithms
+ *
+ * Also includes all helper files in order last due to dependencies
+ *
+ * Note: If you want to overide any defaults please set them in the
+ *       example file before including this file
  *******************************************************************/
 
 // load in utility functions and threading/cuda definitions
@@ -32,33 +39,38 @@
 	#define ALPHA_BASE 0.5
 	#define NUM_ALPHA 16
 	#define MAX_DEFECT_SIZE 1.0
-	#define RHO_INIT 1
+	#define RHO_INIT 1.0
 #elif PLANT == 4
 	#define NUM_POS 7
 	#define STATE_SIZE (2*NUM_POS)
 	#define CONTROL_SIZE 7
-	#define TOTAL_TIME 0.5
-	#define NUM_TIME_STEPS 64
+ 	#define EE_TYPE 1 // flange but no EE on it
+ 	#ifndef TOTAL_TIME
+		#define TOTAL_TIME 0.5
+ 	#endif
+ 	#ifndef NUM_TIME_STEPS
+		#define NUM_TIME_STEPS 64
+ 	#endif
 	#define ALPHA_BASE 0.5
 	#define NUM_ALPHA 16
 	#define MAX_DEFECT_SIZE 1.0
 	#define RHO_INIT 12.5
 	#define INTEGRATOR 1
-	#ifndef EE_COST
-		#define EE_COST 0 // 1 for end effector based cost / goal and 0 for joint based
-	#endif
-	#define USE_LIMITS_FLAG 0 // use joint vel torque limits (quad pen)
 #else
 	#error "Currently only supports Simple Pendulum[1], Inverted Pendulum[2], Quadrotor [3], or KukaArm[4].\n"
 #endif
 
 // optiomizer options
 #define DEBUG_SWITCH 0 // 1 for on 0 for off
+#ifndef USE_ALG_TRACE
+	#define USE_ALG_TRACE 1 // 1 for on 0 for off
+#endif
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
-#define FINITE_DIFF_EPSILON 0.0000001
+#define FINITE_DIFF_EPSILON 0.00001
 // define if we are working in doubles or floats
 // typedef double algType;
 typedef float algType;
+// typedef half algType; // code needs reworking before this will work
 
 // algorithmic options
 #ifndef INTEGRATOR
@@ -124,6 +136,7 @@ typedef float algType;
 #define get_time_ms(time) (get_time_us(time) / 1000.0)
 #define time_delta_us(start,end) (static_cast<double>(get_time_us(end) - get_time_us(start)))
 #define time_delta_ms(start,end) (time_delta_us(start,end)/1000.0)
+#define time_delta_s(start,end) (time_delta_ms(start,end)/1000.0)
 
 // GPU Stream Options
 #define NUM_STREAMS (max(18,4+NUM_ALPHA))
@@ -150,53 +163,120 @@ typedef float algType;
 #ifndef EE_COST
 	#define EE_COST 0 // 1 for end effector based cost / goal and 0 for joint based
 #endif
+#ifndef USE_EE_VEL_COST
+	#define USE_EE_VEL_COST 0 // turn on or off the eeVel code path
+#endif
 #ifndef USE_LIMITS_FLAG
 	#define USE_LIMITS_FLAG 0 // use joint vel torque limits (quad pen)
 #endif
+#ifndef USE_SMOOTH_ABS
+	#define USE_SMOOTH_ABS 0 // use smooth abs cost (only applicable to EE cost)
+#endif
+#ifndef CONSTRAINTS_ON
+	#define CONSTRAINTS_ON 0 // AL style constraints
+#endif
+
+// dynamics URDF options (only applies to Kuka)
+#ifndef USE_WAFR_URDF
+	#define USE_WAFR_URDF 0
+#endif
+#ifndef MPC_MODE
+	#define MPC_MODE 0 // sets gravity to 0
+#endif
+
+// MPC options
+#ifndef USE_MAX_SOLVER_TIME
+	#define USE_MAX_SOLVER_TIME 1
+#endif
 
 // Matrix Dimms
-	#define DIM_x_r STATE_SIZE
-	#define DIM_x_c 1
-	#define DIM_u_r CONTROL_SIZE
-	#define DIM_u_c 1
-	#define DIM_d_r STATE_SIZE
-	#define DIM_d_c 1
-	#define DIM_AB_r STATE_SIZE
-	#define DIM_AB_c (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_ABT_r (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_ABT_c STATE_SIZE
-	#define DIM_A_r STATE_SIZE
-	#define DIM_A_c STATE_SIZE
-	#define DIM_H_r (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_H_c (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_Hxx_r STATE_SIZE
-	#define DIM_Hxx_c STATE_SIZE
-	#define DIM_Hux_r CONTROL_SIZE
-	#define DIM_Hux_c STATE_SIZE
-	#define DIM_Hxu_r STATE_SIZE
-	#define DIM_Hxu_c CONTROL_SIZE
-	#define DIM_Huu_r CONTROL_SIZE
-	#define DIM_Huu_c CONTROL_SIZE
-	#define DIM_g_r (STATE_SIZE + CONTROL_SIZE)
-	#define DIM_g_c 1
-	#define DIM_gx_r STATE_SIZE
-	#define DIM_gx_c 1
-	#define DIM_gu_r CONTROL_SIZE
-	#define DIM_gu_c 1
-	#define DIM_P_r STATE_SIZE
-	#define DIM_P_c STATE_SIZE
-	#define DIM_p_r STATE_SIZE
-	#define DIM_p_c 1
-	#define DIM_K_r CONTROL_SIZE
-	#define DIM_K_c STATE_SIZE
-	#define DIM_KT_r DIM_K_c
-	#define DIM_KT_c DIM_K_r
-	#define DIM_du_r CONTROL_SIZE
-	#define DIM_du_c 1
-	#define OFFSET_HXU (DIM_x_r*(DIM_x_r+DIM_u_r))
-	#define OFFSET_HUU (OFFSET_HXU + DIM_x_r)
-	#define OFFSET_HUX_GU DIM_x_r
-	#define OFFSET_B (DIM_AB_r*DIM_x_r)
+#define DIM_x_r STATE_SIZE
+#define DIM_x_c 1
+#define DIM_u_r CONTROL_SIZE
+#define DIM_u_c 1
+#define DIM_d_r STATE_SIZE
+#define DIM_d_c 1
+#define DIM_AB_r STATE_SIZE
+#define DIM_AB_c (STATE_SIZE + CONTROL_SIZE)
+#define DIM_ABT_r (STATE_SIZE + CONTROL_SIZE)
+#define DIM_ABT_c STATE_SIZE
+#define DIM_A_r STATE_SIZE
+#define DIM_A_c STATE_SIZE
+#define DIM_H_r (STATE_SIZE + CONTROL_SIZE)
+#define DIM_H_c (STATE_SIZE + CONTROL_SIZE)
+#define DIM_Hxx_r STATE_SIZE
+#define DIM_Hxx_c STATE_SIZE
+#define DIM_Hux_r CONTROL_SIZE
+#define DIM_Hux_c STATE_SIZE
+#define DIM_Hxu_r STATE_SIZE
+#define DIM_Hxu_c CONTROL_SIZE
+#define DIM_Huu_r CONTROL_SIZE
+#define DIM_Huu_c CONTROL_SIZE
+#define DIM_g_r (STATE_SIZE + CONTROL_SIZE)
+#define DIM_g_c 1
+#define DIM_gx_r STATE_SIZE
+#define DIM_gx_c 1
+#define DIM_gu_r CONTROL_SIZE
+#define DIM_gu_c 1
+#define DIM_P_r STATE_SIZE
+#define DIM_P_c STATE_SIZE
+#define DIM_p_r STATE_SIZE
+#define DIM_p_c 1
+#define DIM_K_r CONTROL_SIZE
+#define DIM_K_c STATE_SIZE
+#define DIM_KT_r DIM_K_c
+#define DIM_KT_c DIM_K_r
+#define DIM_du_r CONTROL_SIZE
+#define DIM_du_c 1
+#define OFFSET_HXU (DIM_x_r*(DIM_x_r+DIM_u_r))
+#define OFFSET_HUU (OFFSET_HXU + DIM_x_r)
+#define OFFSET_HUX_GU DIM_x_r
+#define OFFSET_B (DIM_AB_r*DIM_x_r)
 // Matrix Dimms
+
+// include the correct set of cost and dynamics functions
+#if PLANT == 1
+	#include "plants/cost_pend.cuh"
+	#include "plants/dynamics_pend.cuh"
+#elif PLANT == 2
+	#include "plants/cost_cart.cuh"
+ 	#include "plants/dynamics_cart.cuh"
+#elif PLANT == 3
+	#include "plants/cost_quad.cuh"
+ 	#include "plants/dynamics_quad.cuh"
+#elif PLANT == 4
+	#include "plants/cost_arm.cuh"
+ 	#include "plants/dynamics_arm.cuh"
+#endif
+
+// include integrators for those dynamics
+#include "utils/integrators.cuh"
+
+// 1: Backward Pass Helpers
+#include "DDPHelpers/bpHelpers.cuh"
+
+// 2: Forward Pass Helpers
+#include "DDPHelpers/fpHelpers.cuh"
+
+// 3: Next Iteration Setup and Init Helpers
+#include "DDPHelpers/nisInitHelpers.cuh"
+
+// 4: DDP Algorithm Wrappers
+#if !defined(MPC_MODE) || MPC_MODE == 0
+	#include "DDPHelpers/DDPWrappers.cuh"
+#endif
+
+// 5: MPC Helpers and Wrappers
+#if defined(MPC_MODE) && MPC_MODE == 1
+	#include "DDPHelpers/MPCHelpers.cuh"       
+#endif
+
+// 6: LCM Helpers and Wrappers
+#if defined(USE_LCM) && USE_LCM == 1
+	#include "DDPHelpers/LCMHelpers.cuh"
+#endif
+
+// finally include the example helpers
+#include "utils/exampleUtils.cuh"
 
 #endif

@@ -13,14 +13,15 @@
  ****************************************************************/
 // x = [q;qd] so xd = [dq,qdd] thus dxd_dx,u = [0_{numpos},I_{numpos},0_{numpos};dqdd]
 #define dqdd2dxd(dqdd,r,c) (r < NUM_POS ? (r + NUM_POS == c ? 1.0 : 0.0) : dqdd[(c-1)*NUM_POS + r])
+#define dqddk2dxd(dqddk,r,c) (r < NUM_POS ? (r + NUM_POS == c ? 1.0 : 0.0) : dqddk)
 
 #if INTEGRATOR == 1 // Euler
 	template <typename T>
 	__host__ __device__ __forceinline__
-	void _integrator(T *s_xkp1, T *s_x, T *s_u, T *s_qdd, T *d_I, T *d_Tbody, T dt, T *s_eePos = nullptr){
+	void _integrator(T *s_xkp1, T *s_x, T *s_u, T *s_qdd, T *d_I, T *d_Tbody, T dt, T *s_eePos = nullptr, T *s_eeVel = nullptr){
 		int start, delta; singleLoopVals(&start,&delta);
 		// compute the new state by first computing dynamics
-		dynamics<T>(s_qdd,s_x,s_u,d_I,d_Tbody,s_eePos);
+		dynamics<T>(s_qdd,s_x,s_u,d_I,d_Tbody,s_eePos,1,s_eeVel);
 		hd__syncthreads();
 		// then use the euler rule
 		for (int ind = start; ind < NUM_POS; ind += delta){
@@ -49,7 +50,7 @@
 #elif INTEGRATOR == 2 // midpoint
 		template <typename T>
 	__host__ __device__ __forceinline__
-	void _integrator(T *s_xkp1, T *s_x, T *s_u, T *s_qdd, T *d_I, T *d_Tbody, T dt, T *s_eePos = nullptr){
+	void _integrator(T *s_xkp1, T *s_x, T *s_u, T *s_qdd, T *d_I, T *d_Tbody, T dt, T *s_eePos = nullptr, T *s_eeVel = nullptr){
 		#ifdef __CUDA_ARCH__
 			__shared__ T s_xm[STATE_SIZE];
 		#else
@@ -57,7 +58,7 @@
 		#endif
 		int start, delta; singleLoopVals(&start,&delta);
 		// first compute dynamics at the initial point
-		dynamics<T>(s_qdd,s_x,s_u,d_I,d_Tbody,s_eePos);
+		dynamics<T>(s_qdd,s_x,s_u,d_I,d_Tbody,s_eePos,1,s_eeVel);
 		hd__syncthreads();
 		// then compute middle point and compute dynamics there
 		for (int ind=start; ind<NUM_POS; ind+=delta){
@@ -65,7 +66,7 @@
 			s_xm[ind+NUM_POS] = s_x[ind+NUM_POS] + 0.5*dt*s_qdd[ind];
 		}
 		hd__syncthreads();
-		dynamics<T>(s_qdd,s_xm,s_u,d_I,d_Tbody,s_eePos);
+		dynamics<T>(s_qdd,s_xm,s_u,d_I,d_Tbody);
 		hd__syncthreads();
 		// then use the final integration rule
 		for (int ind = start; ind < NUM_POS; ind += delta){
@@ -116,7 +117,7 @@
 #elif INTEGRATOR == 3 // RK3
 	template <typename T>
 	__host__ __device__ __forceinline__
-	void _integrator(T *s_xkp1, T *s_x, T *s_u, T *s_qdd1, T *d_I, T *d_Tbody, T dt, T *s_eePos = nullptr){
+	void _integrator(T *s_xkp1, T *s_x, T *s_u, T *s_qdd1, T *d_I, T *d_Tbody, T dt, T *s_eePos = nullptr, T *s_eeVel = nullptr){
 		#ifdef __CUDA_ARCH__
 			__shared__ T s_x2[STATE_SIZE];    __shared__ T s_x3[STATE_SIZE];
 			__shared__ T s_qdd2[NUM_POS];     __shared__ T s_qdd3[NUM_POS];
@@ -125,7 +126,7 @@
 		#endif
 		int start, delta; singleLoopVals(&start,&delta);
 		// first compute dynamics at the initial point
-		dynamics<T>(s_qdd1,s_x,s_u,d_I,d_Tbody,s_eePos);
+		dynamics<T>(s_qdd1,s_x,s_u,d_I,d_Tbody,s_eePos,1,s_eeVel);
 		hd__syncthreads();
 		// then compute middle point and compute dynamics there
 		for (int ind=start; ind<NUM_POS; ind+=delta){
@@ -133,7 +134,7 @@
 			s_x2[ind+NUM_POS] = s_x[ind+NUM_POS] + 0.5*dt*s_qdd1[ind];
 		}
 		hd__syncthreads();
-		dynamics<T>(s_qdd2,s_x2,s_u,d_I,d_Tbody,s_eePos);
+		dynamics<T>(s_qdd2,s_x2,s_u,d_I,d_Tbody);
 		hd__syncthreads();
 		// then compute third point and compute dynamics there
 		for (int ind=start; ind<NUM_POS; ind+=delta){
@@ -141,7 +142,7 @@
 			s_x3[ind+NUM_POS] = s_x[ind+NUM_POS] + dt*(2*s_qdd2[ind] 	   - s_qdd1[ind]);
 		}
 		hd__syncthreads();
-		dynamics<T>(s_qdd3,s_x3,s_u,d_I,d_Tbody,s_eePos);
+		dynamics<T>(s_qdd3,s_x3,s_u,d_I,d_Tbody);
 		hd__syncthreads();
 		// then use the final integration rule
 		for (int ind = start; ind < NUM_POS; ind += delta){
