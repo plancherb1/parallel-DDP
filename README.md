@@ -39,4 +39,4 @@ Then the scripts in the utils folder should launch the drake visualizer and simu
 * BFGS iters may improve / stabilize the EEPos/Vel cost and should be explored
 * Square root implementation of DDP should add numerical stability and should be explored
 * Want to develop URDF > transforms and inertias tool for Arm
-* Would be nice to add a runtime and not compile time switch for Hardware vs. Sim mode and for level of parallelism (M)
+* Would be nice to add a runtime and not compile time switch for Hardware vs. Sim mode and for level of parallelism
