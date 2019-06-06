@@ -1,6 +1,7 @@
 /***
 nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -O3
 ***/
+#error "Example is not fully implemented yet!"
 #define USE_WAFR_URDF 0
 #define EE_COST 1
 #define USE_SMOOTH_ABS 0

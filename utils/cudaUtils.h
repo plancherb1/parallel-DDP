@@ -43,14 +43,14 @@
 #include <assert.h>
 #include <cuda_fp16.h>
 /*** -1 Support for non-float/double types ***/
- 	__host__ __device__ __forceinline__
-	half sin(half val){return __float2half(sin(__half2float(val)));}
-	__host__ __device__ __forceinline__
-	half cos(half val){return __float2half(cos(__half2float(val)));}
-	__host__ __device__ __forceinline__
-	half abs(half val){return __float2half(abs(__half2float(val)));}
-	__host__ __device__ __forceinline__
-	half max(half val1, half val2){return __float2half(max(__half2float(val1),__half2float(val2)));}
+	// __host__ __device__ __forceinline__
+	// half sin(half val){return __float2half(sin(__half2float(val)));}
+	// __host__ __device__ __forceinline__
+	// half cos(half val){return __float2half(cos(__half2float(val)));}
+	// __host__ __device__ __forceinline__
+	// half abs(half val){return __float2half(abs(__half2float(val)));}
+	// __host__ __device__ __forceinline__
+	// half max(half val1, half val2){return __float2half(max(__half2float(val1),__half2float(val2)));}
 /*** -1 Support for non-float/double types ***/
 
 /*** 0 Host Device loop bounds and sync code 0 ***/

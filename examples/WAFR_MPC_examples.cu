@@ -218,7 +218,7 @@ void testMPC_lockstep(char hardware, int doFig8, int debugMode = 0){
 			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);}
 			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);}
 			gettimeofday(&end,NULL);
-			double elapsedTime_us = TIME_STEP*1000000;// time_delta_us(start,end); // TIME_STEP*1000000;//
+			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
 							elapsedTime_us,totalTime_us,eNormLim,vNormLim,dimms->ld_x,doFig8)){break;}
 		}
