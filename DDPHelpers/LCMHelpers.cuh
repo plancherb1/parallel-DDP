@@ -101,13 +101,13 @@ class LCM_TrajRunner {
         int ld_x, ld_u, ld_KT; // dimms
         int64_t t0; // t0 for the current traj
         lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
-        int ready;
+        bool ready; bool PDMode;
         double *q_prev, *u_prev; // previous commands for smoothing
         double alpha; // smoothing parameter (1 = all old, 0 = all new)
 
         // init local vars to match size of passed in vars and get LCM
-        LCM_TrajRunner(int _ld_x, int _ld_u, int _ld_KT, T a = 0.5) : ld_x(_ld_x), ld_u(_ld_u), ld_KT(_ld_KT), alpha(a) {
-            x = (T *)malloc(ld_u*NUM_TIME_STEPS*sizeof(T));                 u = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));
+        LCM_TrajRunner(int _ld_x, int _ld_u, int _ld_KT, T a = 0.5, bool PD = 0) : ld_x(_ld_x), ld_u(_ld_u), ld_KT(_ld_KT), alpha(a), PDMode(PD) {
+            x = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));                 u = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T));
             KT = (T *)malloc(ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));      ready = 0;
             q_prev = (double *)calloc(NUM_POS,sizeof(double));              u_prev = (double *)calloc(CONTROL_SIZE,sizeof(double));
             if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
@@ -142,12 +142,96 @@ class LCM_TrajRunner {
                                              x, u, KT, static_cast<double>(t0), 
                                              &(msg->joint_position_measured[0]), &(msg->joint_velocity_estimated[0]),  
                                              static_cast<double>(msg->utime), ld_x, ld_u, ld_KT,
-                                             q_prev, u_prev, alpha);            
+                                             q_prev, u_prev, alpha);
+            // if PD Demo Mode then output pos that is far in the future
+            if (PDMode){for(int i = 0; i < NUM_POS; i++){dataOut.joint_position[i] = (x[(TRAJ_RUNNER_TIME_STEPS-1)*ld_x + i] + msg->joint_position_measured[i])/2;}}
             // then publish
             if (!err){lcm_ptr.publish(ARM_COMMAND_CHANNEL,&dataOut);}
             else{printf("[!]CRITICAL ERROR: Asked to execute beyond bounds of current traj.\n");}
         }
 };
+
+template <typename T>
+__host__
+void runTrajRunner(matDimms *dimms, double alpha = 0.5, bool PDDemoMode = 0){
+    // init LCM and allocate a traj runner
+    lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner main loop\n");}
+    LCM_TrajRunner<T> tr = LCM_TrajRunner<T>(dimms->ld_x, dimms->ld_u, dimms->ld_KT, alpha, PDDemoMode);
+    // subscribe to everything
+    lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_TrajRunner<T>::statusCallback, &tr);
+    lcm::Subscription *trajSub;
+    if (std::is_same<T, float>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_f, &tr);}
+    else if (std::is_same<T, double>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_d, &tr);}
+    else{printf("Traj runner only defined for floats and doubles\n"); return;}
+    // only execute latest message (no lag)
+    statusSub->setQueueCapacity(1); trajSub->setQueueCapacity(1);
+    // handle forever
+    while(0 == lcm_ptr.handle());
+    // while(1){lcm_ptr.handle();usleep(1000);}
+}
+
+// // trajRunnerPD spits out final state as PD goal
+// template <typename T>
+// class LCM_TrajRunnerPD {
+//     public:
+//         T *x; int ld_x; // current trajectories
+//         lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
+//         int ready; int x_size;
+
+//         // init local vars to match size of passed in vars and get LCM
+//         LCM_TrajRunnerPD(int _ld_x) : ld_x(_ld_x) {
+//             x = (T *)malloc(ld_x*NUM_TIME_STEPS*sizeof(T)); x_size = ld_x; 
+//             if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner\n");}
+//         } 
+//         // free and delete
+//         ~LCM_TrajRunnerPD(){free(x);}
+        
+//         // lcm new traj callback function
+//         void newTrajCallback_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){
+//             ready++;  memcpy(x, &(msg->x[0]), msg->x_size);   x_size = msg->x_size;
+//         }
+//         void newTrajCallback_d(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_d *msg){
+//             ready++;  memcpy(x, &(msg->x[0]), msg->x_size);   x_size = msg->x_size;
+//         }
+
+//         // lcm STATUS callback function
+//         void statusCallback(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_iiwa_status *msg){ 
+//             if(ready < 10){return;}
+//             // construct output msg container and begin to load it with data
+//             #if HARDWARE_MODE
+//                 drake::lcmt_iiwa_command_hardware dataOut;
+//                 #pragma unroll
+//                 for(int i=0; i < 6; i++){dataOut.wrench[i] = 0.0;}
+//             #else
+//                 drake::lcmt_iiwa_command dataOut;   
+//                 dataOut.num_torques = static_cast<int32_t>(CONTROL_SIZE);
+//             #endif
+//             dataOut.num_joints = static_cast<int32_t>(NUM_POS);         dataOut.joint_position.resize(dataOut.num_joints);
+//             dataOut.utime = static_cast<int64_t>(msg->utime);           dataOut.joint_torque.resize(dataOut.num_joints);  // NUM_POS = CONTROL_SIZE for arm so this works
+//             // publish final traj state
+//             for(int i=0; i < NUM_POS; i++){dataOut.joint_position[i] = x[x_size - ld_x + i];}   for(int i=0; i < CONTROL_SIZE; i++){dataOut.joint_torque[i] = 0;}
+//             lcm_ptr.publish(ARM_COMMAND_CHANNEL,&dataOut);
+//             printf("POS IS %f %f %f %f %f %f %f\n",dataOut.joint_position[0],dataOut.joint_position[1],dataOut.joint_position[2],dataOut.joint_position[3],dataOut.joint_position[4],dataOut.joint_position[5],dataOut.joint_position[6]);
+//         }
+// };
+
+// template <typename T>
+// __host__
+// void runTrajRunnerPD(matDimms *dimms){
+//     // init LCM and allocate a traj runner
+//     lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner main loop\n");}
+//     LCM_TrajRunnerPD<T> tr = LCM_TrajRunnerPD<T>(dimms->ld_x);
+//     // subscribe to everything
+//     lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_TrajRunnerPD<T>::statusCallback, &tr);
+//     lcm::Subscription *trajSub;
+//     if (std::is_same<T, float>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunnerPD<T>::newTrajCallback_f, &tr);}
+//     else if (std::is_same<T, double>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunnerPD<T>::newTrajCallback_d, &tr);}
+//     else{printf("Traj runner PD only defined for floats and doubles\n"); return;}
+//     // only execute latest message (no lag)
+//     statusSub->setQueueCapacity(1); trajSub->setQueueCapacity(1);
+//     // handle forever
+//     while(0 == lcm_ptr.handle());
+// }
 
 // template <typename T>
 // class LCM_moveToState {
@@ -201,25 +285,6 @@ class LCM_TrajRunner {
 //             lcm_ptr.publish(ARM_COMMAND_CHANNEL,&dataOut);
 //         }
 // }
-
-template <typename T>
-__host__
-void runTrajRunner(matDimms *dimms, double alpha = 0.5){
-    // init LCM and allocate a traj runner
-    lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to Init in Traj Runner main loop\n");}
-    LCM_TrajRunner<T> tr = LCM_TrajRunner<T>(dimms->ld_x, dimms->ld_u, dimms->ld_KT, alpha);
-    // subscribe to everything
-    lcm::Subscription *statusSub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_TrajRunner<T>::statusCallback, &tr);
-    lcm::Subscription *trajSub;
-    if (std::is_same<T, float>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_f, &tr);}
-    else if (std::is_same<T, double>::value){trajSub = lcm_ptr.subscribe(ARM_TRAJ_CHANNEL, &LCM_TrajRunner<T>::newTrajCallback_d, &tr);}
-    else{printf("Traj runner only defined for floats and doubles\n"); return;}
-    // only execute latest message (no lag)
-    statusSub->setQueueCapacity(1); trajSub->setQueueCapacity(1);
-    // handle forever
-    while(0 == lcm_ptr.handle());
-    // while(1){lcm_ptr.handle();usleep(1000);}
-}
 
 template <typename T>
 class LCM_MPCLoop_Handler {
