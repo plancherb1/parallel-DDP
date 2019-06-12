@@ -98,7 +98,7 @@ class LCM_Fig8Goal_Handler {
     	lcm::LCM lcm_ptr; // ptr to LCM object for publish ability
     	struct timeval start, end; int timeCount; double timeTotal;
 
-    	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim, int iL, int tL) : 
+    	LCM_Fig8Goal_Handler(double tTime, double eLim, double vLim, int iL = MAX_ITER, int tL = MAX_SOLVER_TIME) : 
     		totalTime(tTime), eNormLim(eLim), vNormLim(vLim), iterLimit(iL), timeLimit(tL) {
     		zeroTime = 0; inFig8 = 0; costSent = 0;	totalError = 0;	numIters = 0; currRep = 0;
     		if(!lcm_ptr.good()){printf("LCM Failed to Init in Goal Handler\n");}
@@ -157,8 +157,8 @@ class LCM_Fig8Goal_Handler {
 			if(inFig8){
 				// then load in goal pos and zero out vel, orientation, angularVelocity (for now) -- note orientation is size 4 (quat)
 				kuka::lcmt_target_twist dataOut;               dataOut.utime = msg->utime;
-				for (int i = 0; i < 3; i++){dataOut.position[i] = goal[i];	dataOut.velocity[i] = 0;	
-											dataOut.orientation[i] = 0;		dataOut.angular_velocity[i] = 0;}
+				for (int i = 0; i < 3; i++){dataOut.position[i] = static_cast<float>(goal[i]);	dataOut.velocity[i] = 0;	
+											dataOut.orientation[i] = 0;							dataOut.angular_velocity[i] = 0;}
 				dataOut.orientation[3] = 0;
 				// and publish it to goal channel
 			    lcm_ptr.publish(ARM_GOAL_CHANNEL,&dataOut);
@@ -177,15 +177,15 @@ class LCM_Fig8Goal_Handler {
 				// else if close but not there yet update the cost func to care more about moving to goals
 				else if (!costSent && eNorm < 2.5*eNormLim && vNorm < 2.5*vNormLim){
 					kuka::lcmt_cost_params dataOut;		dataOut.utime = msg->utime;
-					dataOut.q_ee1 = _Q_EE1_fig8;		dataOut.q_ee2 = _Q_EE2_fig8;
-					dataOut.qf_ee1 = _QF_EE1_fig8;		dataOut.qf_ee2 = _QF_EE2_fig8;
-					dataOut.q_eev1 = _Q_EEV1_fig8;		dataOut.q_eev2 = _Q_EEV2_fig8;
-					dataOut.qf_eev1 = _QF_EEV1_fig8;	dataOut.qf_eev2 = _QF_EEV2_fig8;
-					dataOut.q_xdee = _Q_xdEE_fig8;		dataOut.qf_xdee = _QF_xdEE_fig8;
-					dataOut.q_xee = _Q_xEE_fig8;		dataOut.qf_xee = _QF_xEE_fig8;
-					dataOut.r_ee = _R_EE_fig8;			dataOut.r = _R;
-					dataOut.q1 = _Q1; 					dataOut.q2 = _Q2;
-					dataOut.qf1 = _QF1; 				dataOut.qf2 = _QF2;
+					dataOut.q_ee1   = static_cast<float>(_Q_EE1_fig8);		dataOut.q_ee2   = static_cast<float>(_Q_EE2_fig8);
+					dataOut.qf_ee1  = static_cast<float>(_QF_EE1_fig8);		dataOut.qf_ee2  = static_cast<float>(_QF_EE2_fig8);
+					dataOut.q_eev1  = static_cast<float>(_Q_EEV1_fig8);		dataOut.q_eev2  = static_cast<float>(_Q_EEV2_fig8);
+					dataOut.qf_eev1 = static_cast<float>(_QF_EEV1_fig8);	dataOut.qf_eev2 = static_cast<float>(_QF_EEV2_fig8);
+					dataOut.q_xdee  = static_cast<float>(_Q_xdEE_fig8);		dataOut.qf_xdee = static_cast<float>(_QF_xdEE_fig8);
+					dataOut.q_xee   = static_cast<float>(_Q_xEE_fig8);		dataOut.qf_xee  = static_cast<float>(_QF_xEE_fig8);
+					dataOut.r_ee    = static_cast<float>(_R_EE_fig8);		dataOut.r       = static_cast<float>(_R);
+					dataOut.q1      = static_cast<float>(_Q1); 				dataOut.q2      = static_cast<float>(_Q2);
+					dataOut.qf1     = static_cast<float>(_QF1); 			dataOut.qf2     = static_cast<float>(_QF2);
 					lcm_ptr.publish(COST_PARAMS_CHANNEL,&dataOut);
 					costSent = 1;
 				}
@@ -207,7 +207,7 @@ void runFig8GoalLCM(LCM_Fig8Goal_Handler<T> *handler){
 
 template <typename T>
 __host__
-int runMPC_LCM(char mode, T *xInit){
+int runMPC_LCM(char mode, T *xInit, bool PDDemoMode = 0){
 	// launch the simulator
     // printf("Make sure the drake kuka simulator or kuka hardware is launched!!!\n");
 	// get the max iters and time per solve
@@ -252,7 +252,7 @@ int runMPC_LCM(char mode, T *xInit){
     // launch the goal monitor
     std::thread goalThread = std::thread(&runFig8GoalLCM<T>, goalhandler);
     // launch the trajRunner
-    std::thread trajThread = std::thread(&runTrajRunner<T>, dimms, TRAJ_RUNNER_ALPHA);
+    std::thread trajThread = std::thread(&runTrajRunner<T>, dimms, TRAJ_RUNNER_ALPHA, PDDemoMode);
     // launch the status filter if needed
     #if USE_VELOCITY_FILTER
     	std::thread filterThread = std::thread(&run_IIWA_STATUS_filter<T>);
@@ -277,6 +277,8 @@ int main(int argc, char *argv[])
 	char mode = '?'; if (argc > 1){mode = argv[1][0];}
 	// run the MPC loop
 	if (mode == 'C' || mode == 'G'){return runMPC_LCM<algType>(mode,xInit);}
+	// run the PD control loop to demo motion
+	else if(mode == 'Z'){return runMPC_LCM<algType>('G',xInit,1);}
 	// run aditional example options (printers, simulator, etc.)
 	else{return runOtherOptions<algType>(mode,xInit,argv);}
 }
