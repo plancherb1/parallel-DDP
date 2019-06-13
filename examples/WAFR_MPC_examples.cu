@@ -155,6 +155,7 @@ int fig8Simulate(T *xActual, T *xGoal, trajVars<T> *tvars, T *error, double *goa
 		T eePos[NUM_POS];   compute_eePos_scratch<T>(&(xActual[0]), &eePos[0]);
 		T eNorm = 0; 		T vNorm = 0; 		evNorm<T>(xActual, xGoal, &eNorm, &vNorm);
 		// debug print eePos if needed
+		// if (debugMode == 1){printf("[t[%f],EE[%f,%f,%f],Goal[%f,%f,%f],E[%f],avgE[%f],V[%f]]\n",*goalTime,eePos[0],eePos[1],eePos[2],xGoal[0],xGoal[1],xGoal[2],eNorm,(*error)/(*counter),vNorm);}
 		if (debugMode == 1){printf("[[%f,%f,%f],[%f,%f,%f],%f,%f,%f],\n",eePos[0],eePos[1],eePos[2],xGoal[0],xGoal[1],xGoal[2],eNorm,(*error)/(*counter),vNorm);}
 		// update goals if doing figure 8
 		if (doFig8){
@@ -189,14 +190,14 @@ void testMPC_lockstep(char hardware, int doFig8, int debugMode = 0){
 		GPUVars<T> *algvars = new GPUVars<T>; allocateMemory_GPU_MPC<T>(algvars, dimms, tvars);
 		// load initial traj and goal and run to full convergence to warm start
 		loadTraj<T>(algvars, tvars, dimms); loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
-		runiLQR_MPC_GPU<T>(tvars,algvars,dimms,atrace,cst,0,0,1);
+		runiLQR_MPC_GPU<T>(tvars,algvars,dimms,atrace,cst,0,0,1);	tvars->t0_plant = 0;	double elapsedTime_us = 0;
 		// then start a loop of run a couple steps simulate for X steps and repeat
 		while(1){
 			counter++;
 			gettimeofday(&start,NULL);
-			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);
+			runiLQR_MPC_GPU<T>(tvars,algvars,dimms,atrace,cst,0,static_cast<int64_t>(elapsedTime_us),0,itersToDo,timeLimit);
 			gettimeofday(&end,NULL);
-			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
+			elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
 							elapsedTime_us,totalTime_us,eNormLim,vNormLim,dimms->ld_x,doFig8)){break;}
 		}
@@ -210,17 +211,22 @@ void testMPC_lockstep(char hardware, int doFig8, int debugMode = 0){
 		// load initial traj and goal and run to full convergence to warm start
 		loadTraj<T>(algvars, tvars, dimms, nullptr, nullptr, parallelLineSearch); loadFig8Goal<T>(algvars->xGoal,goalTime,totalTime_us);
 		if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,atrace,cst,0,0,1);}
-		else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,atrace,cst,0,0,1);}
+		else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,atrace,cst,0,0,1);}	tvars->t0_plant = 0; double elapsedTime_us = 0;
 		// then start a loop of run a couple steps simulate for X steps and repeat
 		while(1){
 			counter++;
 			gettimeofday(&start,NULL);
-			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);}
-			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,atrace,cst,0,0,0,itersToDo,timeLimit);}
+			if (parallelLineSearch){runiLQR_MPC_CPU2<T>(tvars,algvars,dimms,atrace,cst,0,static_cast<int64_t>(elapsedTime_us),0,itersToDo,timeLimit);}
+			else{runiLQR_MPC_CPU<T>(tvars,algvars,dimms,atrace,cst,0,static_cast<int64_t>(elapsedTime_us),0,itersToDo,timeLimit);}
 			gettimeofday(&end,NULL);
-			double elapsedTime_us = time_delta_us(start,end); // TIME_STEP*1000000;//
+			elapsedTime_us = TIME_STEP*1000000*1.01;//time_delta_us(start,end); // TIME_STEP*1000000;//
 			if(fig8Simulate(algvars->xActual,algvars->xGoal,tvars,&error,&goalTime,&timePrint,&counter,&initial_convergence_flag,
 							elapsedTime_us,totalTime_us,eNormLim,vNormLim,dimms->ld_x,doFig8)){break;}
+			// if (parallelLineSearch){printf("LSS[%d] simulating to: %f %f %f %f %f %f %f vs %f %f %f %f %f %f %f\n",
+			// 	tvars->last_successful_solve,algvars->xActual[0],algvars->xActual[1],algvars->xActual[2],
+			// 	algvars->xActual[3],algvars->xActual[4],algvars->xActual[5],algvars->xActual[6],
+			// 	tvars->x[STATE_SIZE+0],tvars->x[STATE_SIZE+1],tvars->x[STATE_SIZE+2],tvars->x[STATE_SIZE+3],
+			// 	tvars->x[STATE_SIZE+4],tvars->x[STATE_SIZE+5],tvars->x[STATE_SIZE+6]);}
 		}
 		if (parallelLineSearch){freeMemory_CPU_MPC2<T>(algvars);} else{freeMemory_CPU_MPC<T>(algvars);} delete algvars;
 	}

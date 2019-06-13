@@ -537,7 +537,10 @@
             // then use this control to compute the new state
             T *s_xkp1 = s_dx; // re-use this shared mem as we are done with it for this loop
             _integrator<T>(s_xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,nullptr);
-            hd__syncthreads();
+            // printf("xk[%d]: %f %f %f %f %f %f %f uk: %f %f %f %f %f %f %f ---> xkp1[%d]: %f %f %f %f %f %f %f\n",k,xk[0],
+            //             xk[1],xk[2],xk[3],xk[4],xk[5],xk[6],uk[0],uk[1],uk[2],uk[3],uk[4],uk[5],uk[6],
+            //             k+1,s_xkp1[0],s_xkp1[1],s_xkp1[2],s_xkp1[3],s_xkp1[4],s_xkp1[5],s_xkp1[6]);
+            // hd__syncthreads();
             // then write to global memory unless "final" state where we just use for defect on boundary
             #pragma unroll
             for (int ind = start; ind < STATE_SIZE; ind += delta){
@@ -562,7 +565,7 @@
     // for shiftAmount to end of traj
     template <typename T>
     __host__ __device__ __forceinline__
-    void rolloutMPC2(T *x0, T *u0, T *KT0, T *xprev, T *s_dx, T *s_qdd, int shiftAmount, T dt, 
+    void rolloutMPC2(T *x0, T *u0, T *KT0, T *xprev, T *s_dx, T *s_qdd, T dt, int shiftAmount, 
                      int ld_x, int ld_u, int ld_KT,T *d_I = nullptr, T *d_Tbody = nullptr){
         if (shiftAmount == 0){return;} // early exit if we don't have to do anything
          // now we rollout the N-shiftAmount
@@ -588,10 +591,10 @@
 
     template <typename T>
     __global__
-    void rolloutMPCKern2(T *x0, T *u0, T *KT0, T *xprev, int shiftAmount, T dt, 
+    void rolloutMPCKern2(T *x0, T *u0, T *KT0, T *xprev, T dt, int shiftAmount,
                         int ld_x, int ld_u, int ld_KT, T *d_I = nullptr, T *d_Tbody = nullptr){
         __shared__ T s_dx[STATE_SIZE];    __shared__ T s_qdd[NUM_POS];
-        rolloutMPC2<T>(x0,u0,KT0,xprev,s_dx,s_qdd,shiftAmount,dt,ld_x,ld_u,ld_KT,d_I,d_Tbody);
+        rolloutMPC2<T>(x0,u0,KT0,xprev,s_dx,s_qdd,dt,shiftAmount,ld_x,ld_u,ld_KT,d_I,d_Tbody);
     }
 
     template <typename T>
@@ -604,21 +607,23 @@
         // control will remain the same as will the states outside of the first block
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
         // note in <x/u/d>[*alphaIndex], P, p, KT are all of the ones from the last run
-        int goalSize;   if (!EE_COST){goalSize = ld_x;}   else{goalSize = 6;}
+        int goalSize;   if (!EE_COST){goalSize = ld_x;}   else{goalSize = 6;} clear_vars = last_successful_solve > SOLVES_TO_RESET || clear_vars;
         gpuErrchk(cudaMemcpyAsync(d_xGoal, xGoal, goalSize*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
         gpuErrchk(cudaMemcpyAsync(d_xTarget, xTarget, ld_x*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
         gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
-        shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[1]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
-        shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[2]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
-        if (last_successful_solve <= SOLVES_TO_RESET && !clear_vars){
-            shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
-            shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[4]>>>(d_KT,shiftAmount,ld_KT);
-            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[5]>>>(d_P,shiftAmount,ld_P);
-            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_p,shiftAmount,ld_p);
-            shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[7]>>>(d_Pp,shiftAmount,ld_P);
-            shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_pp,shiftAmount,ld_p);     
+        if(shiftAmount > 0){
+            shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[1]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
+            shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[2]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
+            if (!clear_vars){
+                shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
+                shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[4]>>>(d_KT,shiftAmount,ld_KT);
+                shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[5]>>>(d_P,shiftAmount,ld_P);
+                shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_p,shiftAmount,ld_p);
+                shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[7]>>>(d_Pp,shiftAmount,ld_P);
+                shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_pp,shiftAmount,ld_p);     
+            }
         }
-        else{
+        if(clear_vars){
             gpuErrchk(cudaMemsetAsync(h_d_u[*alphaIndex],0,ld_u*NUM_TIME_STEPS*sizeof(T),streams[3]));
             gpuErrchk(cudaMemsetAsync(d_KT,0,ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T),streams[4]));
             gpuErrchk(cudaMemsetAsync(d_P,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[5]));
@@ -632,15 +637,15 @@
         T *ABN = d_AB + ld_AB*DIM_AB_c*(NUM_TIME_STEPS-2);
         gpuErrchk(cudaMemsetAsync(ABN,0,ld_AB*DIM_AB_c*sizeof(T),streams[11]));
         // sync on the ones we need for the rollout
-        gpuErrchk(cudaStreamSynchronize(streams[0]));   gpuErrchk(cudaStreamSynchronize(streams[1]));
-        gpuErrchk(cudaStreamSynchronize(streams[2]));   gpuErrchk(cudaStreamSynchronize(streams[3]));
-        gpuErrchk(cudaStreamSynchronize(streams[4]));
+        gpuErrchk(cudaStreamSynchronize(streams[0]));
+        if(shiftAmount > 0){              gpuErrchk(cudaStreamSynchronize(streams[1]));     gpuErrchk(cudaStreamSynchronize(streams[2]));}
+        if(shiftAmount > 0 || clear_vars){gpuErrchk(cudaStreamSynchronize(streams[3]));     gpuErrchk(cudaStreamSynchronize(streams[4]));}
         // do the rollout
         #if FULL_ROLLOUT
             rolloutMPCKern<T,NUM_TIME_STEPS><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
         #else    
             rolloutMPCKern<T,N_F><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
-            if (M_F > 1){rolloutMPCKern2<T><<<1,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,d_xp,shiftAmount,dt,ld_x,ld_u,ld_KT,d_I,d_Tbody);}
+            if (M_F > 1){rolloutMPCKern2<T><<<1,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,d_xp,dt,shiftAmount,ld_x,ld_u,ld_KT,d_I,d_Tbody);}
         #endif
         // save the shifted into tvars in case all iters fail
         gpuErrchk(cudaMemcpyAsync(x_old, d_xp, ld_x*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
@@ -660,25 +665,30 @@
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
         // note in <x/u/d>, P, p, KT are all of the ones from the last run
         // as always clear the things we can clear and shiftcopy P,p
-        threads[0] = std::thread(&shiftAndCopy<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS>, std::ref(x), shiftAmount, ld_x, std::ref(xp));
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
-        threads[2] = std::thread(&shiftAndCopy<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS>, std::ref(d), shiftAmount, ld_d, nullptr);
-        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
-        if (last_successful_solve <= SOLVES_TO_RESET && !clear_vars){
-            threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c,NUM_TIME_STEPS-1>, std::ref(u), shiftAmount, ld_u, std::ref(up));
-            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
-            threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1>, std::ref(KT), shiftAmount, ld_KT, nullptr);
-            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}    
-            threads[4] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(P), shiftAmount, ld_P, nullptr);
-            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 4);}
-            threads[5] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(p), shiftAmount, ld_p, nullptr);
-            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 5);}
-            threads[6] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(Pp), shiftAmount, ld_P, nullptr);
-            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 6);}
-            threads[7] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(pp), shiftAmount, ld_p, nullptr);
-            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 7);}
+        clear_vars = last_successful_solve > SOLVES_TO_RESET || clear_vars;
+        if (shiftAmount > 0){
+            // printf("shifting\n");
+            threads[0] = std::thread(&shiftAndCopy<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS>, std::ref(x), shiftAmount, ld_x, std::ref(xp));
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
+            threads[2] = std::thread(&shiftAndCopy<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS>, std::ref(d), shiftAmount, ld_d, nullptr);
+            if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
+            if (!clear_vars){
+                threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c,NUM_TIME_STEPS-1>, std::ref(u), shiftAmount, ld_u, std::ref(up));
+                if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
+                threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1>, std::ref(KT), shiftAmount, ld_KT, nullptr);
+                if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}    
+                threads[4] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(P), shiftAmount, ld_P, nullptr);
+                if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 4);}
+                threads[5] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(p), shiftAmount, ld_p, nullptr);
+                if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 5);}
+                threads[6] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(Pp), shiftAmount, ld_P, nullptr);
+                if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 6);}
+                threads[7] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(pp), shiftAmount, ld_p, nullptr);
+                if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 7);}
+            }
         }
-        else{
+        if (clear_vars){
+            // printf("clearing\n");
             threads[1] = std::thread(memset, std::ref(u), 0, ld_u*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
             threads[3] = std::thread(memset, std::ref(KT), 0, ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
@@ -701,17 +711,28 @@
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 10);}
 
         // sync on x,u,d,KT and then rollout first block
-        threads[0].join();  threads[1].join();  threads[2].join();  threads[3].join();
+        if(shiftAmount > 0){threads[0].join();  threads[2].join();}
+        if(shiftAmount > 0 || clear_vars){threads[1].join(); threads[3].join();}
         T s_dx[STATE_SIZE];  T s_qdd[NUM_POS];
         #if FULL_ROLLOUT
-            threads[0] = std::thread(&rolloutMPC<T,NUM_TIME_STEPS>, x, u, KT, d, xp, xActual, s_dx, s_qdd, shiftAmount, dt, ld_x, ld_u, ld_d, ld_KT, I, Tbody);
+            // for (int k=0; k < NUM_TIME_STEPS; k++){
+            //     printf("X[%d][%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",k,x[k*ld_x+0],x[k*ld_x+1],x[k*ld_x+2],x[k*ld_x+3],x[k*ld_x+4],x[k*ld_x+5],x[k*ld_x+6]); 
+            // }
+            // for (int k=0; k < NUM_TIME_STEPS-1; k++){
+            //     printf("u[%d][%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",k,u[k*ld_u+0],u[k*ld_u+1],u[k*ld_u+2],u[k*ld_u+3],u[k*ld_u+4],u[k*ld_u+5],u[k*ld_u+6]);
+            // }
+            // printf("Xf[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",
+            //             x[ld_x*(NUM_TIME_STEPS-1)],x[ld_x*(NUM_TIME_STEPS-1)+1],x[ld_x*(NUM_TIME_STEPS-1)+2],
+            //             x[ld_x*(NUM_TIME_STEPS-1)+3],x[ld_x*(NUM_TIME_STEPS-1)+4],x[ld_x*(NUM_TIME_STEPS-1)+5],
+            //             x[ld_x*(NUM_TIME_STEPS-1)+6]);
+            threads[0] = std::thread(&rolloutMPC<T,NUM_TIME_STEPS>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, std::ref(I), std::ref(Tbody));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
         #else
             T s_dx2[STATE_SIZE];  T s_qdd2[NUM_POS];
-            threads[0] = std::thread(&rolloutMPC<T,N_F>, x, u, KT, d, xp, xActual, s_dx, s_qdd, shiftAmount, dt, ld_x, ld_u, ld_d, ld_KT, I, Tbody);
+            threads[0] = std::thread(&rolloutMPC<T,N_F>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, std::ref(I), std::ref(Tbody));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
             if (M_F > 1){
-                threads[1] = std::thread(&rolloutMPC2<T>, x, u, KT, xp, s_dx2, s_qdd2, shiftAmount, dt, ld_x, ld_u, ld_KT, I, Tbody);
+                threads[1] = std::thread(&rolloutMPC2<T>, std::ref(x), std::ref(u), std::ref(KT), std::ref(xp), std::ref(s_dx2), std::ref(s_qdd2), dt, shiftAmount, ld_x, ld_u, ld_KT, std::ref(I), std::ref(Tbody));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
             }
         #endif
@@ -724,7 +745,8 @@
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 11);}
         // join threads
         threads[0].join(); if(!FULL_ROLLOUT && M_F > 1){threads[1].join();} threads[2].join(); threads[3].join(); threads[11].join();
-        threads[4].join(); threads[5].join(); threads[6].join(); threads[7].join(); threads[8].join(); threads[9].join(); threads[10].join();
+        if(shiftAmount > 0 || clear_vars){threads[4].join(); threads[5].join(); threads[6].join(); threads[7].join();}
+        threads[8].join(); threads[9].join(); threads[10].join();
     }
 
     // store vars to CPU and compute total max defect if requested for debug / printing
@@ -771,6 +793,10 @@
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 0);}
                 (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->us[alphaIndex]), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 1);}
+                (cv->threads)[3] = std::thread(memcpy, std::ref(cv->x), std::ref(cv->xs[alphaIndex]), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+                if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 3);}
+                (cv->threads)[4] = std::thread(memcpy, std::ref(cv->u), std::ref(cv->us[alphaIndex]), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+                if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 4);}
             }
             (cv->threads)[2] = std::thread(memcpy, std::ref(tv->KT), std::ref(cv->KT), (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 2);}
@@ -784,7 +810,8 @@
             (cv->threads)[2] = std::thread(memcpy, std::ref(cv->KT), std::ref(cv->KT_old), (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 2);}
         }
-        (cv->threads)[0].join();    (cv->threads)[1].join();    (cv->threads)[2].join();    (tv->lock)->unlock();
+        (cv->threads)[0].join();    (cv->threads)[1].join();    (cv->threads)[2].join();    
+        if(tv->last_successful_solve == 1 && alphaIndex != -2){ (cv->threads)[3].join();    (cv->threads)[4].join();}     (tv->lock)->unlock();
     }
 
     template <typename T>
@@ -997,12 +1024,6 @@
         // EXIT Handling
             // on exit make sure everything finishes
             gpuErrchk(cudaDeviceSynchronize());
-            #if DEBUG_SWITCH
-                gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
-                printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                    iter,xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho,dJ,z,gv->d[*(gv->alphaIndex)]);
-            #endif
-
             // Bring back the final state and control (and save trace)
             #if USE_ALG_TRACE
                 gettimeofday(&start2,NULL);
@@ -1014,6 +1035,12 @@
                 gettimeofday(&end,NULL);
                 (data->initTime).back() += time_delta_ms(start2,end2);
                 (data->tTime).push_back(time_delta_ms(start,end));
+            #endif
+            #if DEBUG_SWITCH
+                if (*(gv->alphaIndex) == -1){*(gv->alphaIndex) = 0;}
+                gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
+                printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
+                    iter,xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho,dJ,z,gv->d[*(gv->alphaIndex)]);
             #endif
     }
         
@@ -1029,7 +1056,7 @@
             #if USE_ALG_TRACE
                 struct timeval start2, end2;    gettimeofday(&start2,NULL);
             #endif
-            T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
+            T prevJ, dJ, J, z;      T maxd = 0;     int iter = 1;
             T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
             int finalCostShift = use_cost_shift ? shiftAmount : 0;
@@ -1152,10 +1179,6 @@
         }
 
         // EXIT Handling
-            #if DEBUG_SWITCH
-                printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
-            #endif
             // Bring back the final state and control (and compute final d if needed)
             #if USE_ALG_TRACE
                 gettimeofday(&start2,NULL);
@@ -1167,6 +1190,10 @@
                 gettimeofday(&end,NULL);
                 (data->initTime).back() += time_delta_ms(start2,end2);
                 (data->tTime).push_back(time_delta_ms(start,end));
+            #endif
+            #if DEBUG_SWITCH
+                printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
+                            iter,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
             #endif
         // EXIT Handling
     }
@@ -1310,10 +1337,6 @@
         }
 
         // EXIT Handling
-            #if DEBUG_SWITCH
-                printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter,(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
-            #endif
             // Bring back the final state and control (and compute final d if needed)
             #if USE_ALG_TRACE
                 gettimeofday(&start2,NULL);
@@ -1325,6 +1348,11 @@
                 gettimeofday(&end,NULL);
                 (data->initTime).back() += time_delta_ms(start2,end2);
                 (data->tTime).push_back(time_delta_ms(start,end));
+            #endif
+            #if DEBUG_SWITCH
+                if (alphaIndex == -1){alphaIndex = 0;}
+                printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
+                            iter,(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
             #endif
         // EXIT Handling
     }
