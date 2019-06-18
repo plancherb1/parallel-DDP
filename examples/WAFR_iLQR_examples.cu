@@ -258,7 +258,7 @@ void testCPU(int serialAlphas){
                           &I, &Tbody);	
 	}
     else{
-    	allocateMemory_CPU2<T>(&xs, &xp, &xp2, &us, &up, &xGoal, &P, &Pp, &p, &pp, &AB, &H, &g, &KT, &du, &ds, &dp, &ApBK, &Bdu, 
+    	allocateMemory_CPU2<T>(&xs, &x, &xp, &xp2, &us, &u, &up, &xGoal, &P, &Pp, &p, &pp, &AB, &H, &g, &KT, &du, &ds, &d, &dp, &ApBK, &Bdu, 
    						       &JTs, &dJexp, &alpha, &err, &ld_x, &ld_u, &ld_P, &ld_p, &ld_AB, &ld_H, &ld_g, &ld_KT, &ld_du, &ld_d, &ld_A,
                     	       &I, &Tbody);	
     }
@@ -267,7 +267,8 @@ void testCPU(int serialAlphas){
     T *u0 = (T *)malloc(ld_u*NUM_TIME_STEPS*sizeof(T));
 
     for (int i=0; i < TEST_ITERS; i++){
-		printf("<<<TESTING CPU %d/%d>>>\n",i+1,TEST_ITERS);
+		if(serialAlphas){printf("<<<TESTING CPU %d/%d>>>\n",i+1,TEST_ITERS);}
+		else{printf("<<<TESTING CPU-P %d/%d>>>\n",i+1,TEST_ITERS);}
       	loadXU<T>(x0,u0,xGoal,ld_x,ld_u);
       	if(serialAlphas){
       		runiLQR_CPU<T>(x0, u0, nullptr, nullptr, nullptr, nullptr, xGoal, &Jout[i*(MAX_ITER+1)], &alphaOut[i*(MAX_ITER+1)], ROLLOUT_FLAG, 1, 1,
@@ -278,7 +279,7 @@ void testCPU(int serialAlphas){
       	else{
 	      	runiLQR_CPU2<T>(x0, u0, nullptr, nullptr, nullptr, nullptr, xGoal, &Jout[i*(MAX_ITER+1)], &alphaOut[i*(MAX_ITER+1)], ROLLOUT_FLAG, 1, 1,
 						    &tTime[i], &fsimTime[i*MAX_ITER], &fsweepTime[i*MAX_ITER], &bpTime[i*MAX_ITER], &nisTime[i*MAX_ITER], &initTime[i], 
-						    xs, xp, xp2, us, up, P, p, Pp, pp, AB, H, g, KT, du, ds, dp, ApBK, Bdu, alpha, JTs, dJexp, err,
+						    xs, x, xp, xp2, us, u, up, P, p, Pp, pp, AB, H, g, KT, du, ds, d, dp, ApBK, Bdu, alpha, JTs, dJexp, err,
 						    ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A, I, Tbody);	
       	}
 	}
@@ -292,7 +293,7 @@ void testCPU(int serialAlphas){
 	
 	// free those vars
 	if(serialAlphas){freeMemory_CPU<T>(x, xp, xp2, u, up, P, Pp, p, pp, AB, H, g, KT, du, d, dp, Bdu, ApBK, dJexp, err, alpha, JT, xGoal, I, Tbody);}
-	else{freeMemory_CPU2<T>(xs, xp, xp2, us, up, P, Pp, p, pp, AB, H, g, KT, du, ds, dp, Bdu, ApBK, dJexp, err, alpha, JTs, xGoal, I, Tbody);}
+	else{freeMemory_CPU2<T>(xs, x, xp, xp2, us, u, up, P, Pp, p, pp, AB, H, g, KT, du, ds, d, dp, Bdu, ApBK, dJexp, err, alpha, JTs, xGoal, I, Tbody);}
 	free(x0);
     free(u0);
 }

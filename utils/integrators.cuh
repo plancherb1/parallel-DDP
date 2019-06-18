@@ -42,7 +42,7 @@
 		for (int ky = starty; ky < DIM_AB_c; ky += dy){ // pick the col dq, dqdd, du
 			#pragma unroll
 			for (int kx = startx; kx < DIM_AB_r; kx += dx){ // pick the row (q,dq)
-				ABk[ky*ld_AB + kx] = (ky == kx ? 1.0 : 0.0) + dt*dqdd2dxd(s_dqdd,kx,ky);
+				ABk[ky*ld_AB + kx] = static_cast<T>(ky == kx ? 1.0 : 0.0) + dt*dqdd2dxd(s_dqdd,kx,ky);
 			}
 		}
 	}
@@ -62,8 +62,8 @@
 		hd__syncthreads();
 		// then compute middle point and compute dynamics there
 		for (int ind=start; ind<NUM_POS; ind+=delta){
-			s_xm[ind] = 		s_x[ind] 		 + 0.5*dt*s_x[ind+NUM_POS];
-			s_xm[ind+NUM_POS] = s_x[ind+NUM_POS] + 0.5*dt*s_qdd[ind];
+			s_xm[ind] = 		s_x[ind] 		 + static_cast<T>(0.5)*dt*s_x[ind+NUM_POS];
+			s_xm[ind+NUM_POS] = s_x[ind+NUM_POS] + static_cast<T>(0.5)*dt*s_qdd[ind];
 		}
 		hd__syncthreads();
 		dynamics<T>(s_qdd,s_xm,s_u,d_I,d_Tbody);
@@ -90,8 +90,8 @@
 		dynamicsGradient<T>(s_dqdd,s_qdd,s_x,s_u,d_I,d_Tbody);		hd__syncthreads();
 		// then compute middle point and compute dynamics there
 		for (int ind=start; ind<NUM_POS; ind+=delta){
-			s_xm[ind] = 		s_x[ind] 		 + 0.5*dt*s_x[ind+NUM_POS];
-			s_xm[ind+NUM_POS] = s_x[ind+NUM_POS] + 0.5*dt*s_qdd[ind];
+			s_xm[ind] = 		s_x[ind] 		 + static_cast<T>(0.5)*dt*s_x[ind+NUM_POS];
+			s_xm[ind+NUM_POS] = s_x[ind+NUM_POS] + static_cast<T>(0.5)*dt*s_qdd[ind];
 		}
 		hd__syncthreads();
 		// then compute the dynamics gradients at middle point
@@ -104,12 +104,12 @@
 			for (int kx = startx; kx < DIM_AB_r; kx += dx){ // pick the row (q,dq)
 				T val = 0;
 				for (int i = 0; i < DIM_AB_r; i++){
-					T A2_val = (kx == i ? 1.0 : 0.0) + 0.5*dt*dqdd2dxd(s_dqdd2,kx,i);
-					T AB1_val = (ky == i ? 1.0 : 0.0) + 0.5*dt*dqdd2dxd(s_dqdd,i,ky);
+					T A2_val = static_cast<T>(kx == i ? 1.0 : 0.0) + static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd2,kx,i);
+					T AB1_val = static_cast<T>(ky == i ? 1.0 : 0.0) + static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd,i,ky);
 					val += A2_val * AB1_val;
 				}
 				// then add in the [0,B2] and save
-				ABk[ky*ld_AB + kx] = val + (ky < STATE_SIZE ? 0.0 : 0.5*dt*dqdd2dxd(s_dqdd2,kx,ky));
+				ABk[ky*ld_AB + kx] = val + static_cast<T>(ky < STATE_SIZE ? 0.0 : 0.5*dt*dqdd2dxd(s_dqdd2,kx,ky));
 			}
 		}
 	}

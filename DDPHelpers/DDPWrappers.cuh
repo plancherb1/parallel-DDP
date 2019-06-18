@@ -162,7 +162,7 @@ void runiLQR_CPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 		loadVarsCPU<T>(x,xp,x0,u,up,u0,P,Pp,P0,p,pp,p0,KT,KT0,du,d,d0,AB,err,clearVarsFlag,forwardRolloutFlag,
 					   alpha,I,Tbody,xGoal,JT,threads,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB,
 					   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
-		initAlgCPU<T>(x,xp,xp2,u,up,AB,H,g,KT,du,d,JT,Jout,&prevJ,alpha,alphaOut,xGoal,&threads[0],
+		initAlgCPU<T>(x,xp,xp2,u,up,AB,H,g,KT,du,d,JT,Jout,&prevJ,alpha,alphaOut,xGoal,threads,
 		               forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody,
 		               Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 		gettimeofday(&end2,NULL);
@@ -252,8 +252,8 @@ __host__ __forceinline__
 void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, int *alphaOut, 
 				 int forwardRolloutFlag, int clearVarsFlag, int ignoreFirstDefectFlag,
 				 double *tTime, double *simTime, double *sweepTime, double *bpTime, double *nisTime, double *initTime,
-				 T **xs, T *xp, T *xp2, T **us, T *up, T *P, T *p, T *Pp, T *pp, 
-				 T *AB, T *H, T *g, T *KT, T *du, T **ds, T *dp, 
+				 T **xs, T *x, T *xp, T *xp2, T **us, T *u, T *up, T *P, T *p, T *Pp, T *pp, 
+				 T *AB, T *H, T *g, T *KT, T *du, T **ds, T *d, T *dp, 
 				 T *ApBK, T *Bdu, T *alphas, T **JTs, T *dJexp,  int *err,
 				 int ld_x, int ld_u, int ld_P, int ld_p, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, int ld_A,
 				 T *I = nullptr, T *Tbody = nullptr,
@@ -270,10 +270,10 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 		std::thread threads[MAX_CPU_THREADS];
 		
 		// load in vars and init the alg
-		loadVarsCPU<T>(xs[0],xp,x0,us[0],up,u0,P,Pp,P0,p,pp,p0,KT,KT0,du,ds[0],d0,AB,err,clearVarsFlag,forwardRolloutFlag,
+		loadVarsCPU<T>(x,xp,x0,u,up,u0,P,Pp,P0,p,pp,p0,KT,KT0,du,d,d0,AB,err,clearVarsFlag,forwardRolloutFlag,
 					   alphas,I,Tbody,xGoal,JTs[0],threads,ld_x,ld_u,ld_P,ld_p,ld_KT,ld_du,ld_d,ld_AB,
 					   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
-		initAlgCPU2<T>(xs,xp,xp2,us,up,AB,H,g,KT,du,ds,JTs[0],Jout,&prevJ,alphas,alphaOut,xGoal,threads,
+		initAlgCPU2<T>(xs,x,xp,xp2,us,u,up,AB,H,g,KT,du,ds,d,JTs[0],Jout,&prevJ,alphas,alphaOut,xGoal,threads,
 		               forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody,
 		               Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2);
 		gettimeofday(&end2,NULL);
@@ -283,7 +283,7 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 	// debug print -- so ready to start
 	if (DEBUG_SWITCH){
 		printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",
-					xs[0][ld_x*(NUM_TIME_STEPS-1)],xs[0][ld_x*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
+					xs[alphaIndex][ld_x*(NUM_TIME_STEPS-1)],xs[alphaIndex][ld_x*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
 	}
 	while(1){
 		// BACKWARD PASS //
@@ -339,14 +339,14 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 
 		if (DEBUG_SWITCH){
 			printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-						iter-1,xs[0][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],xs[0][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+						iter-1,xs[alphaIndex][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],xs[alphaIndex][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
 		}
 	}
 
 	// EXIT Handling
 		if (DEBUG_SWITCH){
 			printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-						iter,xs[0][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],xs[0][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+						iter,xs[alphaIndex][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],xs[alphaIndex][DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
 		}
 		// Bring back the final state and control (and compute final d if needed)
 		gettimeofday(&start2,NULL);

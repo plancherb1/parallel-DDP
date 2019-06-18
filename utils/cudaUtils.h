@@ -43,14 +43,18 @@
 #include <assert.h>
 #include <cuda_fp16.h>
 /*** -1 Support for non-float/double types ***/
-	// __host__ __device__ __forceinline__
-	// half sin(half val){return __float2half(sin(__half2float(val)));}
-	// __host__ __device__ __forceinline__
-	// half cos(half val){return __float2half(cos(__half2float(val)));}
-	// __host__ __device__ __forceinline__
-	// half abs(half val){return __float2half(abs(__half2float(val)));}
-	// __host__ __device__ __forceinline__
-	// half max(half val1, half val2){return __float2half(max(__half2float(val1),__half2float(val2)));}
+	__host__ __device__ __forceinline__
+	half sin(half val){return __float2half(sin(__half2float(val)));}
+	__host__ __device__ __forceinline__
+	half cos(half val){return __float2half(cos(__half2float(val)));}
+	__host__ __device__ __forceinline__
+	half abs(half val){return __float2half(abs(__half2float(val)));}
+	__host__ __device__ __forceinline__
+	half max(half val1, half val2){return __float2half(max(__half2float(val1),__half2float(val2)));}
+	__host__ __device__ __forceinline__
+	half sqrt(half val){return __float2half(sqrt(__half2float(val)));}
+	__host__ __device__ __forceinline__
+	half atan2(half val1, half val2){return __float2half(atan2(__half2float(val1),__half2float(val2)));}
 /*** -1 Support for non-float/double types ***/
 
 /*** 0 Host Device loop bounds and sync code 0 ***/
@@ -238,7 +242,7 @@
 				for (int piv_col = 0; piv_col < DIM; piv_col++){
 					// load in values
 					if (kr < DIM && kc < DIM + 1){
-					   inv_pivot = 1.0/A[piv_col + piv_col*DIM];
+					   inv_pivot = static_cast<T>(1)/A[piv_col + piv_col*DIM];
 					   C = A[kr + piv_col*DIM];
 					   sRow = A[piv_col + (piv_col + kc)*DIM];
 					}
@@ -261,7 +265,7 @@
 			int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
 			#pragma unroll
 			for (int piv_col = 0; piv_col < DIM; piv_col++){
-				T inv_pivot = 1.0/A[piv_col + piv_col*DIM];
+				T inv_pivot = static_cast<T>(1)/A[piv_col + piv_col*DIM];
 				// load in values
 				#pragma unroll
 				for (int kr = starty; kr < DIM; kr += dy){C[kr] = A[kr + piv_col*DIM];}
