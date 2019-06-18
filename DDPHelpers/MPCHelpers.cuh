@@ -1226,7 +1226,7 @@
             #endif
 
             // do initial "next iteration setup"
-            initAlgCPU2<T>(cv->xs,cv->xp,cv->xp2,cv->us,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,(cv->JTs)[0],Jout,&prevJ,cv->alpha,alphaOut,
+            initAlgCPU2<T>(cv->xs,cv->x,cv->xp,cv->xp2,cv->us,cv->u,cv->up,cv->AB,cv->H,cv->g,cv->KT,cv->du,cv->ds,cv->d,(cv->JTs)[0],Jout,&prevJ,cv->alpha,alphaOut,
                            cv->xGoal,cv->threads,0,md->ld_x,md->ld_u,md->ld_AB,md->ld_H,md->ld_g,md->ld_KT,md->ld_du,md->ld_d,cv->I,cv->Tbody,
                            cst->Q_EE1,cst->Q_EE2,cst->QF_EE1,cst->QF_EE2,cst->Q_EEV1,cst->Q_EEV2,cst->QF_EEV1,cst->QF_EEV2,
                            cst->R_EE,cst->Q_xdEE,cst->QF_xdEE,cst->Q_xEE,cst->QF_xEE,cst->Q1,cst->Q2,cst->R,cst->QF1,cst->QF2,finalCostShift,cv->xTarget);

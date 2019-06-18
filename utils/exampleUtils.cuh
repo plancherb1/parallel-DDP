@@ -42,7 +42,7 @@
 		// mode 0 = vertial position, mode 1 = center of workspace, mode 2 = patrick position
 		for (int i = 0; i < STATE_SIZE; i++){xInit[i] = 0;}
 		if (mode == 1){xInit[1] = PI/4.0; xInit[3] = -PI/4.0; xInit[5] = PI/4.0;}
-		if (mode == 2){xInit[0] = PI/2.0; xInit[1] = -PI/6.0; xInit[2] = -PI/3.0; xInit[3] = -PI/2.0; xInit[4] = 3.0*PI/4.0; xInit[5] = -PI/4.0; xInit[6] = 0.0;}
+		if (mode == 2){xInit[0] = PI/2.0; xInit[1] = -PI/6.0; xInit[2] = -PI/3.0; xInit[3] = -PI/2.0; xInit[4] = 3.0*PI/4.0; xInit[5] = -PI/4.0; xInit[6] = 0;}
 	}
 	template <typename T>
 	__host__
@@ -50,8 +50,8 @@
 		T *xk = tvars->x;	T *uk = tvars->u;
 		for (int k=0; k<NUM_TIME_STEPS; k++){
 			for (int i = 0; i < STATE_SIZE; i++){
-				xk[i] = (xInit != nullptr) ? xInit[i] : 0.0;	
-				if (i < CONTROL_SIZE){uk[i] = (uInit != nullptr) ? uInit[i] : 0.01;}
+				xk[i] = (xInit != nullptr) ? xInit[i] : static_cast<T>(0);	
+				if (i < CONTROL_SIZE){uk[i] = (uInit != nullptr) ? uInit[i] : static_cast<T>(0.01);}
 			}
 			xk += (dimms->ld_x);	uk += (dimms->ld_u);
 		}

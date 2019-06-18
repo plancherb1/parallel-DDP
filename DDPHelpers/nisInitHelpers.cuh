@@ -458,28 +458,28 @@ void initAlgCPU(T *x, T *xp, T *xp2, T *u, T *up, T *AB, T *H, T *g, T *KT, T *d
 
 template <typename T>
 __host__ __forceinline__
-void initAlgCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *AB, T *H, T *g, T *KT, T *du, T **ds, T *JT, T *Jout, T *prevJ, \
+void initAlgCPU2(T **xs, T *x, T *xp, T *xp2, T **us, T *u, T *up, T *AB, T *H, T *g, T *KT, T *du, T **ds, T *d, T *JT, T *Jout, T *prevJ, \
 				T *alphas, int *alphaOut, T *xGoal, std::thread *threads, int forwardRolloutFlag, \
 				int ld_x, int ld_u, int ld_AB, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_d, T *I = nullptr, T *Tbody = nullptr, \
 				T Q_EE1 = _Q_EE1, T Q_EE2 = _Q_EE2, T QF_EE1 = _QF_EE1, T QF_EE2 = _QF_EE2, \
    			    T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
    			    T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE, \
    			    T Q1 = _Q1, T Q2 = _Q2, T R = _R, T QF1 = _QF1, T QF2 = _QF2, int finalCostShift = 0, T *xTarget = nullptr){
-	initAlgCPU<T>(xs[0],xp,xp2,us[0],up,AB,H,g,KT,du,ds[0],JT,Jout,prevJ,alphas,alphaOut,xGoal,threads,
+	initAlgCPU<T>(x,xp,xp2,u,up,AB,H,g,KT,du,d,JT,Jout,prevJ,alphas,alphaOut,xGoal,threads,
 		          forwardRolloutFlag,ld_x,ld_u,ld_AB,ld_H,ld_g,ld_KT,ld_du,ld_d,I,Tbody,
 		          Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,Q1,Q2,R,QF1,QF2,finalCostShift,xTarget);
 	// also copy all x,u,d to xs,us,ds
-	for (int i = 1; i < NUM_ALPHA; i++){
-		threads[3*i] = std::thread(memcpy, std::ref(xs[i]), std::ref(xs[0]), ld_x*NUM_TIME_STEPS*sizeof(T));
+	for (int i = 0; i < NUM_ALPHA; i++){
+		threads[3*i] = std::thread(memcpy, std::ref(xs[i]), std::ref(x), ld_x*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3*i);}
-        threads[3*i+1] = std::thread(memcpy, std::ref(us[i]), std::ref(us[0]), ld_u*NUM_TIME_STEPS*sizeof(T));
+        threads[3*i+1] = std::thread(memcpy, std::ref(us[i]), std::ref(u), ld_u*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3*i+1);}
         if (M_F > 1){
-            threads[3*i+2] = std::thread(memcpy, std::ref(ds[i]), std::ref(ds[0]), ld_d*NUM_TIME_STEPS*sizeof(T));
+            threads[3*i+2] = std::thread(memcpy, std::ref(ds[i]), std::ref(d), ld_d*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3*i+2);}
         }	
 	}
-	for(int i = 1; i < NUM_ALPHA; i++){
+	for(int i = 0; i < NUM_ALPHA; i++){
 		threads[3*i].join();	threads[3*i+1].join();	if (M_F > 1){threads[3*i+2].join();}
 	}
 }
@@ -924,8 +924,8 @@ void allocateMemory_CPU(T **x, T **xp, T **xp2, T **u, T **up, T **xGoal, T **P,
 
 template <typename T>
 __host__ __forceinline__
-void allocateMemory_CPU2(T ***xs, T **xp, T **xp2, T ***us, T **up, T **xGoal, T **P, T **Pp, T **p, T **pp, 
-						T **AB, T **H, T **g, T **KT, T **du, T ***ds, T **dp, T **ApBK, T **Bdu, T ***JTs, T **dJexp, T **alpha, int **err, 
+void allocateMemory_CPU2(T ***xs, T **x, T **xp, T **xp2, T ***us, T **u, T **up, T **xGoal, T **P, T **Pp, T **p, T **pp, 
+						T **AB, T **H, T **g, T **KT, T **du, T ***ds, T **d, T **dp, T **ApBK, T **Bdu, T ***JTs, T **dJexp, T **alpha, int **err, 
 						int *ld_x, int *ld_u, int *ld_P, int *ld_p, int *ld_AB, int *ld_H, int *ld_g, int *ld_KT, int *ld_du, int *ld_d, int *ld_A, 
 						T **I = nullptr, T **Tbody = nullptr){
 	// allocate the xs and us and ds (and JTs)
@@ -933,9 +933,9 @@ void allocateMemory_CPU2(T ***xs, T **xp, T **xp2, T ***us, T **up, T **xGoal, T
 	*us = (T **)malloc(NUM_ALPHA*sizeof(T*));
 	*ds = (T **)malloc(NUM_ALPHA*sizeof(T*));
 	*JTs = (T **)malloc(NUM_ALPHA*sizeof(T*));
-	allocateMemory_CPU<T>(&((*xs)[0]), xp, xp2, &((*us)[0]), up, xGoal, P, Pp, p, pp, AB, H, g, KT, du, &((*ds)[0]), dp, ApBK, Bdu, &((*JTs)[0]), dJexp, alpha, err, 
+	allocateMemory_CPU<T>(x, xp, xp2, u, up, xGoal, P, Pp, p, pp, AB, H, g, KT, du, d, dp, ApBK, Bdu, &((*JTs)[0]), dJexp, alpha, err, 
 						  ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A, I, Tbody);
-	for (int i = 1; i < NUM_ALPHA; i++){
+	for (int i = 0; i < NUM_ALPHA; i++){
 		(*xs)[i] = (T *)malloc((*ld_x)*NUM_TIME_STEPS*sizeof(T));
 		(*us)[i] = (T *)malloc((*ld_u)*NUM_TIME_STEPS*sizeof(T));
 		(*ds)[i] = (T *)malloc((*ld_d)*NUM_TIME_STEPS*sizeof(T));
@@ -954,10 +954,10 @@ void freeMemory_CPU(T *x, T *xp, T *xp2, T *u, T *up, T *P, T *Pp, T *p, T *pp, 
 
 template <typename T>
 __host__ __forceinline__
-void freeMemory_CPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *P, T *Pp, T *p, T *pp, T *AB, T *H, T *g, T *KT, T *du, T **ds, T *dp, T *Bdu, T *ApBK, 
+void freeMemory_CPU2(T **xs, T *x, T *xp, T *xp2, T **us, T *u, T *up, T *P, T *Pp, T *p, T *pp, T *AB, T *H, T *g, T *KT, T *du, T **ds, T *d, T *dp, T *Bdu, T *ApBK, 
                     T *dJexp, int *err, T *alpha, T **JTs, T *xGoal, T *I = nullptr, T *Tbody = nullptr){
-	freeMemory_CPU<T>(xs[0], xp, xp2, us[0], up, P, Pp, p, pp, AB, H, g, KT, du, ds[0], dp, Bdu, ApBK, dJexp, err, alpha, JTs[0], xGoal, I, Tbody);
-	for (int i = 1; i < NUM_ALPHA; i++){
+	freeMemory_CPU<T>(x, xp, xp2, u, up, P, Pp, p, pp, AB, H, g, KT, du, d, dp, Bdu, ApBK, dJexp, err, alpha, JTs[0], xGoal, I, Tbody);
+	for (int i = 0; i < NUM_ALPHA; i++){
 		free(xs[i]);	free(us[i]);	free(ds[i]);	free(JTs[i]);
 	}
 	free(xs); free(us); free(ds); free(JTs);
