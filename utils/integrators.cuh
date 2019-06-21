@@ -12,8 +12,13 @@
  *    dynamicsGradient (from dynamics)
  ****************************************************************/
 // x = [q;qd] so xd = [dq,qdd] thus dxd_dx,u = [0_{numpos},I_{numpos},0_{numpos};dqdd]
-#define dqdd2dxd(dqdd,r,c) (r < NUM_POS ? (r + NUM_POS == c ? 1.0 : 0.0) : dqdd[(c-1)*NUM_POS + r])
-#define dqddk2dxd(dqddk,r,c) (r < NUM_POS ? (r + NUM_POS == c ? 1.0 : 0.0) : dqddk)
+ template <typename T>
+	__host__ __device__ __forceinline__
+T dqdd2dxd(T *dqdd, int r, int c){return r < NUM_POS ? static_cast<T>(r + NUM_POS == c ? 1 : 0) : dqdd[(c-1)*NUM_POS + r];}
+
+template <typename T>
+	__host__ __device__ __forceinline__
+T dqddk2dxd(T dqddk, int r, int c){return r < NUM_POS ? static_cast<T>(r + NUM_POS == c ? 1 : 0) : dqddk;}
 
 #if INTEGRATOR == 1 // Euler
 	template <typename T>
@@ -42,7 +47,7 @@
 		for (int ky = starty; ky < DIM_AB_c; ky += dy){ // pick the col dq, dqdd, du
 			#pragma unroll
 			for (int kx = startx; kx < DIM_AB_r; kx += dx){ // pick the row (q,dq)
-				ABk[ky*ld_AB + kx] = static_cast<T>(ky == kx ? 1.0 : 0.0) + dt*dqdd2dxd(s_dqdd,kx,ky);
+				ABk[ky*ld_AB + kx] = static_cast<T>(ky == kx ? 1 : 0) + dt*dqdd2dxd(s_dqdd,kx,ky);
 			}
 		}
 	}
@@ -104,12 +109,12 @@
 			for (int kx = startx; kx < DIM_AB_r; kx += dx){ // pick the row (q,dq)
 				T val = 0;
 				for (int i = 0; i < DIM_AB_r; i++){
-					T A2_val = static_cast<T>(kx == i ? 1.0 : 0.0) + static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd2,kx,i);
-					T AB1_val = static_cast<T>(ky == i ? 1.0 : 0.0) + static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd,i,ky);
+					T A2_val = static_cast<T>(kx == i ? 1 : 0) + static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd2,kx,i);
+					T AB1_val = static_cast<T>(ky == i ? 1 : 0) + static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd,i,ky);
 					val += A2_val * AB1_val;
 				}
 				// then add in the [0,B2] and save
-				ABk[ky*ld_AB + kx] = val + static_cast<T>(ky < STATE_SIZE ? 0.0 : 0.5*dt*dqdd2dxd(s_dqdd2,kx,ky));
+				ABk[ky*ld_AB + kx] = val + (ky < STATE_SIZE ? static_cast<T>(0) : static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd2,kx,ky));
 			}
 		}
 	}
@@ -130,24 +135,24 @@
 		hd__syncthreads();
 		// then compute middle point and compute dynamics there
 		for (int ind=start; ind<NUM_POS; ind+=delta){
-			s_x2[ind] 		  =	s_x[ind] 		 + 0.5*dt*s_x[ind+NUM_POS];
-			s_x2[ind+NUM_POS] = s_x[ind+NUM_POS] + 0.5*dt*s_qdd1[ind];
+			s_x2[ind] 		  =	s_x[ind] 		 + static_cast<T>(0.5)*dt*s_x[ind+NUM_POS];
+			s_x2[ind+NUM_POS] = s_x[ind+NUM_POS] + static_cast<T>(0.5)*dt*s_qdd1[ind];
 		}
 		hd__syncthreads();
 		dynamics<T>(s_qdd2,s_x2,s_u,d_I,d_Tbody);
 		hd__syncthreads();
 		// then compute third point and compute dynamics there
 		for (int ind=start; ind<NUM_POS; ind+=delta){
-			s_x3[ind] 		  = s_x[ind] 		 + dt*(2*s_x2[ind+NUM_POS] - s_x[ind+NUM_POS]);
-			s_x3[ind+NUM_POS] = s_x[ind+NUM_POS] + dt*(2*s_qdd2[ind] 	   - s_qdd1[ind]);
+			s_x3[ind] 		  = s_x[ind] 		 + dt*(static_cast<T>(2)*s_x2[ind+NUM_POS] - s_x[ind+NUM_POS]);
+			s_x3[ind+NUM_POS] = s_x[ind+NUM_POS] + dt*(static_cast<T>(2)*s_qdd2[ind] 	   - s_qdd1[ind]);
 		}
 		hd__syncthreads();
 		dynamics<T>(s_qdd3,s_x3,s_u,d_I,d_Tbody);
 		hd__syncthreads();
 		// then use the final integration rule
 		for (int ind = start; ind < NUM_POS; ind += delta){
-			s_xkp1[ind] 		= s_x[ind] 		   + (dt/6.0)*(s_x[ind+NUM_POS] + 4.0*s_x2[ind+NUM_POS] + s_x3[ind+NUM_POS]);
-			s_xkp1[ind+NUM_POS] = s_x[ind+NUM_POS] + (dt/6.0)*(s_qdd1[ind] 	    + 4.0*s_qdd2[ind]       + s_qdd3[ind]);
+			s_xkp1[ind] 		= s_x[ind] 		   + (dt/static_cast<T>(6))*(s_x[ind+NUM_POS] + static_cast<T>(4)*s_x2[ind+NUM_POS] + s_x3[ind+NUM_POS]);
+			s_xkp1[ind+NUM_POS] = s_x[ind+NUM_POS] + (dt/static_cast<T>(6))*(s_qdd1[ind] 	  + static_cast<T>(4)*s_qdd2[ind]       + s_qdd3[ind]);
 		}
 	}
 
@@ -173,8 +178,8 @@
 	   	// then get xm_1 and compute gradient there
 		#pragma unroll
 	   	for (int i=start; i<NUM_POS; i += delta){
-	      	s_xm_1[i] 			= s_x[i] + 0.5*dt*s_x[i+NUM_POS];
-	      	s_xm_1[i + NUM_POS] = s_x[i] + 0.5*dt*s_qdd_1[i];
+	      	s_xm_1[i] 			= s_x[i] + static_cast<T>(0.5)*dt*s_x[i+NUM_POS];
+	      	s_xm_1[i + NUM_POS] = s_x[i] + static_cast<T>(0.5)*dt*s_qdd_1[i];
 	   	}
 	   	hd__syncthreads();
 	   	dynamicsGradient<T>(s_dqdd_2,s_qdd_2,s_xm_1,s_u,d_I,d_Tbody);
@@ -182,8 +187,8 @@
 	   	// then get xm2 and compute the gradient there
 		#pragma unroll
 	   	for (int i=start; i<NUM_POS; i += delta){
-	   		s_xm_2[i] 			= s_x[i] + dt*s_x[i+NUM_POS] + 2*dt*s_xm_1[i+NUM_POS];
-	      	s_xm_2[i + NUM_POS] = s_x[i] + dt*s_qdd_1[i] 	 + 2*dt*s_qdd_2[i];
+	   		s_xm_2[i] 			= s_x[i] + dt*s_x[i+NUM_POS] + static_cast<T>(2)*dt*s_xm_1[i+NUM_POS];
+	      	s_xm_2[i + NUM_POS] = s_x[i] + dt*s_qdd_1[i] 	 + static_cast<T>(2)*dt*s_qdd_2[i];
 	   	}
 	   	hd__syncthreads();
 	   	dynamicsGradient<T>(s_dqdd_3,s_qdd_3,s_xm_2,s_u,d_I,d_Tbody);
@@ -196,9 +201,9 @@
 				T val = 0;
 				#pragma unroll
 				for (int i=0; i<DIM_AB_r; i++){
-					val += dqdd2dxd(s_dqdd_2,kx,i)*(dt/2.0*dqdd2dxd(s_dqdd_1,i,ky) + (ky == i ? 1.0 : 0.0));
+					val += dqdd2dxd(s_dqdd_2,kx,i)*(static_cast<T>(0.5)*dt*dqdd2dxd(s_dqdd_1,i,ky) + static_cast<T>(ky == i ? 1 : 0));
 				}
-				s_TMP_1[kx + DIM_AB_r*ky] = val + (ky < STATE_SIZE ? 0.0 : dqdd2dxd(s_dqdd_2,kx,ky));
+				s_TMP_1[kx + DIM_AB_r*ky] = val + (ky < STATE_SIZE ? static_cast<T>(0) : dqdd2dxd(s_dqdd_2,kx,ky));
 			}
 		}
 		hd__syncthreads();
@@ -210,9 +215,9 @@
 				T val = 0;
 				#pragma unroll
 				for (int i=0; i<DIM_AB_r; i++){
-					val += dqdd2dxd(s_dqdd_3,kx,i)*(2.0*dt*s_TMP_1[ky*DIM_AB_r + i] - dt*dqdd2dxd(s_dqdd_1,i,ky) + (ky == i ? 1.0 : 0.0));
+					val += dqdd2dxd(s_dqdd_3,kx,i)*(static_cast<T>(2)*dt*s_TMP_1[ky*DIM_AB_r + i] - dt*dqdd2dxd(s_dqdd_1,i,ky) + static_cast<T>(ky == i ? 1 : 0));
 	          		}
-	          		s_TMP_2[kx + DIM_AB_r*ky] = val + (ky < STATE_SIZE ? 0.0 : dqdd2dxd(s_dqdd_3,kx,ky));
+	          		s_TMP_2[kx + DIM_AB_r*ky] = val + (ky < STATE_SIZE ? static_cast<T>(0) : dqdd2dxd(s_dqdd_3,kx,ky));
 			}
 		}
 		hd__syncthreads();
@@ -221,8 +226,8 @@
 		for (int ky = starty; ky < DIM_AB_c; ky += dy){
 			#pragma unroll
 			for (int kx = startx; kx < DIM_AB_r; kx += dx){
-				ABk[kx + ld_AB*ky] = (dt/6.0)*dqdd2dxd(s_dqdd_1,kx,ky) + (2.0*dt/3.0)*s_TMP_1[kx + DIM_AB_r*ky] +
-     								 (dt/6.0)*s_TMP_2[kx + DIM_AB_r*ky] + (kx == ky ? 1 : 0);
+				ABk[kx + ld_AB*ky] = (dt/static_cast<T>(6))*dqdd2dxd(s_dqdd_1,kx,ky) + (static_cast<T>(2)*dt/static_cast<T>(3))*s_TMP_1[kx + DIM_AB_r*ky] +
+     								 (dt/static_cast<T>(6))*s_TMP_2[kx + DIM_AB_r*ky] + static_cast<T>(kx == ky ? 1 : 0);
 			}
 		}
 	}

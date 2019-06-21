@@ -390,9 +390,9 @@ void initAlgGPU(T **d_x, T **h_d_x, T *d_xp, T *d_xp2, T **d_u, T **h_d_u, T *d_
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
 	gpuErrchk(cudaMemcpy(prevJ, &d_JT[*alphaIndex], sizeof(T), cudaMemcpyDeviceToHost));
-	*prevJ += 2*TOL_COST;
+	*prevJ += static_cast<T>(2*TOL_COST);
 	gpuErrchk(cudaMemcpyAsync(&d_JT[*alphaIndex], prevJ, sizeof(T), cudaMemcpyHostToDevice,streams[7]));
-	Jout[0] = *prevJ - 2*TOL_COST;
+	Jout[0] = *prevJ - static_cast<T>(2*TOL_COST);
 	gpuErrchk(cudaDeviceSynchronize()); // make sure this all finishes before we start the main loop
 }
 
@@ -490,8 +490,8 @@ int acceptRejectTrajGPU(T **h_d_x, T *d_xp, T **h_d_u, T *d_up, T **h_d_d, T *d_
                    		T *J, T *prevJ, T *dJ, T *rho, T *drho, int *alphaIndex, int *alphaOut, T *Jout, \
                    		int *iter, cudaStream_t *streams, int ld_x, int ld_u, int ld_d, int max_iter = MAX_ITER, int *updated = nullptr){
 	// if failure increase rho, reset x,u,P,p,d
-	if (*dJ < 0){
-		*drho = max((*drho)*RHO_FACTOR,RHO_FACTOR); *rho = min((*rho)*(*drho), RHO_MAX);
+	if (*dJ < static_cast<T>(0)){
+		*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR)); *rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX));
 		*alphaIndex = 0; alphaOut[*iter] = -1; Jout[*iter] = *prevJ;
 		// gpuErrchk(cudaMemcpyAsync(d_P,d_Pp,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[0]));
 		// gpuErrchk(cudaMemcpyAsync(d_p,d_pp,ld_p*DIM_p_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[1]));
@@ -500,16 +500,16 @@ int acceptRejectTrajGPU(T **h_d_x, T *d_xp, T **h_d_u, T *d_up, T **h_d_d, T *d_
 		if (M_F > 1){gpuErrchk(cudaMemcpyAsync(h_d_d[*alphaIndex],d_dp,ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[2]));}
 		gpuErrchk(cudaDeviceSynchronize());
 		// check for maxRho failure
-		if (*rho == RHO_MAX && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
+		if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
 		else if (DEBUG_SWITCH){printf("[!]Forward Pass Failed Increasing Rho\n");}
 	}
 	// else try to decrease rho if we can and turn dJ into a percentage and save the cost to prevJ for next time and check for cost tol or max iter exit
 	else {
-		*drho = min((*drho)/RHO_FACTOR, 1.0/RHO_FACTOR); *rho = max((*rho)*(*drho), RHO_MIN);
+		*drho = min((*drho)/static_cast<T>(RHO_FACTOR), static_cast<T>(1.0/RHO_FACTOR)); *rho = max((*rho)*(*drho), static_cast<T>(RHO_MIN));
 		*dJ = (*dJ)/(*prevJ); *prevJ = J[*alphaIndex]; alphaOut[*iter] = *alphaIndex; Jout[*iter] = J[*alphaIndex];
 		if(updated != nullptr){*updated = 1;}
 		// check for convergence
-		if(*dJ < TOL_COST){if (DEBUG_SWITCH){printf("Exiting for tolCost[%f]\n",*dJ);} return 1;}      
+		if(*dJ < static_cast<T>(TOL_COST)){if (DEBUG_SWITCH){printf("Exiting for tolCost[%f]\n",*dJ);} return 1;}      
 	}
 	// check for max iters
 	if (*iter == max_iter){ if (DEBUG_SWITCH){printf("Breaking for MaxIter\n");} return 1;}
@@ -524,7 +524,8 @@ int acceptRejectTrajCPU(T *x, T *xp, T *u, T *up, T *d, T *dp, T J, T *prevJ, \
                    		int *iter, std::thread *threads, int ld_x, int ld_u, int ld_d, int max_iter = MAX_ITER){
 	// if failure increase rho, reset x,u,P,p,d
 	if (*alphaIndex == -1){
-		*drho = max((*drho)*RHO_FACTOR,RHO_FACTOR); *rho = min((*rho)*(*drho), RHO_MAX);  alphaOut[*iter] = -1; Jout[*iter] = *prevJ;
+		*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR)); *rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX));  
+		alphaOut[*iter] = -1; Jout[*iter] = *prevJ;
 		// threads[0] = std::thread(memcpy, std::ref(Pp), std::ref(P), ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
      	// threadss[1] = std::thread(memcpy, std::ref(pp), std::ref(p), ld_p*DIM_p_c*NUM_TIME_STEPS*sizeof(T));
      	threads[0] = std::thread(memcpy, std::ref(x), std::ref(xp), ld_x*NUM_TIME_STEPS*sizeof(T));
@@ -537,15 +538,15 @@ int acceptRejectTrajCPU(T *x, T *xp, T *u, T *up, T *d, T *dp, T J, T *prevJ, \
 		}
      	threads[0].join(); threads[1].join(); if (M_F > 1){threads[2].join();}
 		// check for maxRho failure
-		if (*rho == RHO_MAX && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
+		if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
 		else if (DEBUG_SWITCH){printf("[!]Forward Pass Failed Increasing Rho\n");}
 	}
 	// else try to decrease rho if we can and turn dJ into a percentage and save the cost to prevJ for next time and check for cost tol or max iter exit
 	else {
-		*drho = min((*drho)/RHO_FACTOR, 1.0/RHO_FACTOR); *rho = max((*rho)*(*drho), RHO_MIN);
+		*drho = min((*drho)/static_cast<T>(RHO_FACTOR), static_cast<T>(1.0/RHO_FACTOR)); *rho = max((*rho)*(*drho), static_cast<T>(RHO_MIN));
 		*dJ = (*dJ)/(*prevJ); *prevJ = J; alphaOut[*iter] = *alphaIndex; Jout[*iter] = J;
 		// check for convergence
-		if(*dJ < TOL_COST && 0){if (DEBUG_SWITCH){printf("Exiting for tolCost[%f]\n",*dJ);} return 1;}      
+		if(*dJ < static_cast<T>(TOL_COST)){if (DEBUG_SWITCH){printf("Exiting for tolCost[%f]\n",*dJ);} return 1;}      
 	}
 	// check for max iters
 	if (*iter == max_iter){ if (DEBUG_SWITCH){printf("Breaking for MaxIter\n");} return 1;}
@@ -560,7 +561,8 @@ int acceptRejectTrajCPU2(T **xs, T *xp, T **us, T *up, T **ds, T *dp, T J, T *pr
                    		int *iter, std::thread *threads, int ld_x, int ld_u, int ld_d, int max_iter = MAX_ITER){
 	// if failure increase rho, reset x,u,P,p,d
 	if (*alphaIndex == -1){
-		*drho = max((*drho)*RHO_FACTOR,RHO_FACTOR); *rho = min((*rho)*(*drho), RHO_MAX);  alphaOut[*iter] = -1; Jout[*iter] = *prevJ;
+		*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR)); *rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX));  
+		alphaOut[*iter] = -1; Jout[*iter] = *prevJ;
 		// threads[0] = std::thread(memcpy, std::ref(Pp), std::ref(P), ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
      	// threadss[1] = std::thread(memcpy, std::ref(pp), std::ref(p), ld_p*DIM_p_c*NUM_TIME_STEPS*sizeof(T));
      	threads[0] = std::thread(&memcpyArr<T>, std::ref(xs), std::ref(xp), ld_x*NUM_TIME_STEPS*sizeof(T), NUM_ALPHA, -1);
@@ -573,15 +575,15 @@ int acceptRejectTrajCPU2(T **xs, T *xp, T **us, T *up, T **ds, T *dp, T J, T *pr
 		}
      	threads[0].join(); threads[1].join(); if (M_F > 1){threads[2].join();}
 		// check for maxRho failure
-		if (*rho == RHO_MAX && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
+		if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
 		else if (DEBUG_SWITCH){printf("[!]Forward Pass Failed Increasing Rho\n");}
 	}
 	// else try to decrease rho if we can and turn dJ into a percentage and save the cost to prevJ for next time and check for cost tol or max iter exit
 	else {
-		*drho = min((*drho)/RHO_FACTOR, 1.0/RHO_FACTOR); *rho = max((*rho)*(*drho), RHO_MIN);
+		*drho = min((*drho)/static_cast<T>(RHO_FACTOR), static_cast<T>(1.0/RHO_FACTOR)); *rho = max((*rho)*(*drho), static_cast<T>(RHO_MIN));
 		*dJ = (*dJ)/(*prevJ); *prevJ = J; alphaOut[*iter] = *alphaIndex; Jout[*iter] = J;
 		// check for convergence
-		if(*dJ < TOL_COST && 0){if (DEBUG_SWITCH){printf("Exiting for tolCost[%f]\n",*dJ);} return 1;}      
+		if(*dJ < static_cast<T>(TOL_COST) && 0){if (DEBUG_SWITCH){printf("Exiting for tolCost[%f]\n",*dJ);} return 1;}      
 	}
 	// check for max iters
 	if (*iter == max_iter){ if (DEBUG_SWITCH){printf("Breaking for MaxIter\n");} return 1;}

@@ -161,7 +161,7 @@
 	      	for (int i=0; i<STATE_SIZE; i++){
 	      		#pragma unroll
 	         	for (int j=0; j<STATE_SIZE; j++){
-	            	Hk[i*ld_H + j] = (i != j) ? 0 : (i < NUM_POS ? QF1 : QF2);
+	            	Hk[i*ld_H + j] = (i != j) ? static_cast<T>(0) : (i < NUM_POS ? QF1 : QF2);
 	         	}  
 	      	}
 	      	#pragma unroll
@@ -183,7 +183,7 @@
 	      	for (int i=0; i<STATE_SIZE+CONTROL_SIZE; i++){
 	      		#pragma unroll
 	         	for (int j=0; j<STATE_SIZE+CONTROL_SIZE; j++){
-	            	Hk[i*ld_H + j] = (i != j) ? 0 : (i < NUM_POS ? Q1 : (i < STATE_SIZE ? Q2 : R));
+	            	Hk[i*ld_H + j] = (i != j) ? static_cast<T>(0) : (i < NUM_POS ? Q1 : (i < STATE_SIZE ? Q2 : R));
 	         	}  
 	      	}
 	      	#pragma unroll
@@ -284,7 +284,7 @@
 	    for (int ind = start; ind < NUM_POS; ind += delta){
 	    	T cost = 0;
 	    	if(ind == 0){cost += eeCost<T>(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);} // compute in one thread incase smooth abs (for EEcost)
-	      	cost += static_cast<T>(0.5)*(k == NUM_TIME_STEPS-1 ? 0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
+	      	cost += static_cast<T>(0.5)*(k == NUM_TIME_STEPS-1 ? static_cast<T>(0) : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
 	      	cost += nominalStateCost<T>(s_x,ind,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE); // add on the nominal state target cost
 	      	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      		cost += limitCosts<T,0>(s_x,s_u,ind,k); cost += limitCosts<T,0>(s_x,s_u,ind+NUM_POS,k); cost += limitCosts<T,0>(s_x,s_u,ind+STATE_SIZE,k);
@@ -305,7 +305,7 @@
 		#pragma unroll
 	    for (int ind = 0; ind < NUM_POS; ind ++){
 	      	if(ind == 0){cost += eeCost<T>(s_eePos,d_eeGoal,k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);} // compute in one thread incase smooth abs (for EEcost)
-	      	cost += static_cast<T>(0.5)*(k == NUM_TIME_STEPS-1 ? 0 : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
+	      	cost += static_cast<T>(0.5)*(k == NUM_TIME_STEPS-1 ? static_cast<T>(0) : R_EE)*s_u[ind]*s_u[ind]; // add on input cost
 	      	cost += nominalStateCost<T>(s_x,ind,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE); // add on the nominal state target cost
 	      	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      		cost += limitCosts<T,0>(s_x,s_u,ind,k); cost += limitCosts<T,0>(s_x,s_u,ind+NUM_POS,k); cost += limitCosts<T,0>(s_x,s_u,ind+STATE_SIZE,k);
@@ -337,7 +337,7 @@
 		  		if (r < NUM_POS){val += deeCost<T>(s_eePos,s_deePos,d_eeGoal,k,r,nullptr,nullptr,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,timeShift);}
 	  		#endif
 			if (r < STATE_SIZE){val += dNominalStateCost<T,1>(s_x,r,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE);} // nominal state target cost
-			else{val += (k == NUM_TIME_STEPS - 1 ? 0 : R_EE)*s_u[r-STATE_SIZE];} // control cost
+			else{val += (k == NUM_TIME_STEPS - 1 ? static_cast<T>(0) : R_EE)*s_u[r-STATE_SIZE];} // control cost
 		  	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      		val += limitCosts<T,1>(s_x,s_u,r,k);
 	  		#endif
@@ -370,7 +370,7 @@
 	           	#endif
 			    if (r == c){
 					if (r < STATE_SIZE){val += dNominalStateCost<T,2>(s_x,r,k,xTarget,Q_xEE,QF_xEE,Q_xdEE,QF_xdEE);} // nominal state target cost
-		        	else {val += (k== NUM_TIME_STEPS - 1) ? 0 : R_EE;} // control cost
+		        	else {val += (k== NUM_TIME_STEPS - 1) ? static_cast<T>(0) : R_EE;} // control cost
 		        	#if USE_LIMITS_FLAG // add on any limit costs if needed
 	      				val += limitCosts<T,2>(s_x,s_u,r,k);
 	  				#endif

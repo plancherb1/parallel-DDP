@@ -50,11 +50,15 @@
 	__host__ __device__ __forceinline__
 	half abs(half val){return __float2half(abs(__half2float(val)));}
 	__host__ __device__ __forceinline__
+	half min(half val1, half val2){return __float2half(min(__half2float(val1),__half2float(val2)));}
+	__host__ __device__ __forceinline__
 	half max(half val1, half val2){return __float2half(max(__half2float(val1),__half2float(val2)));}
 	__host__ __device__ __forceinline__
 	half sqrt(half val){return __float2half(sqrt(__half2float(val)));}
 	__host__ __device__ __forceinline__
 	half atan2(half val1, half val2){return __float2half(atan2(__half2float(val1),__half2float(val2)));}
+	__host__ __device__ __forceinline__
+	half pow(half val, half exp){return __float2half(pow(__half2float(val),__half2float(exp)));}
 /*** -1 Support for non-float/double types ***/
 
 /*** 0 Host Device loop bounds and sync code 0 ***/
@@ -422,7 +426,7 @@
 	  	for (int ky = starty; ky < N; ky += dy){
 	    	#pragma unroll
 	    	for (int kx = startx; kx < M; kx += dx){
-	    		A[ky*ld_A + kx] = (kx == ky ? 1.0 : 0.0);
+	    		A[ky*ld_A + kx] = static_cast<T>(kx == ky ? 1 : 0);
 	    	}
 	  	}
 	}
@@ -436,7 +440,7 @@
 	    for (int ky = starty; ky < N; ky += dy){
 	     	#pragma unroll
 			for (int kx = startx; kx < M; kx += dx){
-	        	dst[kx + ld_dst*ky] = src[kx + ld_src*ky] + (kx == ky ? reg : 0.0);
+	        	dst[kx + ld_dst*ky] = src[kx + ld_src*ky] + (kx == ky ? reg : static_cast<T>(0));
 	        }
 		}
 	}
@@ -563,7 +567,7 @@
 		int start, delta; singleLoopVals(&start, &delta);
 	    #pragma unroll
 	    for (int ind = start; ind < M; ind += delta){
-			T val = alpha*dotProdMv<T,K>(A, ld_A, b, ind) + (c != NULL ? c[ind] : 0.0);
+			T val = alpha*dotProdMv<T,K>(A, ld_A, b, ind) + (c != NULL ? c[ind] : static_cast<T>(0));
 	    	if (PEQFLAG){d[ind] += val;}
 	    	else{d[ind] = val;}
 		}

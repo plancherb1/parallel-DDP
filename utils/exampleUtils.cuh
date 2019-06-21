@@ -86,8 +86,8 @@
 	__host__
 	void evNorm(T *xActual, T *xGoal, T *eNorm, T *vNorm, T *eePos){
 		compute_eePos_scratch<T>(xActual, &eePos[0]);
-		*eNorm = static_cast<T>(sqrt(pow(eePos[0]-xGoal[0],2) + pow(eePos[1]-xGoal[1],2) + pow(eePos[2]-xGoal[2],2)));
-		*vNorm = 0; for(int i=0;i<NUM_POS;i++){*vNorm+=(T)pow(xActual[NUM_POS+i],2);} *vNorm = static_cast<T>(sqrt(*vNorm));
+		*eNorm = 0; for(int i=0;i<3;i++){T delta = eePos[i]-xGoal[i]; *eNorm+=delta*delta;} *eNorm = static_cast<T>(sqrt(*eNorm));
+		*vNorm = 0; for(int i=0;i<NUM_POS;i++){*vNorm+=xActual[NUM_POS+i]*xActual[NUM_POS+i];} *vNorm = static_cast<T>(sqrt(*vNorm));
 	}
 	template <typename T>
 	__host__

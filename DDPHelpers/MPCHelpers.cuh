@@ -443,7 +443,7 @@
                 #pragma unroll
                 for (int r = startx; r < DIM_R; r += dx){
                     int i = c*ld_A + r;
-                    T val = (FLAG && ksrc >= DIM_N - 1) ? 0.0 : Asrc[i];
+                    T val = (FLAG && ksrc >= DIM_N - 1) ? static_cast<T>(0) : Asrc[i];
                     Adst[i] = val;
                     if(B != nullptr){Bdst[i] = val;}
                 }
@@ -832,7 +832,7 @@
             // then compute the state delta (using the foh)
             for (int ind = start; ind < STATE_SIZE; ind += delta){
                 T val = (static_cast<T>(1.0-fraction)*xk_d[ind] + static_cast<T>(fraction)*xk_u[ind]);
-                dx[ind] = (ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]) - val;
+                dx[ind] = static_cast<T>(ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]) - val;
                 if(PD_GAINS_ON_STATE && ind < NUM_POS){q_out[ind] = static_cast<double>(val);}
             }
             hd__syncthreads();
@@ -871,7 +871,7 @@
             #if USE_ALG_TRACE
                 struct timeval start2, end2;    gettimeofday(&start2,NULL);
             #endif
-            T prevJ, dJ, z;     int iter = 1;   T rho = RHO_INIT;   T drho = 1.0;
+            T prevJ, dJ, z;     int iter = 1;   T rho = RHO_INIT;   T drho = 1;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   T Jout[MAX_ITER+1];   int alphaOut[MAX_ITER+1];
             int finalCostShift = use_cost_shift ? shiftAmount : 0;
             // printf("Last Successful Solve: %d\n",tv->last_successful_solve);
@@ -1057,7 +1057,7 @@
                 struct timeval start2, end2;    gettimeofday(&start2,NULL);
             #endif
             T prevJ, dJ, J, z;      T maxd = 0;     int iter = 1;
-            T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
+            T rho = RHO_INIT;       T drho = 1;     int alphaIndex = 0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
             int finalCostShift = use_cost_shift ? shiftAmount : 0;
             
@@ -1109,7 +1109,7 @@
                 gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
             #endif
             // FORWARD PASS //
-                dJ = -1.0;  alphaIndex = 0; (data->sweepTime).push_back(0.0);    (data->simTime).push_back(0.0);
+                dJ = -1;  alphaIndex = 0; (data->sweepTime).push_back(0.0);    (data->simTime).push_back(0.0);
                 while(1){
                     // FORWARD SWEEP //
                         #if USE_ALG_TRACE
@@ -1210,8 +1210,8 @@
             #if USE_ALG_TRACE
                 struct timeval start2, end2;    gettimeofday(&start2,NULL);
             #endif
-            T prevJ, dJ, J, z;      T maxd = 0; int iter = 1;
-            T rho = RHO_INIT;       T drho = 1.0;   int alphaIndex = 0;
+            T prevJ, dJ, J, z;      T maxd = 0;     int iter = 1;
+            T rho = RHO_INIT;       T drho = 1;     int alphaIndex = 0;
             int shiftAmount = get_time_steps_us_f(tv->t0_plant,tActual_plant);   int alphaOut[MAX_ITER+1];   T Jout[MAX_ITER+1];
             int finalCostShift = use_cost_shift ? shiftAmount : 0;
             
@@ -1263,7 +1263,7 @@
                 gettimeofday(&end,NULL); if(time_delta_ms(start,end) > time_budget){if (DEBUG_SWITCH){printf("Exiting for maxTime\n");} break;};
             #endif
             // FORWARD PASS //
-                dJ = -1.0;  alphaIndex = 0; (data->sweepTime).push_back(0.0);    (data->simTime).push_back(0.0);
+                dJ = -1;  alphaIndex = 0; (data->sweepTime).push_back(0.0);    (data->simTime).push_back(0.0);
                 while(1){
                     // FORWARD SWEEP //
                         #if USE_ALG_TRACE

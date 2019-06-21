@@ -55,11 +55,11 @@ void backprop(T *s_H, T *s_g, T *s_AB, T *s_AB2, T *s_P, T *s_p, \
   	for (int ky = starty; ky < DIM_ABT_c; ky += dy){
     	#pragma unroll
     	for (int kx = startx; kx < DIM_ABT_r; kx += dx){ // multiply column ky of P by row kx of AB' == column of AB place in (kx,ky) -> ky*DIM_ABT_r+kx of AB2
-      		T val = 0.0;
+      		T val = 0;
       		#pragma unroll
       		for (int j=0; j < DIM_P_c; j++){
         		// note P = P + diag(rho) if in P*B
-        		val += s_AB[kx*DIM_AB_r + j] * (s_P[ky*DIM_P_r + j] + STATE_REG*((kx >= DIM_x_r && ky == j) ? rho : 0.0)); 
+        		val += s_AB[kx*DIM_AB_r + j] * (s_P[ky*DIM_P_r + j] + ((STATE_REG && kx >= DIM_x_r && ky == j) ? rho : static_cast<T>(0))); 
       		}
       		s_AB2[ky*DIM_ABT_r + kx] = val;
     	}
@@ -69,11 +69,11 @@ void backprop(T *s_H, T *s_g, T *s_AB, T *s_AB2, T *s_P, T *s_p, \
   	for (int ky = starty; ky < DIM_p_c; ky += dy){
     	#pragma unroll
     	for (int kx = startx; kx < DIM_p_r; kx += dx){ // dim_p_c == 1 so just limits to one set of threads
-     		T val = 0.0;
+     		T val = 0;
       		if (M_F > 1 && onDefectBoundary(iter)){
         		#pragma unroll
         		for (int j=0; j < DIM_p_r; j++){
-          			val += b_d[j] * (s_P[kx + j*DIM_P_r] + STATE_REG*((kx >= DIM_x_r && kx == j) ? rho : 0.0)); // multiply a row of P by d
+          			val += b_d[j] * (s_P[kx + j*DIM_P_r] + ((STATE_REG && kx >= DIM_x_r && kx == j) ? rho : static_cast<T>(0))); // multiply a row of P by d
         		}
       		}
       		s_p[kx] += val;
@@ -98,10 +98,10 @@ __host__ __device__ __forceinline__
 int computeKTdu_dim1(T *s_K, T *s_du, T *s_H, T *s_g, T rho, int ld_KT, \
 					 T *b_KT = nullptr, T *b_du = nullptr){
   	// we need to make sure that s_H is > 0
-  	if (s_H[OFFSET_HUU] <= 0){
+  	if (s_H[OFFSET_HUU] <= static_cast<T>(0)){
     	return 1;
   	}
-  	T val = 1.0/(s_H[OFFSET_HUU] + (!STATE_REG)*rho); // load into each thread
+  	T val = static_cast<T>(1)/(s_H[OFFSET_HUU] + (!STATE_REG ? rho : static_cast<T>(0))); // load into each thread
   	// then multiply through to the gu and hux blocks (computing K and du --> store to global memory)
   	int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
   	#pragma unroll
@@ -171,9 +171,9 @@ int invHuu_dim4(T *s_H, T *s_Huu, T rho){
   	hd__syncthreads();
   	// we now have loaded in all of the adjugates and can easily compute the determinant and final inverse (1/det * adjugates^T)
   	// first compute the det by multiplying the adjugates with the the values in one row
-  	T val = 1/(s_Huu[0]*s_Huu2[0] + s_Huu[1]*s_Huu2[1] + s_Huu[2]*s_Huu2[2] + s_Huu[3]*s_Huu2[3]);
+  	T val = static_cast<T>(1)/(s_Huu[0]*s_Huu2[0] + s_Huu[1]*s_Huu2[1] + s_Huu[2]*s_Huu2[2] + s_Huu[3]*s_Huu2[3]);
   	// test for pd matrix
-  	if (val <= 0){ // failure
+  	if (val <= static_cast<T>(0)){ // failure
     	return 1;
   	}
   	// then multiply through by the det in parallel and transpose into 2nd half of Huu
@@ -232,7 +232,7 @@ void computeCTG(T *s_P, T *s_p, T *s_H, T *s_g, T *s_K, T *s_du, T *s_AB2, \
 		for (int ky = starty; ky < DIM_KT_c; ky += dy){
 		#pragma unroll
 		for (int kx = startx; kx < DIM_KT_r; kx += dx){
-			T val = STATE_REG ? dotProd<T,DIM_K_r>(&s_K[kx*DIM_K_r],1,&s_H[OFFSET_HUU + ky * DIM_H_r],1) : 0.0;
+			T val = STATE_REG ? dotProd<T,DIM_K_r>(&s_K[kx*DIM_K_r],1,&s_H[OFFSET_HUU + ky * DIM_H_r],1) : static_cast<T>(0);
 			s_AB2[kx + ky * DIM_KT_r] = val - s_H[OFFSET_HXU + kx + DIM_H_r * ky];
   		}
 	}
@@ -243,10 +243,10 @@ void computeCTG(T *s_P, T *s_p, T *s_H, T *s_g, T *s_K, T *s_du, T *s_AB2, \
   	for (int ky = starty; ky < DIM_P_c; ky += dy){
     	#pragma unroll
     	for (int kx = startx; kx < DIM_P_r; kx += dx){
-      		T val = 0.0;
+      		T val = 0;
 			#pragma unroll
 			for (int j=0; j < DIM_K_r; j++){
-				val += s_AB2[kx + DIM_KT_r * j] * s_K[ky * DIM_K_r + j] - (STATE_REG ? s_K[kx * DIM_K_r + j] * s_H[OFFSET_HUX_GU + ky * DIM_H_r + j] : 0.0);
+				val += s_AB2[kx + DIM_KT_r * j] * s_K[ky * DIM_K_r + j] - (STATE_REG ? s_K[kx * DIM_K_r + j] * s_H[OFFSET_HUX_GU + ky * DIM_H_r + j] : static_cast<T>(0));
 			}
       		#ifdef __CUDA_ARCH__
       			s_P[kx+ky*DIM_P_r] = s_H[kx+ky*DIM_H_r] + val;
@@ -262,10 +262,10 @@ void computeCTG(T *s_P, T *s_p, T *s_H, T *s_g, T *s_K, T *s_du, T *s_AB2, \
   	for (int ky = starty; ky < DIM_p_c; ky += dy){
     	#pragma unroll
     	for (int kx = startx; kx < DIM_p_r; kx += dx){ // note DIM_p_c == 1
-      		T val = 0.0;
+      		T val = 0;
       		#pragma unroll
       		for (int j=0; j < DIM_du_r; j++){
-        		val += s_du[j] * s_AB2[kx + DIM_KT_r * j] - STATE_REG*s_K[kx * DIM_K_r + j] * s_g[OFFSET_HUX_GU + j];
+        		val += s_du[j] * s_AB2[kx + DIM_KT_r * j] - (STATE_REG ? s_K[kx * DIM_K_r + j] * s_g[OFFSET_HUX_GU + j] : static_cast<T>(0));
       		}
       		s_p[kx] = s_g[kx] + val;
       		#ifdef __CUDA_ARCH__
@@ -287,7 +287,7 @@ void computeFSVars(T *b_ApBK, T *b_Bdu, T *s_AB, T *s_K, T *s_du, int ld_A){
 	for (int ky = starty; ky < DIM_A_c; ky += dy){
 		#pragma unroll
 		for (int kx = startx; kx < DIM_A_r; kx += dx){
-			T val = 0.0;
+			T val = 0;
 			#pragma unroll
 			for (int j=0; j<DIM_u_r; j++){
 				// multiply row kx of B by column ky of K store in (kx,ky) of XM
@@ -300,7 +300,7 @@ void computeFSVars(T *b_ApBK, T *b_Bdu, T *s_AB, T *s_K, T *s_du, int ld_A){
 	for (int ky = starty; ky < DIM_d_c; ky += dy){
 		#pragma unroll
 		for (int kx = startx; kx < DIM_d_r; kx += dx){
-			T val = 0.0;
+			T val = 0;
 			#pragma unroll
 			for (int j=0; j<DIM_du_r; j++){
 				// multiply row kx of B by column ky of du store in (kx,ky) of d
@@ -428,7 +428,7 @@ void backPassThreaded(threadDesc_t desc, T *AB, T *P, T *p, T *Pp, T *pp, T *H, 
    	T s_dx[STATE_SIZE];				T s_Huu[2*DIM_Huu_r*DIM_Huu_c];		T s_temp[DIM_Huu_r + DIM_Huu_c + 1];
    	int i, ks, iterCount, LIN_XFRM_FLAG;
   	// zero the expected cost reduction
-  	dJexp[2*desc.tid] = 0.0;	dJexp[2*desc.tid+1] = 0.0;
+  	dJexp[2*desc.tid] = 0;	dJexp[2*desc.tid+1] = 0;
    	for (unsigned int i2=0; i2<desc.reps; i2++){
       	i = (desc.tid+i2*desc.dim);		LIN_XFRM_FLAG = LINEAR_TRANSFORM_SWITCH;	ks = (N_B*(i+1)-1);
 	    b_Pprev = DIM_P_c*ld_P*(ks-1) + P;		b_pprev = ld_p*(ks-1) + p;
@@ -497,9 +497,9 @@ int backwardPassGPU(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, T *d_g, T
 	    for (int i = 0; i < M_B; i++){fail |= err[i];}
 	    // if an error then reset and increase rho
 	    if (fail){
-	      	*drho = max((*drho)*RHO_FACTOR,RHO_FACTOR);
-	      	*rho = min((*rho)*(*drho), RHO_MAX);
-	      	if (*rho == RHO_MAX && !IGNORE_MAX_ROX_EXIT){return 1;}
+	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR));
+	      	*rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX));
+	      	if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){return 1;}
 	      	else { // try to do the factorization again with a larger rho
 		        if (DEBUG_SWITCH){printf("[!]Inversion Failed Increasing Rho\n");}
 		        // need to reset the d_P, d_p
@@ -544,9 +544,9 @@ int backwardPassCPU(T *AB, T *P, T *p, T *Pp, T *pp, T *H, T *g, T *KT, T *du, T
  		if (M_F > 1){threads[BP_THREADS].join();}
      	// if an error then reset and increase rho
 	    if (fail){
-	      	*drho = max((*drho)*RHO_FACTOR,RHO_FACTOR);
-	      	*rho = min((*rho)*(*drho), RHO_MAX);
-	      	if (*rho == RHO_MAX && !IGNORE_MAX_ROX_EXIT){return 1;}
+	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR));
+	      	*rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX));
+	      	if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){return 1;}
 	      	else { // try to do the factorization again with a larger rho
 	        	if (DEBUG_SWITCH){printf("[!]Inversion Failed Increasing Rho\n");}
 	        	// need to reset the d_P, d_p

@@ -38,7 +38,7 @@ void forwardSweepInner(T *s_ApBK, T *Bk, T *dk, T *s_dx, T *xk, T *xpk, T alpha,
 			#pragma unroll
 			for (int i=0; i<DIM_x_r; i++){val += s_ApBK[kx + DIM_A_r*i]*s_dx[i];}
 			// and then add d and the previos value and save to global memory
-			xkp1[kx] += -alpha*Bk[kx] + val + (onDefectBoundary(k) ? dk[kx] : 0.0);
+			xkp1[kx] += -alpha*Bk[kx] + val + (onDefectBoundary(k) ? dk[kx] : static_cast<T>(0));
 		}
 
 		// then update the offsets for the next pass
@@ -96,7 +96,7 @@ __global__
 void defectKern(T **d_d, T *d_dT, int ld_d){
 	__shared__ T s_d[NUM_TIME_STEPS];
   	// compute the defect in shared memory
-    s_d[threadIdx.x] = 0.0;
+    s_d[threadIdx.x] = static_cast<T>(0);
     if (onDefectBoundary(threadIdx.x)){
       	T *dk = &d_d[blockIdx.x][threadIdx.x*ld_d];
 		for (int c = 0; c < DIM_d_r; c ++){
@@ -136,7 +136,7 @@ T defectComp(T *d, int ld_d){
 	   	#pragma unroll
 	   	for (int a = blockIdx.x; a < NUM_ALPHA; a += gridDim.x){
 	   		// compute cost load into shared memory for reduction
-	      	s_J[threadIdx.x] = 0.0; T *xa = d_x[a]; T *ua = d_u[a];
+	      	s_J[threadIdx.x] = static_cast<T>(0); T *xa = d_x[a]; T *ua = d_u[a];
 	      	#pragma unroll
 	      	for (int k = threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x){
 	      		T *xk = &xa[k*ld_x]; 	T *uk = &ua[k*ld_u];
@@ -182,7 +182,7 @@ T defectComp(T *d, int ld_d){
 		// mode 1 implies that we have computed the cost in the gradient/Hessian comp and need
 		//        to sum up per block across all NUM_TIME_STEPS (must launch with extern shared mem)
 		//        note this also only happens in the init so only one alpha block
-			s_JT[threadIdx.x] = 0.0;
+			s_JT[threadIdx.x] = static_cast<T>(0);
 			for (int k = threadIdx.x; k < NUM_TIME_STEPS; k += blockDim.x){s_JT[threadIdx.x] += d_JT[k];}
 			__syncthreads();
 			// sum it all up per alpha with a reduce pattern
@@ -392,16 +392,16 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 	gpuErrchk(cudaStreamSynchronize(streams[0]));
 	gpuErrchk(cudaMemcpyAsync(J, d_JT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, streams[0]));
 	if (M_F > 1){gpuErrchk(cudaStreamSynchronize(streams[1])); gpuErrchk(cudaMemcpyAsync(d, d_dT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));}
-	*dJ = -1.0; *z = 0.0; T cdJ = -1.0; T cz = 0.0; bool JFlag, zFlag, dFlag;
+	*dJ = -1; *z = 0; T cdJ = -1; T cz = 0; bool JFlag, zFlag, dFlag;
 	gpuErrchk(cudaDeviceSynchronize());
 	for (int i=0; i<NUM_ALPHA; i++){
-		cdJ = prevJ - J[i]; JFlag = cdJ >= 0.0 && cdJ > *dJ;
-		cz = cdJ / (alpha[i]*dJexp[0] + alpha[i]*alpha[i]/2.0*dJexp[1]); zFlag = USE_EXP_RED ? (EXP_RED_MIN < cz && cz < EXP_RED_MAX) : 1;
-		dFlag = M_F == 1 || *ignore_defect ? 1 :  d[i] < MAX_DEFECT_SIZE;
+		cdJ = prevJ - J[i]; JFlag = cdJ >= static_cast<T>(0) && cdJ > *dJ;
+		cz = cdJ / (alpha[i]*dJexp[0] + static_cast<T>(0.5)*alpha[i]*alpha[i]*dJexp[1]); zFlag = USE_EXP_RED ? (static_cast<T>(EXP_RED_MIN) < cz && cz < static_cast<T>(EXP_RED_MAX)) : 1;
+		dFlag = M_F == 1 || *ignore_defect ? 1 :  d[i] < static_cast<T>(MAX_DEFECT_SIZE);
 		// printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
 		// printf("             dJexp[%.12f][%.12f] eq0?[%d][%d]\n",dJexp[0],dJexp[1],abs(dJexp[0])<0.00000000001,abs(dJexp[1])<0.00000000001);
 		if(JFlag && zFlag && dFlag){
-			if (d[i] < USE_MAX_DEFECT){*ignore_defect = 0;} // update the ignore defect
+			if (d[i] < static_cast<T>(MAX_DEFECT_SIZE)){*ignore_defect = 0;} // update the ignore defect
 			*alphaIndex = i; *dJ = cdJ; *z = cz; // update current best index, dJ, z
 			if (!ALPHA_BEST_SWITCH){break;} // pick first alpha strategy   
 		}
@@ -432,7 +432,7 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
     }
     // while we are doing these (very expensive) operation save xp into xp2 which we'll need for the backward pass linear transform
     // and sum expCost -- note: only do this the first time
-    if (alpha == 1.0){
+    if (alpha == static_cast<T>(1)){
         threads[max(FSIM_THREADS,COST_THREADS)] = std::thread(memcpy, std::ref(xp2), std::ref(xp), ld_x*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);} 
         for (unsigned int i=1; i<BP_THREADS; i++){dJexp[0] += dJexp[2*i]; dJexp[1] += dJexp[2*i+1];}
@@ -456,15 +456,15 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
 		for (unsigned int thread_i = 0; thread_i < FSIM_THREADS; thread_i++){*J += JT[thread_i];}
 	#endif
     // don't forget to join the xp2 copy if applicable
-    if (alpha == 1.0){threads[max(FSIM_THREADS,COST_THREADS)].join();}
+    if (alpha == static_cast<T>(1)){threads[max(FSIM_THREADS,COST_THREADS)].join();}
         
 	// if J satisfies line search criteria
-    *dJ = prevJ - *J; 											JFlag = *dJ >= 0.0;
-	*z = *dJ / (alpha*dJexp[0] + alpha*alpha/2.0*dJexp[1]); 	zFlag = !USE_EXP_RED || (EXP_RED_MIN < *z && *z < EXP_RED_MAX);
-    if (M_F > 1){*maxd = defectComp(d,ld_d); dFlag = *maxd < MAX_DEFECT_SIZE;} else{dFlag = 1;}
+    *dJ = prevJ - *J; 											JFlag = *dJ >= static_cast<T>(0);
+	*z = *dJ / (alpha*dJexp[0] + static_cast<T>(0.5)*alpha*alpha*dJexp[1]); 	zFlag = !USE_EXP_RED || (static_cast<T>(EXP_RED_MIN) < *z && *z < static_cast<T>(EXP_RED_MAX));
+    if (M_F > 1){*maxd = defectComp(d,ld_d); dFlag = *maxd < static_cast<T>(MAX_DEFECT_SIZE);} else{dFlag = 1;}
     // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d]\n",alpha,*J,*dJ,*z,*maxd,JFlag,zFlag,dFlag);
     if(JFlag && zFlag && dFlag){
-		if (*ignore_defect && *maxd < USE_MAX_DEFECT){*ignore_defect = 0;}
+		if (*ignore_defect && *maxd < static_cast<T>(MAX_DEFECT_SIZE)){*ignore_defect = 0;}
 		return 0;
     }
     // else fails so need to restore x to xp and u to up (and d to dp if M_F > 1)
@@ -545,15 +545,15 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
     if (startAlpha == 0){threads[FSIM_ALPHA_THREADS*max(FSIM_ALPHA_THREADS,COST_THREADS)].join();}     
 
 	// if J satisfies line search criteria
-	T cdJ = -1.0; T cz = 0.0; T cd = 0.0; int alphaIndex = -1; bool JFlag, zFlag, dFlag;
+	T cdJ = -1; T cz = 0; T cd = 0; int alphaIndex = -1; bool JFlag, zFlag, dFlag;
 	for (unsigned int alpha_i = 0; alpha_i < FSIM_ALPHA_THREADS; alpha_i++){
 		unsigned int alphaInd = startAlpha + alpha_i;	if(alphaInd >= NUM_ALPHA){break;}	T alpha = alphas[alphaInd];					
-		T cJ = Js[alpha_i];		cdJ = prevJ - cJ;					JFlag = cdJ >= 0.0 && cdJ > *dJ;
-		cz = cdJ / (alpha*dJexp[0] + alpha*alpha/2.0*dJexp[1]); 	zFlag = !USE_EXP_RED || (EXP_RED_MIN < cz && cz < EXP_RED_MAX);
-	    if (M_F > 1){cd = defectComp(ds[alphaInd],ld_d); dFlag = cd < MAX_DEFECT_SIZE;} else{dFlag = 1;}
+		T cJ = Js[alpha_i];		cdJ = prevJ - cJ;									JFlag = cdJ >= static_cast<T>(0) && cdJ > *dJ;
+		cz = cdJ / (alpha*dJexp[0] + static_cast<T>(0.5)*alpha*alpha*dJexp[1]); 	zFlag = !USE_EXP_RED || (static_cast<T>(EXP_RED_MIN) < cz && cz < static_cast<T>(EXP_RED_MAX));
+	    if (M_F > 1){cd = defectComp(ds[alphaInd],ld_d); dFlag = cd < static_cast<T>(MAX_DEFECT_SIZE);} else{dFlag = 1;}
 	    // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d]\n",alpha,cJ,cdJ,cz,cd,JFlag,zFlag,dFlag);
 	    if(JFlag && zFlag && dFlag){
-			if (*ignore_defect && cd < USE_MAX_DEFECT){*ignore_defect = 0;} // update the ignore defect
+			if (*ignore_defect && cd < static_cast<T>(MAX_DEFECT_SIZE)){*ignore_defect = 0;} // update the ignore defect
 			alphaIndex = alphaInd; *dJ = cdJ; *z = cz; *J = Js[alpha_i]; *maxd = cd; // update current best index, dJ, z, J, maxd
 			if (!ALPHA_BEST_SWITCH){break;} // pick first alpha strategy   
 	    }
@@ -660,11 +660,11 @@ void forwardPassSLQGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_ApBK, T *d_Bdu,
 	// since NUM_ALPHA <= 32 (usually) the overhead in launching a kernel will outweigh the gains of logN comps vs N serial comps
 	gpuErrchk(cudaStreamSynchronize(streams[0]));
 	gpuErrchk(cudaMemcpyAsync(J, d_JT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, streams[0]));
-	*dJ = -1.0; *z = 0.0; T cdJ = -1.0; T cz = 0.0; bool JFlag, zFlag;
+	*dJ = -1; *z = 0; T cdJ = -1; T cz = 0; bool JFlag, zFlag;
 	gpuErrchk(cudaDeviceSynchronize());
 	for (int i=0; i<NUM_ALPHA; i++){
-		cdJ = prevJ - J[i]; JFlag = cdJ >= 0.0 && cdJ > *dJ;
-		cz = cdJ / (alpha[i]*dJexp[0] + alpha[i]*alpha[i]/2.0*dJexp[1]); zFlag = USE_EXP_RED ? (EXP_RED_MIN < cz && cz < EXP_RED_MAX) : 1;
+		cdJ = prevJ - J[i]; JFlag = cdJ >= static_cast<T>(0) && cdJ > *dJ;
+		cz = cdJ / (alpha[i]*dJexp[0] + static_cast<T>(0.5)*alpha[i]*alpha[i]*dJexp[1]); zFlag = USE_EXP_RED ? (static_cast<T>(EXP_RED_MIN) < cz && cz < static_cast<T>(EXP_RED_MAX)) : 1;
 		//printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]f[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
 		if(JFlag && zFlag){
 			*alphaIndex = i; *dJ = cdJ; *z = cz; // update current best index, dJ, z

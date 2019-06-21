@@ -2,9 +2,9 @@
 
 ### Releases
 [**```v0.1: WAFR 2018 Release```**](https://github.com/plancherb1/parallel-DDP/tree/v0.1)
-holds the code for "[A Performance Analysis of Differential Dynamic Programming on a GPU](https://agile.seas.harvard.edu/publications/performance-analysis-parallel-differential-dynamic-programming-gpu)."
+holds the code for "[A Performance Analysis of Differential Dynamic Programming on a GPU](https://plancherb1.github.io/publication/parallelddp/)."
 
-[**```v0.2: ICRA 2019 Release```**](https://github.com/plancherb1/parallel-DDP/tree/v0.2) extends the previous work by integrating LCM for hardware experiments and cleaning up the code base / interface. <!--An extended abstract describing the hardware experiments can be found [here]().-->
+[**```v0.2: ICRA 2019 Release```**](https://github.com/plancherb1/parallel-DDP/tree/v0.2) extends the previous work by integrating LCM for hardware experiments and cleaning up the code base / interface. An extended abstract describing the hardware experiments can be found [here](https://plancherb1.github.io/publication/parallelddp_icra/).
 
 ### Stucture of this Repository
 * ```config.h``` defines all of the default settings (parallel level, plant, etc.) for an experiment and imports all of the various helper functions and files from the following folders as needed
