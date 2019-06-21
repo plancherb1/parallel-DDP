@@ -163,18 +163,18 @@ T defectComp(T *d, int ld_d){
 	}
 
 #else
-	// cost kern just for summing over M_F or NUM_TIME_STEPS
+	// cost kern just for summing over M_BLOCKS_F or NUM_TIME_STEPS
 	template <typename T, int MODE>
 	__global__
 	void costKern(T *d_JT){
 		auto s_JT = shared_memory_proxy<T>();
 		// mode 0 implies that we have computed the cost in the forward pass and need to sum
-		//        up per block across M_F shooting intervals (extern shared mem is size 0)
+		//        up per block across M_BLOCKS_F shooting intervals (extern shared mem is size 0)
 		if (MODE == 0){
 			int alpha = threadIdx.x;
 			T J = 0;
 			#pragma unroll
-			for (int i=0; i<M_F; i++){J += d_JT[alpha*M_F + i];}
+			for (int i=0; i<M_BLOCKS_F; i++){J += d_JT[alpha*M_BLOCKS_F + i];}
 			__syncthreads();
 			d_JT[alpha] = J;
 		}
@@ -192,7 +192,7 @@ T defectComp(T *d, int ld_d){
 		}
 		// else bad mode
 		else{
-			printf("ERROR: invalid mode for costKern_v2 usage is 0:M_F sum 1:NUM_TIME_STEPS sum 2:NUM_TIME_STEPS comp. Note: need extern shared mem for 1,2.");
+			printf("ERROR: invalid mode for costKern_v2 usage is 0:M_BLOCKS_F sum 1:NUM_TIME_STEPS sum 2:NUM_TIME_STEPS comp. Note: need extern shared mem for 1,2.");
 		}
 	}
 #endif
@@ -231,15 +231,15 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 					 T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE,
 					 int finalCostShift = 0, T *xTarget = nullptr){
 	int start, delta; singleLoopVals(&start,&delta);
-	int kStart = bInd * N_F;
-	unsigned int iters = EE_COST ? N_F : (bInd < M_F - 1 ? N_F : N_F - 1);
+	int kStart = bInd * N_BLOCKS_F;
+	unsigned int iters = EE_COST ? N_BLOCKS_F : (bInd < M_BLOCKS_F - 1 ? N_BLOCKS_F : N_BLOCKS_F - 1);
 	T *xk = &x[kStart*ld_x];
 	T *xkp1 = xk + ld_x;
 	T *uk = &u[kStart*ld_u];
 	T *xpk = &xp[kStart*ld_x];
 	T *KTk = &KT[kStart*ld_KT*DIM_KT_c];
 	T *duk = &du[kStart*ld_du];
-	T *dk = &d[((bInd+1)*N_F-1)*ld_d]; // will only be used once on boundary so lock in
+	T *dk = &d[((bInd+1)*N_BLOCKS_F-1)*ld_d]; // will only be used once on boundary so lock in
 	bool tempFlag = (s_x != nullptr) && (s_u != nullptr);
 	for(unsigned int k=0; k < iters; k++){
 		// load in the x and u and compute controls
@@ -253,14 +253,14 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 		// then write to global memory unless "final" state where we just use for defect on boundary
 		#pragma unroll
 		for (int ind = start; ind < STATE_SIZE; ind += delta){
-			if (k < N_F - 1){xkp1[ind] = s_xkp1[ind];}
-			else if (bInd < M_F - 1){dk[ind] = s_xkp1[ind] - xkp1[ind];}
+			if (k < N_BLOCKS_F - 1){xkp1[ind] = s_xkp1[ind];}
+			else if (bInd < M_BLOCKS_F - 1){dk[ind] = s_xkp1[ind] - xkp1[ind];}
 		}
 		#if EE_COST
 			// Also compute running / final cost if needed (note not on defect "final" states)
-			if (k < N_F - 1 || bInd == M_F - 1){
-				if(tempFlag){costFunc(s_cost,s_eePos,d_xGoal,s_x,s_u,bInd*N_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);}
-				else{		 costFunc(s_cost,s_eePos,d_xGoal,xk,uk,bInd*N_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);}
+			if (k < N_BLOCKS_F - 1 || bInd == M_BLOCKS_F - 1){
+				if(tempFlag){costFunc(s_cost,s_eePos,d_xGoal,s_x,s_u,bInd*N_BLOCKS_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);}
+				else{		 costFunc(s_cost,s_eePos,d_xGoal,xk,uk,bInd*N_BLOCKS_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);}
 			}
 		#endif
 		// update the offsets for the next pass
@@ -296,7 +296,7 @@ void forwardSimKern(T **d_x, T **d_u, T *d_KT, T *d_du, T **d_d, T *d_alpha, \
 					(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,s_x,s_u,s_cost,s_eePos,d_xGoal,s_eeVel,
 					Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);
 	#if EE_COST // sum up the total cost
-		if (threadIdx.y == 0 && threadIdx.x == 0){d_JT[bInd + alphaInd*M_F] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];}
+		if (threadIdx.y == 0 && threadIdx.x == 0){d_JT[bInd + alphaInd*M_BLOCKS_F] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];}
 	#endif
 }
 
@@ -371,9 +371,9 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 	gpuErrchk(cudaMemcpyAsync(d_xp2,d_xp,ld_x*DIM_x_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[3]));
 
 	// also while waiting on the GPU memcpy the expected reduction back that was computed during the back pass and sum
-	gpuErrchk(cudaMemcpyAsync(dJexp, d_dJexp, 2*M_B*sizeof(T), cudaMemcpyDeviceToHost, streams[2]));
+	gpuErrchk(cudaMemcpyAsync(dJexp, d_dJexp, 2*M_BLOCKS_B*sizeof(T), cudaMemcpyDeviceToHost, streams[2]));
 	gpuErrchk(cudaStreamSynchronize(streams[2]));
-	for (int i=1; i<M_B; i++){dJexp[0] += dJexp[2*i]; dJexp[1] += dJexp[2*i+1];}
+	for (int i=1; i<M_BLOCKS_B; i++){dJexp[0] += dJexp[2*i]; dJexp[1] += dJexp[2*i+1];}
 	gpuErrchk(cudaDeviceSynchronize());
 	// ACTUAL FORWARD SIM //
 
@@ -385,19 +385,19 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 		costKern<T,0><<<1,NUM_ALPHA,0,streams[0]>>>(d_JT);
 	#endif
 	gpuErrchk(cudaPeekAtLastError());
-	if (M_F > 1){defectKern<<<NUM_ALPHA,NUM_TIME_STEPS,0,streams[1]>>>(d_d,d_dT,ld_d);	gpuErrchk(cudaPeekAtLastError());}
+	if (M_BLOCKS_F > 1){defectKern<<<NUM_ALPHA,NUM_TIME_STEPS,0,streams[1]>>>(d_d,d_dT,ld_d);	gpuErrchk(cudaPeekAtLastError());}
 
 	// then find the best J that shows improvement
 	// since NUM_ALPHA <= 32 (usually) the overhead in launching a kernel will outweigh the gains of logN comps vs N serial comps
 	gpuErrchk(cudaStreamSynchronize(streams[0]));
 	gpuErrchk(cudaMemcpyAsync(J, d_JT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, streams[0]));
-	if (M_F > 1){gpuErrchk(cudaStreamSynchronize(streams[1])); gpuErrchk(cudaMemcpyAsync(d, d_dT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));}
+	if (M_BLOCKS_F > 1){gpuErrchk(cudaStreamSynchronize(streams[1])); gpuErrchk(cudaMemcpyAsync(d, d_dT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));}
 	*dJ = -1; *z = 0; T cdJ = -1; T cz = 0; bool JFlag, zFlag, dFlag;
 	gpuErrchk(cudaDeviceSynchronize());
 	for (int i=0; i<NUM_ALPHA; i++){
 		cdJ = prevJ - J[i]; JFlag = cdJ >= static_cast<T>(0) && cdJ > *dJ;
 		cz = cdJ / (alpha[i]*dJexp[0] + static_cast<T>(0.5)*alpha[i]*alpha[i]*dJexp[1]); zFlag = USE_EXP_RED ? (static_cast<T>(EXP_RED_MIN) < cz && cz < static_cast<T>(EXP_RED_MAX)) : 1;
-		dFlag = M_F == 1 || *ignore_defect ? 1 :  d[i] < static_cast<T>(MAX_DEFECT_SIZE);
+		dFlag = M_BLOCKS_F == 1 || *ignore_defect ? 1 :  d[i] < static_cast<T>(MAX_DEFECT_SIZE);
 		// printf("Alpha[%f] -> dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d] vs bdJ[%f]\n",alpha[i],cdJ,cz,d[i],JFlag,zFlag,dFlag,*dJ);
 		// printf("             dJexp[%.12f][%.12f] eq0?[%d][%d]\n",dJexp[0],dJexp[1],abs(dJexp[0])<0.00000000001,abs(dJexp[1])<0.00000000001);
 		if(JFlag && zFlag && dFlag){
@@ -424,7 +424,7 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
 	// printf("computing alpha[%f]\n",alpha);
 	*J = 0; 	threadDesc_t desc; 		desc.dim = FSIM_THREADS;
 	for (unsigned int thread_i = 0; thread_i < FSIM_THREADS; thread_i++){
-        desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_THREADS,M_F);
+        desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_THREADS,M_BLOCKS_F);
     	threads[thread_i] = std::thread(&forwardSim<T>, desc, std::ref(x), std::ref(u), std::ref(KT), std::ref(du), std::ref(d), alpha, std::ref(xp), 
     													ld_x, ld_u, ld_KT, ld_du, ld_d, std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JT),
     													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,std::ref(xTarget));
@@ -461,25 +461,25 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
 	// if J satisfies line search criteria
     *dJ = prevJ - *J; 											JFlag = *dJ >= static_cast<T>(0);
 	*z = *dJ / (alpha*dJexp[0] + static_cast<T>(0.5)*alpha*alpha*dJexp[1]); 	zFlag = !USE_EXP_RED || (static_cast<T>(EXP_RED_MIN) < *z && *z < static_cast<T>(EXP_RED_MAX));
-    if (M_F > 1){*maxd = defectComp(d,ld_d); dFlag = *maxd < static_cast<T>(MAX_DEFECT_SIZE);} else{dFlag = 1;}
+    if (M_BLOCKS_F > 1){*maxd = defectComp(d,ld_d); dFlag = *maxd < static_cast<T>(MAX_DEFECT_SIZE);} else{dFlag = 1;}
     // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d]\n",alpha,*J,*dJ,*z,*maxd,JFlag,zFlag,dFlag);
     if(JFlag && zFlag && dFlag){
 		if (*ignore_defect && *maxd < static_cast<T>(MAX_DEFECT_SIZE)){*ignore_defect = 0;}
 		return 0;
     }
-    // else fails so need to restore x to xp and u to up (and d to dp if M_F > 1)
+    // else fails so need to restore x to xp and u to up (and d to dp if M_BLOCKS_F > 1)
     else{
         threads[0] = std::thread(memcpy, std::ref(x), std::ref(xp), ld_x*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
         threads[1] = std::thread(memcpy, std::ref(u), std::ref(up), ld_u*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
-        if (M_F > 1){
+        if (M_BLOCKS_F > 1){
             threads[2] = std::thread(memcpy, std::ref(d), std::ref(dp), ld_d*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
         }
         threads[0].join();
         threads[1].join();
-        if (M_F > 1){threads[2].join();}
+        if (M_BLOCKS_F > 1){threads[2].join();}
         return 1;
     }
     // LINE SEARCH //
@@ -501,7 +501,7 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
 	for (unsigned int alpha_i = 0; alpha_i < FSIM_ALPHA_THREADS; alpha_i++){
 		unsigned int alphaInd = startAlpha + alpha_i; 	if(alphaInd >= NUM_ALPHA){break;}
 		for (unsigned int thread_i = 0; thread_i < FSIM_ALPHA_THREADS; thread_i++){
-	        desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_ALPHA_THREADS,M_F);
+	        desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_ALPHA_THREADS,M_BLOCKS_F);
 	    	threads[alpha_i*FSIM_ALPHA_THREADS+thread_i] = std::thread(&forwardSim<T>, desc, std::ref(xs[alphaInd]), std::ref(us[alphaInd]), std::ref(KT), std::ref(du), std::ref(ds[alphaInd]), alphas[alphaInd], std::ref(xp), 
 	    													ld_x, ld_u, ld_KT, ld_du, ld_d, std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JTs[alphaInd]),
 	    													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,std::ref(xTarget));
@@ -550,7 +550,7 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
 		unsigned int alphaInd = startAlpha + alpha_i;	if(alphaInd >= NUM_ALPHA){break;}	T alpha = alphas[alphaInd];					
 		T cJ = Js[alpha_i];		cdJ = prevJ - cJ;									JFlag = cdJ >= static_cast<T>(0) && cdJ > *dJ;
 		cz = cdJ / (alpha*dJexp[0] + static_cast<T>(0.5)*alpha*alpha*dJexp[1]); 	zFlag = !USE_EXP_RED || (static_cast<T>(EXP_RED_MIN) < cz && cz < static_cast<T>(EXP_RED_MAX));
-	    if (M_F > 1){cd = defectComp(ds[alphaInd],ld_d); dFlag = cd < static_cast<T>(MAX_DEFECT_SIZE);} else{dFlag = 1;}
+	    if (M_BLOCKS_F > 1){cd = defectComp(ds[alphaInd],ld_d); dFlag = cd < static_cast<T>(MAX_DEFECT_SIZE);} else{dFlag = 1;}
 	    // printf("Alpha[%f] -> J[%f]dJ[%f] -> z[%f], d[%f] so flags are J[%d]z[%d]d[%d]\n",alpha,cJ,cdJ,cz,cd,JFlag,zFlag,dFlag);
 	    if(JFlag && zFlag && dFlag){
 			if (*ignore_defect && cd < static_cast<T>(MAX_DEFECT_SIZE)){*ignore_defect = 0;} // update the ignore defect
@@ -641,9 +641,9 @@ void forwardPassSLQGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_ApBK, T *d_Bdu,
 	gpuErrchk(cudaMemcpyAsync(d_xp2,d_xp,ld_x*DIM_x_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[2]));
 
 	// also while waiting on the GPU memcpy the expected reduction back that was computed during the back pass and sum
-	gpuErrchk(cudaMemcpyAsync(dJexp, d_dJexp, 2*M_B*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
+	gpuErrchk(cudaMemcpyAsync(dJexp, d_dJexp, 2*M_BLOCKS_B*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
 	gpuErrchk(cudaStreamSynchronize(streams[1]));
-	for (int i=1; i<M_B; i++){dJexp[0] += dJexp[2*i]; dJexp[1] += dJexp[2*i+1];}
+	for (int i=1; i<M_BLOCKS_B; i++){dJexp[0] += dJexp[2*i]; dJexp[1] += dJexp[2*i+1];}
 	// ACTUAL FORWARD SIM //
 
 	// LINE SEARCH //

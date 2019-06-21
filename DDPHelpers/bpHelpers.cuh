@@ -70,7 +70,7 @@ void backprop(T *s_H, T *s_g, T *s_AB, T *s_AB2, T *s_P, T *s_p, \
     	#pragma unroll
     	for (int kx = startx; kx < DIM_p_r; kx += dx){ // dim_p_c == 1 so just limits to one set of threads
      		T val = 0;
-      		if (M_F > 1 && onDefectBoundary(iter)){
+      		if (M_BLOCKS_F > 1 && onDefectBoundary(iter)){
         		#pragma unroll
         		for (int j=0; j < DIM_p_r; j++){
           			val += b_d[j] * (s_P[kx + j*DIM_P_r] + ((STATE_REG && kx >= DIM_x_r && kx == j) ? rho : static_cast<T>(0))); // multiply a row of P by d
@@ -333,7 +333,7 @@ void computeExpRed(T *s_dJ, T *s_H, T *s_g, T *s_du){
   	}
 }
 
-//<<<M_B,Dim3(ld_H,ld_H)>>>
+//<<<M_BLOCKS_B,Dim3(ld_H,ld_H)>>>
 template <typename T>
 __global__
 void backPassKern(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, \
@@ -353,8 +353,8 @@ void backPassKern(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, \
 	__shared__ T s_Huu[2*DIM_Huu_r*DIM_Huu_c];
 	__shared__ T s_dx[STATE_SIZE];
 	__shared__ T s_temp[DIM_Huu_r + DIM_Huu_c + 1];
-  	for (int block = blockIdx.x; block < M_B; block += gridDim.x){
-	    int ks = (N_B*(block+1)-1);		int LIN_XFRM_FLAG = LINEAR_TRANSFORM_SWITCH;	int iterCount;
+  	for (int block = blockIdx.x; block < M_BLOCKS_B; block += gridDim.x){
+	    int ks = (N_BLOCKS_B*(block+1)-1);		int LIN_XFRM_FLAG = LINEAR_TRANSFORM_SWITCH;	int iterCount;
 	    T *b_Pprev = DIM_P_c*ld_P*(ks-1) + d_P;		T *b_pprev = ld_p*(ks-1) + d_p;
 	    T *b_H = DIM_H_c*ld_H*ks + d_H;				T *b_g = ld_g*ks + d_g;
 	    T *b_P, *b_p, *b_AB, *b_KT, *b_du, *b_d, *b_Bdu, *b_ApBK;
@@ -363,10 +363,10 @@ void backPassKern(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, \
 	        copyMat<T,DIM_P_r,DIM_P_c>(b_Pprev, b_H, ld_P, ld_H);		copyMat<T,DIM_p_r,DIM_p_c>(b_pprev, b_g, ld_p, ld_g);
 	        // then update pointers
 	        b_P = b_Pprev;		b_p = b_pprev;	b_Pprev -= DIM_P_c*ld_P;	b_pprev -= ld_p;		ks--;
-	        b_H -= DIM_H_c*ld_H;	b_g -= ld_g;	iterCount = N_B - 2;		LIN_XFRM_FLAG = 0;
+	        b_H -= DIM_H_c*ld_H;	b_g -= ld_g;	iterCount = N_BLOCKS_B - 2;		LIN_XFRM_FLAG = 0;
 	    }
 	    // else read first from pp to ensure no weird asynchronous stuff (hard to compare) -- and apply linxfrm if asked
-	    else{iterCount = N_B - 1;	b_P = DIM_P_c*ld_P*ks + (FORCE_PARALLEL ? d_Pp : d_P);	b_p = ld_p*ks + (FORCE_PARALLEL ? d_pp : d_p);}
+	    else{iterCount = N_BLOCKS_B - 1;	b_P = DIM_P_c*ld_P*ks + (FORCE_PARALLEL ? d_Pp : d_P);	b_p = ld_p*ks + (FORCE_PARALLEL ? d_pp : d_p);}
 	    // in either case load the rest of the vars
 	    b_AB = DIM_AB_c*ld_AB*ks + d_AB;	b_KT = DIM_KT_c*ld_KT*ks + d_KT;	b_du = ld_du*ks + d_du;
 	    b_d = ld_d*ks + d_d;				b_Bdu = ld_d*ks + d_Bdu;			b_ApBK = DIM_A_c*ld_A*ks + d_ApBK;
@@ -395,8 +395,8 @@ void backPassKern(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, \
 	        // note: if first timestep can skip
 	        if (iter != 0 || blockIdx.x != 0){computeCTG<T>(s_P,s_p,s_H,s_g,s_K,s_du,s_AB2,iter,ld_P,b_Pprev,b_pprev);}
 	        // COMPUTE vars for Forward Sweep store in b_ApBK, b_Bdu, compute from s_AB, s_K, s_du
-	        // note if M_F == 1 can skip
-	        if (M_F > 1){computeFSVars<T>(b_ApBK,b_Bdu,s_AB,s_K,s_du,ld_A);}
+	        // note if M_BLOCKS_F == 1 can skip
+	        if (M_BLOCKS_F > 1){computeFSVars<T>(b_ApBK,b_Bdu,s_AB,s_K,s_du,ld_A);}
 	        // COMPUTE expected cost reduction store in s_dJ, compute from s_H, s_g, and s_du
 	        if (USE_EXP_RED){computeExpRed<T>(s_dJ,s_H,s_g,s_du);}
 	        // Then update the pointers for the next pass if we need to have one
@@ -430,7 +430,7 @@ void backPassThreaded(threadDesc_t desc, T *AB, T *P, T *p, T *Pp, T *pp, T *H, 
   	// zero the expected cost reduction
   	dJexp[2*desc.tid] = 0;	dJexp[2*desc.tid+1] = 0;
    	for (unsigned int i2=0; i2<desc.reps; i2++){
-      	i = (desc.tid+i2*desc.dim);		LIN_XFRM_FLAG = LINEAR_TRANSFORM_SWITCH;	ks = (N_B*(i+1)-1);
+      	i = (desc.tid+i2*desc.dim);		LIN_XFRM_FLAG = LINEAR_TRANSFORM_SWITCH;	ks = (N_BLOCKS_B*(i+1)-1);
 	    b_Pprev = DIM_P_c*ld_P*(ks-1) + P;		b_pprev = ld_p*(ks-1) + p;
 	    b_H = DIM_H_c*ld_H*ks + H;				b_g = ld_g*ks + g;
 	    // be careful that if you are the final block you need to simply copy your Hxx cost -> P and gx -> p back one timestep
@@ -438,10 +438,10 @@ void backPassThreaded(threadDesc_t desc, T *AB, T *P, T *p, T *Pp, T *pp, T *H, 
 	      copyMat<T,DIM_P_r,DIM_P_c>(b_Pprev, b_H, ld_P, ld_H);		copyMat<T,DIM_p_r,DIM_p_c>(b_pprev, b_g, ld_p, ld_g);
 	      // then update pointers
 	      b_P = b_Pprev;		b_p = b_pprev;		b_Pprev -= DIM_P_c*ld_P;	b_pprev -= ld_p;		ks--;
-	      b_H -= DIM_H_c*ld_H;	b_g -= ld_g;		LIN_XFRM_FLAG = 0;			iterCount = N_B - 2;
+	      b_H -= DIM_H_c*ld_H;	b_g -= ld_g;		LIN_XFRM_FLAG = 0;			iterCount = N_BLOCKS_B - 2;
 	    }
 	    // else read first from pp to ensure no weird asynchronous stuff (hard to compare) -- and apply linxfrm if asked
-	    else{iterCount = N_B - 1;	b_P = DIM_P_c*ld_P*ks + (FORCE_PARALLEL ? Pp : P);	b_p = ld_p*ks + (FORCE_PARALLEL ? pp : p);}
+	    else{iterCount = N_BLOCKS_B - 1;	b_P = DIM_P_c*ld_P*ks + (FORCE_PARALLEL ? Pp : P);	b_p = ld_p*ks + (FORCE_PARALLEL ? pp : p);}
 	    // in either case load the rest of the vars
 	    b_AB = DIM_AB_c*ld_AB*ks + AB;		b_KT = DIM_KT_c*ld_KT*ks + KT;		b_du = ld_du*ks + du;
 	    b_d = ld_d*ks + d;					b_Bdu = ld_d*ks + Bdu;				b_ApBK = DIM_A_c*ld_A*ks + ApBK;
@@ -464,7 +464,7 @@ void backPassThreaded(threadDesc_t desc, T *AB, T *P, T *p, T *Pp, T *pp, T *H, 
       		// COMPUTE CTG
          	if (iter != 0 || i != 0){computeCTG<T>(b_Pprev,b_pprev,b_H,b_g,s_K,s_du,s_AB2,iter,ld_P);}
       		// COMPUTE vars for Forward Sweep (ApBK and Bdu)
-         	if (M_F > 1){computeFSVars<T>(b_ApBK,b_Bdu,b_AB,s_K,s_du,ld_A);}
+         	if (M_BLOCKS_F > 1){computeFSVars<T>(b_ApBK,b_Bdu,b_AB,s_K,s_du,ld_A);}
       		// COMPUTE expected cost reduction
          	if (USE_EXP_RED){computeExpRed<T>(&dJexp[2*desc.tid],b_H,b_g,s_du);}
 			// Then update the pointers for the next pass
@@ -489,12 +489,12 @@ int backwardPassGPU(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, T *d_g, T
   	while(1){
 	    int fail = 0;
 	    // launch the kernel to compute the back bass in blocks       
-	    backPassKern<T><<<M_B,dimms,0,streams[0]>>>(d_AB,d_P,d_p,d_Pp,d_pp,d_H,d_g,d_KT,d_du,d_d,d_ApBK,d_Bdu,d_x,d_xp,d_dJexp,d_err,
+	    backPassKern<T><<<M_BLOCKS_B,dimms,0,streams[0]>>>(d_AB,d_P,d_p,d_Pp,d_pp,d_H,d_g,d_KT,d_du,d_d,d_ApBK,d_Bdu,d_x,d_xp,d_dJexp,d_err,
 	                                                *rho,ld_AB,ld_P,ld_p,ld_H,ld_g,ld_KT,ld_du,ld_A,ld_d,ld_x);
 	    // check for an error
 	    gpuErrchk(cudaStreamSynchronize(streams[0]));
-	    gpuErrchk(cudaMemcpy(err, d_err, M_B*sizeof(int), cudaMemcpyDeviceToHost));
-	    for (int i = 0; i < M_B; i++){fail |= err[i];}
+	    gpuErrchk(cudaMemcpy(err, d_err, M_BLOCKS_B*sizeof(int), cudaMemcpyDeviceToHost));
+	    for (int i = 0; i < M_BLOCKS_B; i++){fail |= err[i];}
 	    // if an error then reset and increase rho
 	    if (fail){
 	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR));
@@ -528,20 +528,20 @@ int backwardPassCPU(T *AB, T *P, T *p, T *Pp, T *pp, T *H, T *g, T *KT, T *du, T
      	// compute the back pass threaded
      	threadDesc_t desc;    desc.dim = BP_THREADS;
      	for (unsigned int thread_i = 0; thread_i < BP_THREADS; thread_i++){
-        	desc.tid = thread_i;   desc.reps = compute_reps(thread_i,BP_THREADS,M_B);
+        	desc.tid = thread_i;   desc.reps = compute_reps(thread_i,BP_THREADS,M_BLOCKS_B);
         	threads[thread_i] = std::thread(&backPassThreaded<T>, desc, std::ref(AB), std::ref(P), std::ref(p), std::ref(Pp), std::ref(pp), std::ref(H), 
         														  std::ref(g), std::ref(KT), std::ref(du), std::ref(d), std::ref(ApBK), std::ref(Bdu), 
         														  std::ref(x), std::ref(xp), std::ref(dJexp), std::ref(err), ld_AB, ld_P, ld_p, ld_H, 
         														  ld_g, ld_KT, ld_du, ld_A, ld_d, ld_x, *rho);
         	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, thread_i);}
      	}
-     	// while this runs save d -> dp if M_F > 1
-     	if (M_F > 1){
+     	// while this runs save d -> dp if M_BLOCKS_F > 1
+     	if (M_BLOCKS_F > 1){
      		threads[BP_THREADS] = std::thread(memcpy, std::ref(dp), std::ref(d), ld_d*NUM_TIME_STEPS*sizeof(T));
      		if(FORCE_CORE_SWITCHES){setCPUForThread(threads, BP_THREADS);}
  	 	}
      	for (unsigned int thread_i = 0; thread_i < BP_THREADS; thread_i++){threads[thread_i].join(); fail |= err[thread_i];}
- 		if (M_F > 1){threads[BP_THREADS].join();}
+ 		if (M_BLOCKS_F > 1){threads[BP_THREADS].join();}
      	// if an error then reset and increase rho
 	    if (fail){
 	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR));

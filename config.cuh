@@ -85,11 +85,11 @@ typedef float algType;
 #endif
 
 // parallelization options
-#define M 4
-#define M_B M // how many time steps to do in parallel on back pass
-#define M_F M // how many multiple shooting intervals to use in the forward pass
-#define N_B (NUM_TIME_STEPS/M_B)
-#define N_F (NUM_TIME_STEPS/M_F)
+#define M_BLOCKS 4
+#define M_BLOCKS_B M_BLOCKS // how many time steps to do in parallel on back pass
+#define M_BLOCKS_F M_BLOCKS // how many multiple shooting intervals to use in the forward pass
+#define N_BLOCKS_B (NUM_TIME_STEPS/M_BLOCKS_B)
+#define N_BLOCKS_F (NUM_TIME_STEPS/M_BLOCKS_F)
 #define FORCE_PARALLEL 1 // 0 for better performance 1 for identical output for comp b/t CPU and GPU
 
 // regularizer options
@@ -122,7 +122,7 @@ typedef float algType;
 #ifndef MAX_DEFECT_SIZE
 	#define MAX_DEFECT_SIZE 1.0 // use to not allow new traj with non-physical jump artifacts in it from multiple shooting
 #endif
-#define onDefectBoundary(k) ((((k+1) % N_F) == 0) && (k < NUM_TIME_STEPS - 1))
+#define onDefectBoundary(k) ((((k+1) % N_BLOCKS_F) == 0) && (k < NUM_TIME_STEPS - 1))
 
 // task length / time
 #ifndef TOTAL_TIME
@@ -147,15 +147,15 @@ typedef float algType;
 #if USE_HYPER_THREADING
 	#define COST_THREADS (max(CPU_CORES,1))
 	#define INTEGRATOR_THREADS (max(CPU_CORES,1))
-	#define BP_THREADS (max(min(M_B,2*CPU_CORES),1))
-	#define FSIM_THREADS (max(min(M_F,2*CPU_CORES),1))
-	#define FSIM_ALPHA_THREADS (max(min(M_F,CPU_CORES),1))
+	#define BP_THREADS (max(min(M_BLOCKS_B,2*CPU_CORES),1))
+	#define FSIM_THREADS (max(min(M_BLOCKS_F,2*CPU_CORES),1))
+	#define FSIM_ALPHA_THREADS (max(min(M_BLOCKS_F,CPU_CORES),1))
 #else
 	#define COST_THREADS (max(CPU_CORES/2,1))
 	#define INTEGRATOR_THREADS (max(CPU_CORES/2,1))
-	#define BP_THREADS (max(min(M_B,CPU_CORES),1))
-	#define FSIM_THREADS (max(min(M_F,2*CPU_CORES),1))
-	#define FSIM_ALPHA_THREADS (max(min(M_F,CPU_CORES/2),1))
+	#define BP_THREADS (max(min(M_BLOCKS_B,CPU_CORES),1))
+	#define FSIM_THREADS (max(min(M_BLOCKS_F,2*CPU_CORES),1))
+	#define FSIM_ALPHA_THREADS (max(min(M_BLOCKS_F,CPU_CORES/2),1))
 #endif
 #define MAX_CPU_THREADS (max(max(13,max((max(FSIM_ALPHA_THREADS,FSIM_THREADS)+1)*COST_THREADS + INTEGRATOR_THREADS + 3, FSIM_ALPHA_THREADS*FSIM_ALPHA_THREADS + 1)),3*NUM_ALPHA+3))
 

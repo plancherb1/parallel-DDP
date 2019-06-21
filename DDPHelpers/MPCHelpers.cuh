@@ -207,17 +207,17 @@
         gpuErrchk(cudaMalloc((void**)&(gv->d_ApBK), (md->ld_A)*DIM_A_c*NUM_TIME_STEPS*sizeof(T)));  
 
         // then for cost, alpha, rho, and errors
-        gpuErrchk(cudaMalloc((void**)&(gv->d_JT), (EE_COST ? max(M_F*NUM_ALPHA,NUM_TIME_STEPS) : NUM_ALPHA)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_JT), (EE_COST ? max(M_BLOCKS_F*NUM_ALPHA,NUM_TIME_STEPS) : NUM_ALPHA)*sizeof(T)));
         gv->J = (T *)malloc(NUM_ALPHA*sizeof(T));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_dJexp),2*M_B*sizeof(T)));
-        gv->dJexp = (T *)malloc(2*M_B*sizeof(T));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_dJexp),2*M_BLOCKS_B*sizeof(T)));
+        gv->dJexp = (T *)malloc(2*M_BLOCKS_B*sizeof(T));
         gv->alphaIndex = (int *)malloc(sizeof(int));    *(gv->alphaIndex) = 0;
         gv->alpha = (T *)malloc(NUM_ALPHA*sizeof(T));
         gpuErrchk(cudaMalloc((void**)&(gv->d_alpha), NUM_ALPHA*sizeof(T)));
         for (int i=0; i<NUM_ALPHA; i++){(gv->alpha)[i] = pow(ALPHA_BASE,i);}
         gpuErrchk(cudaMemcpy(gv->d_alpha, gv->alpha, NUM_ALPHA*sizeof(T), cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_err),M_B*sizeof(int)));
-        gv->err = (int *)malloc(M_B*sizeof(int));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_err),M_BLOCKS_B*sizeof(int)));
+        gv->err = (int *)malloc(M_BLOCKS_B*sizeof(int));
 
         // put streams in order of priority
         int priority, minPriority, maxPriority;
@@ -303,11 +303,11 @@
         cv->ApBK = (T *)malloc((md->ld_A)*DIM_A_c*NUM_TIME_STEPS*sizeof(T));  
         // could have FSIM or COST THREADS cost comps
         cv->JT = (T *)malloc(max(FSIM_THREADS,COST_THREADS)*sizeof(T));
-        cv->dJexp = (T *)malloc(2*M_B*sizeof(T));
+        cv->dJexp = (T *)malloc(2*M_BLOCKS_B*sizeof(T));
         // allocate and init alpha
         cv->alpha = (T *)malloc(NUM_ALPHA*sizeof(T));
         for (int i=0; i<NUM_ALPHA; i++){(cv->alpha)[i] = pow(ALPHA_BASE,i);}
-        cv->err = (int *)malloc(M_B*sizeof(int));
+        cv->err = (int *)malloc(M_BLOCKS_B*sizeof(int));
         // load in the Inertia and Tbody if requested
         cv->I = (T *)malloc(36*NUM_POS*sizeof(T));   initI<T>(cv->I);
         cv->Tbody = (T *)malloc(36*NUM_POS*sizeof(T));   initT<T>(cv->Tbody);
@@ -632,7 +632,7 @@
             gpuErrchk(cudaMemsetAsync(d_pp,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[6]));
         }
         gpuErrchk(cudaMemsetAsync(d_du,0,ld_du*NUM_TIME_STEPS*sizeof(T),streams[8]));
-        gpuErrchk(cudaMemsetAsync(d_err,0,M_B*sizeof(int),streams[9]));
+        gpuErrchk(cudaMemsetAsync(d_err,0,M_BLOCKS_B*sizeof(int),streams[9]));
         gpuErrchk(cudaMemsetAsync(d_dT,0,NUM_ALPHA*sizeof(T),streams[10]));
         T *ABN = d_AB + ld_AB*DIM_AB_c*(NUM_TIME_STEPS-2);
         gpuErrchk(cudaMemsetAsync(ABN,0,ld_AB*DIM_AB_c*sizeof(T),streams[11]));
@@ -644,8 +644,8 @@
         #if FULL_ROLLOUT
             rolloutMPCKern<T,NUM_TIME_STEPS><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
         #else    
-            rolloutMPCKern<T,N_F><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
-            if (M_F > 1){rolloutMPCKern2<T><<<1,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,d_xp,dt,shiftAmount,ld_x,ld_u,ld_KT,d_I,d_Tbody);}
+            rolloutMPCKern<T,N_BLOCKS_F><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
+            if (M_BLOCKS_F > 1){rolloutMPCKern2<T><<<1,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,d_xp,dt,shiftAmount,ld_x,ld_u,ld_KT,d_I,d_Tbody);}
         #endif
         // save the shifted into tvars in case all iters fail
         gpuErrchk(cudaMemcpyAsync(x_old, d_xp, ld_x*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
@@ -729,9 +729,9 @@
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
         #else
             T s_dx2[STATE_SIZE];  T s_qdd2[NUM_POS];
-            threads[0] = std::thread(&rolloutMPC<T,N_F>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, std::ref(I), std::ref(Tbody));
+            threads[0] = std::thread(&rolloutMPC<T,N_BLOCKS_F>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, std::ref(I), std::ref(Tbody));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
-            if (M_F > 1){
+            if (M_BLOCKS_F > 1){
                 threads[1] = std::thread(&rolloutMPC2<T>, std::ref(x), std::ref(u), std::ref(KT), std::ref(xp), std::ref(s_dx2), std::ref(s_qdd2), dt, shiftAmount, ld_x, ld_u, ld_KT, std::ref(I), std::ref(Tbody));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
             }
@@ -744,7 +744,7 @@
         threads[11] = std::thread(memcpy, std::ref(KT_old), std::ref(KT), ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 11);}
         // join threads
-        threads[0].join(); if(!FULL_ROLLOUT && M_F > 1){threads[1].join();} threads[2].join(); threads[3].join(); threads[11].join();
+        threads[0].join(); if(!FULL_ROLLOUT && M_BLOCKS_F > 1){threads[1].join();} threads[2].join(); threads[3].join(); threads[11].join();
         if(shiftAmount > 0 || clear_vars){threads[4].join(); threads[5].join(); threads[6].join(); threads[7].join();}
         threads[8].join(); threads[9].join(); threads[10].join();
     }
@@ -879,7 +879,7 @@
             // define kernel dimms
             dim3 ADimms(DIM_A_r,1);//DIM_A_c);
             dim3 bpDimms(8,7);  dim3 dynDimms(8,7);//dim3 bpDimms(DIM_H_r,DIM_H_c);  dim3 dynDimms(36,7);
-            dim3 FPBlocks(M_F,NUM_ALPHA);   dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);     dim3 intDimms(NUM_TIME_STEPS-1,1);
+            dim3 FPBlocks(M_BLOCKS_F,NUM_ALPHA);   dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);     dim3 intDimms(NUM_TIME_STEPS-1,1);
             if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
 
             // load and clear variables as requested and init the alg
@@ -946,7 +946,7 @@
                         gettimeofday(&start2,NULL);
                     #endif
                     // Sweep forward with all alpha in parallel if applicable
-                    if (M_F > 1){
+                    if (M_BLOCKS_F > 1){
                         forwardSweepKern<T><<<NUM_ALPHA,ADimms,0,(gv->streams)[0]>>>(gv->d_x,gv->d_ApBK,gv->d_Bdu,gv->h_d_d[*(gv->alphaIndex)],
                                                                                gv->d_xp,gv->d_alpha,md->ld_x,md->ld_d,md->ld_A);
                         gpuErrchk(cudaPeekAtLastError());   gpuErrchk(cudaDeviceSynchronize());
@@ -1116,7 +1116,7 @@
                             gettimeofday(&start2,NULL);
                         #endif
                         // Do the forward sweep if applicable
-                        if (M_F > 1){forwardSweep<T>(cv->x,cv->ApBK,cv->Bdu,cv->d,cv->xp,(cv->alpha)[alphaIndex],md->ld_x,md->ld_d,md->ld_A);}
+                        if (M_BLOCKS_F > 1){forwardSweep<T>(cv->x,cv->ApBK,cv->Bdu,cv->d,cv->xp,(cv->alpha)[alphaIndex],md->ld_x,md->ld_d,md->ld_A);}
                         #if USE_ALG_TRACE
                             gettimeofday(&end2,NULL);
                             (data->sweepTime).back() += time_delta_ms(start2,end2);
@@ -1270,7 +1270,7 @@
                             gettimeofday(&start2,NULL);
                         #endif
                         // Do the forward sweep if applicable
-                        if (M_F > 1){forwardSweep2<T>(cv->xs, cv->ApBK, cv->Bdu, cv->ds, cv->xp, cv->alpha, alphaIndex, cv->threads, md->ld_x, md->ld_d, md->ld_A);}
+                        if (M_BLOCKS_F > 1){forwardSweep2<T>(cv->xs, cv->ApBK, cv->Bdu, cv->ds, cv->xp, cv->alpha, alphaIndex, cv->threads, md->ld_x, md->ld_d, md->ld_A);}
                         #if USE_ALG_TRACE
                             gettimeofday(&end2,NULL);
                             (data->sweepTime).back() += time_delta_ms(start2,end2);

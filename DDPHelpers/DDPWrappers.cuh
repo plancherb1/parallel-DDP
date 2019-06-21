@@ -26,7 +26,7 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 	// define kernel dimms
 	dim3 ADimms(DIM_A_r,1);//DIM_A_r,DIM_A_c);
 	dim3 bpDimms(8,7); 				dim3 dynDimms(8,7);//(36,7);
-	dim3 FPBlocks(M_F,NUM_ALPHA);	dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);		dim3 intDimms(NUM_TIME_STEPS-1,1);
+	dim3 FPBlocks(M_BLOCKS_F,NUM_ALPHA);	dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);		dim3 intDimms(NUM_TIME_STEPS-1,1);
 	if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
 
 	// load and clear variables as requested and init the alg
@@ -69,7 +69,7 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 			// FORWARD SWEEP //
 				gettimeofday(&start2,NULL);
 				// Sweep forward with all alpha in parallel if applicable
-				if (M_F > 1){
+				if (M_BLOCKS_F > 1){
 					forwardSweepKern<T><<<NUM_ALPHA,ADimms,0,streams[0]>>>(d_x,d_ApBK,d_Bdu,h_d_d[*alphaIndex],d_xp,d_alpha,ld_x,ld_d,ld_A);
 					gpuErrchk(cudaPeekAtLastError());	gpuErrchk(cudaDeviceSynchronize());
 				}
@@ -132,7 +132,7 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 
 		// print the result
 		printf("GPU Parallel blocks:[%d] t:[%f] with FP[%f], FS[%f], BP[%f], NIU[%f] Xf:[%.4f, %.4f] iters:[%d] cost:[%f] max_d[%f]\n",
-					M_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,d[*alphaIndex]);
+					M_BLOCKS_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,d[*alphaIndex]);
 		if (DEBUG_SWITCH){printf("\n");}
 	// EXIT Handling
 }
@@ -190,7 +190,7 @@ void runiLQR_CPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 				// FORWARD SWEEP //
 					gettimeofday(&start2,NULL);
 					// Do the forward sweep if applicable
-					if (M_F > 1){forwardSweep<T>(x, ApBK, Bdu, d, xp, alpha[alphaIndex], ld_x, ld_d, ld_A);}
+					if (M_BLOCKS_F > 1){forwardSweep<T>(x, ApBK, Bdu, d, xp, alpha[alphaIndex], ld_x, ld_d, ld_A);}
 					gettimeofday(&end2,NULL);
 					sweepTime[iter-1] += time_delta_ms(start2,end2);
 				// FORWARD SWEEP //
@@ -242,7 +242,7 @@ void runiLQR_CPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 		*tTime = time_delta_ms(start,end);
 
 		printf("CPU Parallel blocks:[%d] t:[%f] with FP[%f], FS[%f], BP[%f], NIU[%f] Xf:[%.4f, %.4f] iters:[%d] cost:[%f] max_d[%f]\n",
-					M_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,maxd);
+					M_BLOCKS_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,maxd);
 		if (DEBUG_SWITCH){printf("\n");}
 	// EXIT Handling
 }
@@ -299,7 +299,7 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 				// FORWARD SWEEP //
 					gettimeofday(&start2,NULL);
 					// Do the forward sweep if applicable
-					if (M_F > 1){forwardSweep2<T>(xs, ApBK, Bdu, ds, xp, alphas, alphaIndex, threads, ld_x, ld_d, ld_A);}
+					if (M_BLOCKS_F > 1){forwardSweep2<T>(xs, ApBK, Bdu, ds, xp, alphas, alphaIndex, threads, ld_x, ld_d, ld_A);}
 					gettimeofday(&end2,NULL);
 					sweepTime[iter-1] += time_delta_ms(start2,end2);
 				// FORWARD SWEEP //
@@ -357,7 +357,7 @@ void runiLQR_CPU2(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, 
 		*tTime = time_delta_ms(start,end);
 
 		printf("CPU Parallel blocks:[%d] t:[%f] with FP[%f], FS[%f], BP[%f], NIU[%f] Xf:[%.4f, %.4f] iters:[%d] cost:[%f] max_d[%f]\n",
-					M_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,maxd);
+					M_BLOCKS_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,maxd);
 		if (DEBUG_SWITCH){printf("\n");}
 	// EXIT Handling
 }
@@ -383,7 +383,7 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 	// define kernel dimms
 	dim3 ADimms(DIM_A_r,1);//DIM_A_r,DIM_A_c);
 	dim3 bpDimms(8,7); 				dim3 dynDimms(8,7);//(36,7);
-	dim3 FPBlocks(M_F,NUM_ALPHA);	dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);		dim3 intDimms(NUM_TIME_STEPS-1,1);
+	dim3 FPBlocks(M_BLOCKS_F,NUM_ALPHA);	dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);		dim3 intDimms(NUM_TIME_STEPS-1,1);
 	if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
 
 	// load and clear variables as requested and init the alg
@@ -476,7 +476,7 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 
 		// print the result
 		printf("GPU Parallel blocks:[%d] t:[%f] with FP[%f], FS[%f], BP[%f], NIU[%f] Xf:[%.4f, %.4f] iters:[%d] cost:[%f] max_d[%f]\n",
-					M_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,d[*alphaIndex]);
+					M_BLOCKS_B,*tTime,*simTime,*sweepTime,*bpTime,*nisTime,x0[ld_x*(NUM_TIME_STEPS-1)],x0[ld_x*(NUM_TIME_STEPS-1)+1],iter,prevJ,d[*alphaIndex]);
 		if (DEBUG_SWITCH){printf("\n");}
 	// EXIT Handling
 }

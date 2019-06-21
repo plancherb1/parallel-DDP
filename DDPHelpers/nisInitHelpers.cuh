@@ -269,11 +269,11 @@ void nextIterationSetupGPU(T **d_x, T **h_d_x, T *d_xp, T **d_u, T **h_d_u, T *d
 	if (NUM_ALPHA > 1){
 		memcpyCurrAKern<T><<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[4]>>>(d_u,h_d_u[*alphaIndex],*alphaIndex,ld_u*DIM_u_c); gpuErrchk(cudaPeekAtLastError());
 		memcpyCurrAKern<T><<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[5]>>>(d_x,h_d_x[*alphaIndex],*alphaIndex,ld_x*DIM_x_c); gpuErrchk(cudaPeekAtLastError());
-		if (M_F > 1){ memcpyCurrAKern<T><<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[6]>>>(d_d,h_d_d[*alphaIndex],*alphaIndex,ld_d*DIM_d_c); gpuErrchk(cudaPeekAtLastError());}
+		if (M_BLOCKS_F > 1){ memcpyCurrAKern<T><<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[6]>>>(d_d,h_d_d[*alphaIndex],*alphaIndex,ld_d*DIM_d_c); gpuErrchk(cudaPeekAtLastError());}
 	}
 	gpuErrchk(cudaMemcpyAsync(d_xp,h_d_x[*alphaIndex],ld_x*DIM_x_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[7]));
 	gpuErrchk(cudaMemcpyAsync(d_up,h_d_u[*alphaIndex],ld_u*DIM_u_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[8]));
-	if (M_F > 1){gpuErrchk(cudaMemcpyAsync(d_dp,h_d_d[*alphaIndex],ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[9]));}
+	if (M_BLOCKS_F > 1){gpuErrchk(cudaMemcpyAsync(d_dp,h_d_d[*alphaIndex],ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[9]));}
 	// synch on backpass streams
 	gpuErrchk(cudaStreamSynchronize(streams[0])); gpuErrchk(cudaStreamSynchronize(streams[1])); gpuErrchk(cudaStreamSynchronize(streams[2])); gpuErrchk(cudaStreamSynchronize(streams[3]));
 }
@@ -342,11 +342,11 @@ void nextIterationSetupCPU2(T **xs, T *xp, T **us, T *up, T **ds, T *dp, T *AB, 
 	 	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
 	 	threads[1] = std::thread(&memcpyArr<T>, std::ref(us), std::ref(us[*alphaIndex]), ld_u*NUM_TIME_STEPS*sizeof(T), NUM_ALPHA, *alphaIndex);
 	 	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
-		if (M_F > 1){
+		if (M_BLOCKS_F > 1){
 			threads[2] = std::thread(&memcpyArr<T>, std::ref(ds), std::ref(ds[*alphaIndex]), ld_d*NUM_TIME_STEPS*sizeof(T), NUM_ALPHA, *alphaIndex);
 			if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
 		}
-	 	threads[0].join(); threads[1].join(); if (M_F > 1){threads[2].join();}
+	 	threads[0].join(); threads[1].join(); if (M_BLOCKS_F > 1){threads[2].join();}
 	}
 }
 
@@ -373,12 +373,12 @@ void initAlgGPU(T **d_x, T **h_d_x, T *d_xp, T *d_xp2, T **d_u, T **h_d_u, T *d_
 	if (NUM_ALPHA > 1){
 		memcpyCurrAKern<<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[2]>>>(d_u,h_d_u[*alphaIndex],*alphaIndex,ld_u); gpuErrchk(cudaPeekAtLastError());
 		memcpyCurrAKern<<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[3]>>>(d_x,h_d_x[*alphaIndex],*alphaIndex,ld_x); gpuErrchk(cudaPeekAtLastError());
-		if (M_F > 1){memcpyCurrAKern<T><<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[4]>>>(d_d,h_d_d[*alphaIndex],*alphaIndex,ld_d); gpuErrchk(cudaPeekAtLastError());}
+		if (M_BLOCKS_F > 1){memcpyCurrAKern<T><<<NUM_ALPHA-1,NUM_TIME_STEPS,0,streams[4]>>>(d_d,h_d_d[*alphaIndex],*alphaIndex,ld_d); gpuErrchk(cudaPeekAtLastError());}
 	}
 	gpuErrchk(cudaMemcpyAsync(d_xp,h_d_x[*alphaIndex],ld_x*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[5]));
 	gpuErrchk(cudaMemcpyAsync(d_xp2,h_d_x[*alphaIndex],ld_x*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[6]));
 	gpuErrchk(cudaMemcpyAsync(d_up,h_d_u[*alphaIndex],ld_u*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[7]));
-	if (M_F > 1){gpuErrchk(cudaMemcpyAsync(d_dp,h_d_d[*alphaIndex],ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[7]));}
+	if (M_BLOCKS_F > 1){gpuErrchk(cudaMemcpyAsync(d_dp,h_d_d[*alphaIndex],ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[7]));}
 	// get the cost and add epsilon in case the intialization results in zero update for the first pass
 	defectKern<T><<<NUM_ALPHA,NUM_TIME_STEPS,0,streams[5]>>>(d_d,d_dT,ld_d); gpuErrchk(cudaPeekAtLastError());
 	#if !EE_COST
@@ -474,13 +474,13 @@ void initAlgCPU2(T **xs, T *x, T *xp, T *xp2, T **us, T *u, T *up, T *AB, T *H, 
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3*i);}
         threads[3*i+1] = std::thread(memcpy, std::ref(us[i]), std::ref(u), ld_u*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3*i+1);}
-        if (M_F > 1){
+        if (M_BLOCKS_F > 1){
             threads[3*i+2] = std::thread(memcpy, std::ref(ds[i]), std::ref(d), ld_d*NUM_TIME_STEPS*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3*i+2);}
         }	
 	}
 	for(int i = 0; i < NUM_ALPHA; i++){
-		threads[3*i].join();	threads[3*i+1].join();	if (M_F > 1){threads[3*i+2].join();}
+		threads[3*i].join();	threads[3*i+1].join();	if (M_BLOCKS_F > 1){threads[3*i+2].join();}
 	}
 }
 
@@ -497,7 +497,7 @@ int acceptRejectTrajGPU(T **h_d_x, T *d_xp, T **h_d_u, T *d_up, T **h_d_d, T *d_
 		// gpuErrchk(cudaMemcpyAsync(d_p,d_pp,ld_p*DIM_p_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[1]));
 		gpuErrchk(cudaMemcpyAsync(h_d_x[*alphaIndex],d_xp,ld_x*DIM_x_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[0]));
 		gpuErrchk(cudaMemcpyAsync(h_d_u[*alphaIndex],d_up,ld_u*DIM_u_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[1]));
-		if (M_F > 1){gpuErrchk(cudaMemcpyAsync(h_d_d[*alphaIndex],d_dp,ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[2]));}
+		if (M_BLOCKS_F > 1){gpuErrchk(cudaMemcpyAsync(h_d_d[*alphaIndex],d_dp,ld_d*DIM_d_c*NUM_TIME_STEPS*sizeof(T),cudaMemcpyDeviceToDevice,streams[2]));}
 		gpuErrchk(cudaDeviceSynchronize());
 		// check for maxRho failure
 		if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
@@ -532,11 +532,11 @@ int acceptRejectTrajCPU(T *x, T *xp, T *u, T *up, T *d, T *dp, T J, T *prevJ, \
      	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
      	threads[1] = std::thread(memcpy, std::ref(u), std::ref(up), ld_u*NUM_TIME_STEPS*sizeof(T));
      	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
-		if (M_F > 1){
+		if (M_BLOCKS_F > 1){
 			threads[2] = std::thread(memcpy, std::ref(d), std::ref(dp), ld_d*NUM_TIME_STEPS*sizeof(T));
 			if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
 		}
-     	threads[0].join(); threads[1].join(); if (M_F > 1){threads[2].join();}
+     	threads[0].join(); threads[1].join(); if (M_BLOCKS_F > 1){threads[2].join();}
 		// check for maxRho failure
 		if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
 		else if (DEBUG_SWITCH){printf("[!]Forward Pass Failed Increasing Rho\n");}
@@ -569,11 +569,11 @@ int acceptRejectTrajCPU2(T **xs, T *xp, T **us, T *up, T **ds, T *dp, T J, T *pr
      	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
      	threads[1] = std::thread(&memcpyArr<T>, std::ref(us), std::ref(up), ld_u*NUM_TIME_STEPS*sizeof(T), NUM_ALPHA, -1);
      	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
-		if (M_F > 1){
+		if (M_BLOCKS_F > 1){
 			threads[2] = std::thread(&memcpyArr<T>, std::ref(ds), std::ref(dp), ld_d*NUM_TIME_STEPS*sizeof(T), NUM_ALPHA, -1);
 			if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
 		}
-     	threads[0].join(); threads[1].join(); if (M_F > 1){threads[2].join();}
+     	threads[0].join(); threads[1].join(); if (M_BLOCKS_F > 1){threads[2].join();}
 		// check for maxRho failure
 		if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){if (DEBUG_SWITCH){printf("Exiting for maxRho\n");} return 1;}
 		else if (DEBUG_SWITCH){printf("[!]Forward Pass Failed Increasing Rho\n");}
@@ -628,7 +628,7 @@ void loadVarsGPU(T **d_x, T **h_d_x, T *d_xp, T *x0, T **d_u, T **h_d_u, T *d_up
   	}
   	// always clear these
   	gpuErrchk(cudaMemsetAsync(d_du,0,ld_du*NUM_TIME_STEPS*sizeof(T),streams[9]));
-    gpuErrchk(cudaMemsetAsync(d_err,0,M_B*sizeof(int),streams[10]));
+    gpuErrchk(cudaMemsetAsync(d_err,0,M_BLOCKS_B*sizeof(int),streams[10]));
     gpuErrchk(cudaMemsetAsync(d_dT,0,NUM_ALPHA*sizeof(T),streams[11]));
     T *ABN = d_AB + ld_AB*DIM_AB_c*(NUM_TIME_STEPS-2);
     gpuErrchk(cudaMemsetAsync(ABN,0,ld_AB*DIM_AB_c*sizeof(T),streams[12]));
@@ -640,9 +640,9 @@ void loadVarsGPU(T **d_x, T **h_d_x, T *d_xp, T *x0, T **d_u, T **h_d_u, T *d_up
 
     // run initial forward sim if asked
 	if (forwardRolloutFlag){
-		if (!EE_COST){forwardSimKern<T><<<M_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,nullptr,nullptr,
+		if (!EE_COST){forwardSimKern<T><<<M_BLOCKS_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,nullptr,nullptr,
 																	   Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
-		else{forwardSimKern<T><<<M_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,d_xGoal,d_JT,
+		else{forwardSimKern<T><<<M_BLOCKS_F,dynDimms,0,streams[0]>>>(d_x,d_u,d_KT,d_du,d_d,d_alpha,d_xp,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,d_xGoal,d_JT,
 															  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE);}
 		gpuErrchk(cudaPeekAtLastError());
 	}
@@ -716,7 +716,7 @@ void loadVarsCPU(T *x, T *xp, T *x0, T *u, T *up, T *u0, T *P, T *Pp, T *P0, T *
 	if (forwardRolloutFlag){
         threadDesc_t desc;	desc.dim = FSIM_THREADS;
         for (unsigned int thread_i = 0; thread_i < FSIM_THREADS; thread_i++){
-            desc.tid = thread_i; 	desc.reps = compute_reps(thread_i,FSIM_THREADS,M_F);
+            desc.tid = thread_i; 	desc.reps = compute_reps(thread_i,FSIM_THREADS,M_BLOCKS_F);
             #if EE_COST
                 threads[thread_i] = std::thread(&forwardSim<T>, desc, std::ref(x), std::ref(u), std::ref(KT), std::ref(du), std::ref(d), alpha[0], 
                                                         			  std::ref(xp), ld_x, ld_u, ld_KT, ld_du, ld_d, 
@@ -740,7 +740,7 @@ template <typename T>
 __host__ __forceinline__
 void storeVarsGPU(T **h_d_x, T *x0, T **h_d_u, T *u0, int *alphaIndex, cudaStream_t *streams, int ld_x, int ld_u, \
 				  T **d_d = nullptr, T *d_dT = nullptr, T *d = nullptr, int ld_d = 0){
-	bool defectFlag = M_F > 1 && d_d != nullptr && d_dT != nullptr && d != nullptr && ld_d != 0;
+	bool defectFlag = M_BLOCKS_F > 1 && d_d != nullptr && d_dT != nullptr && d != nullptr && ld_d != 0;
 	if (defectFlag){defectKern<<<NUM_ALPHA,NUM_TIME_STEPS,0,streams[0]>>>(d_d,d_dT,ld_d); gpuErrchk(cudaPeekAtLastError());}
 	gpuErrchk(cudaMemcpyAsync(x0, h_d_x[*alphaIndex], ld_x*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
 	gpuErrchk(cudaMemcpyAsync(u0, h_d_u[*alphaIndex], ld_u*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, streams[2]));
@@ -753,7 +753,7 @@ template <typename T>
 __host__ __forceinline__
 void storeVarsCPU(T *x, T *x0, T *u, T *u0, std::thread *threads, int ld_x, int ld_u, \
 				  T *d = nullptr, T *maxd = nullptr, int ld_d = 0){
-	bool defectFlag = M_F > 1 && d != nullptr && maxd != nullptr && ld_d != 0;
+	bool defectFlag = M_BLOCKS_F > 1 && d != nullptr && maxd != nullptr && ld_d != 0;
 	if (defectFlag){*maxd = defectComp(d,ld_d);}
 	threads[0] = std::thread(memcpy, std::ref(x0), std::ref(x), ld_x*NUM_TIME_STEPS*sizeof(T));
 	if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
@@ -819,17 +819,17 @@ void allocateMemory_GPU(T ***d_x, T ***h_d_x, T **d_xp, T **d_xp2, T ***d_u, T *
 	gpuErrchk(cudaMalloc((void**)d_ApBK, (*ld_A)*DIM_A_c*NUM_TIME_STEPS*sizeof(T)));  
 
 	// then for cost, alpha, rho, and errors
-	gpuErrchk(cudaMalloc((void**)d_JT, (EE_COST ? max(M_F*NUM_ALPHA,NUM_TIME_STEPS) : NUM_ALPHA)*sizeof(T)));
+	gpuErrchk(cudaMalloc((void**)d_JT, (EE_COST ? max(M_BLOCKS_F*NUM_ALPHA,NUM_TIME_STEPS) : NUM_ALPHA)*sizeof(T)));
 	*J = (T *)malloc(NUM_ALPHA*sizeof(T));
-	gpuErrchk(cudaMalloc((void**)d_dJexp,2*M_B*sizeof(T)));
-	*dJexp = (T *)malloc(2*M_B*sizeof(T));
+	gpuErrchk(cudaMalloc((void**)d_dJexp,2*M_BLOCKS_B*sizeof(T)));
+	*dJexp = (T *)malloc(2*M_BLOCKS_B*sizeof(T));
 	*alphaIndex = (int *)malloc(sizeof(int*));
 	*alpha = (T *)malloc(NUM_ALPHA*sizeof(T));
 	gpuErrchk(cudaMalloc((void**)d_alpha, NUM_ALPHA*sizeof(T)));
 	for (int i=0; i<NUM_ALPHA; i++){(*alpha)[i] = pow(ALPHA_BASE,i);}
 	gpuErrchk(cudaMemcpy(*d_alpha, *alpha, NUM_ALPHA*sizeof(T), cudaMemcpyHostToDevice));
-	gpuErrchk(cudaMalloc((void**)d_err,M_B*sizeof(int)));
-	*err = (int *)malloc(M_B*sizeof(int));
+	gpuErrchk(cudaMalloc((void**)d_err,M_BLOCKS_B*sizeof(int)));
+	*err = (int *)malloc(M_BLOCKS_B*sizeof(int));
 
 	// put streams in order of priority
 	int priority, minPriority, maxPriority;
@@ -914,11 +914,11 @@ void allocateMemory_CPU(T **x, T **xp, T **xp2, T **u, T **up, T **xGoal, T **P,
 	*ApBK = (T *)malloc((*ld_A)*DIM_A_c*NUM_TIME_STEPS*sizeof(T));  
 	// could have FSIM or COST THREADS cost comps
 	*JT = (T *)malloc(max(FSIM_THREADS,COST_THREADS)*sizeof(T));
-	*dJexp = (T *)malloc(2*M_B*sizeof(T));
+	*dJexp = (T *)malloc(2*M_BLOCKS_B*sizeof(T));
 	// allocate and init alpha
 	*alpha = (T *)malloc(NUM_ALPHA*sizeof(T));
 	for (int i=0; i<NUM_ALPHA; i++){(*alpha)[i] = pow(ALPHA_BASE,i);}
-	*err = (int *)malloc(M_B*sizeof(int));
+	*err = (int *)malloc(M_BLOCKS_B*sizeof(int));
 	// load in the Inertia and Tbody if requested
 	if (I != nullptr){*I = (T *)malloc(36*NUM_POS*sizeof(T));	initI<T>(*I);}
 	if (Tbody != nullptr){*Tbody = (T *)malloc(36*NUM_POS*sizeof(T));	initT<T>(*Tbody);}
