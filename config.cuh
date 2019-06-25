@@ -66,7 +66,9 @@
 	#define USE_ALG_TRACE 1 // 1 for on 0 for off
 #endif
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
-#define FINITE_DIFF_EPSILON 0.00001
+#ifndef FINITE_DIFF_EPSILON
+	#define FINITE_DIFF_EPSILON 0.00001
+#endif
 // define if we are working in doubles or floats
 // typedef double algType;
 typedef float algType;
