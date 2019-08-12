@@ -144,7 +144,7 @@ class LCM_TrajRunner {
                                              static_cast<double>(msg->utime), ld_x, ld_u, ld_KT,
                                              q_prev, u_prev, alpha);
             // if PD Demo Mode then output pos that is far in the future
-            if (PDMode){for(int i = 0; i < NUM_POS; i++){dataOut.joint_position[i] = static_cast<T>(0.5)*(x[(TRAJ_RUNNER_TIME_STEPS-1)*ld_x + i] + static_cast<T>(msg->joint_position_measured[i]));}}
+            if (PDMode){for(int i = 0; i < NUM_POS; i++){dataOut.joint_position[i] = 0.5*(static_cast<double>(x[(TRAJ_RUNNER_TIME_STEPS-1)*ld_x + i]) + msg->joint_position_measured[i]);}}
             // then publish
             if (!err){lcm_ptr.publish(ARM_COMMAND_CHANNEL,&dataOut);}
             else{printf("[!]CRITICAL ERROR: Asked to execute beyond bounds of current traj.\n");}

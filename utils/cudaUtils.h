@@ -509,9 +509,39 @@
 	     	#pragma unroll
 			for (int kx = startx; kx < M; kx += dx){
 	        	T val = alpha*(A[ky + ld_A*kx] + B[ky + ld_B*kx]);
-	        	if (PEQFLAG){C[ky + ld_C*kx] += val;}
-	        	else{C[ky + ld_C*kx] = val;}
+	        	#if PEQFLAG
+					C[ky + ld_C*kx] += val;
+				#else
+					C[ky + ld_C*kx] = val;
+				#endif
 	        }
+		}
+	}
+
+	// add two vectors c (+)= alpha*(a + b)
+	template <typename T, int M, int PEQFLAG = 0>
+	__host__ __device__ __forceinline__
+	void vecAdd(T *c, T *a, T *b, T alpha = 1.0){
+		int start, delta; singleLoopVals(&start,&delta);
+		#pragma unroll
+	    for (int ind = start; ind < M; ind += delta){
+	    	T val = alpha*(a[ind] + b[ind]);
+        	#if PEQFLAG
+				c[ind] += val;
+			#else
+				c[ind] = val;
+			#endif
+		}
+	}
+
+	// add two vectors b += alpha*a
+	template <typename T, int M>
+	__host__ __device__ __forceinline__
+	void vecAdd(T *b, T *a, T alpha = 1.0){
+		int start, delta; singleLoopVals(&start,&delta);
+		#pragma unroll
+	    for (int ind = start; ind < M; ind += delta){
+	    	b[ind] += alpha*a[ind];
 		}
 	}
 
@@ -554,8 +584,11 @@
 	        		val += 	beta*C[ind_C];
 	        	}
 	        	int ind_D = T_D ? ky + ld_D*kx : kx + ld_D*ky;
-	        	if (PEQFLAG){D[ind_D] += val;}
-	        	else{D[ind_D] = val;}
+	        	#if PEQFLAG
+					d[ind_D] += val;
+				#else
+					d[ind_D] = val;
+				#endif
 	        }
 		}
 	}
@@ -568,8 +601,11 @@
 	    #pragma unroll
 	    for (int ind = start; ind < M; ind += delta){
 			T val = alpha*dotProdMv<T,K>(A, ld_A, b, ind) + (c != NULL ? c[ind] : static_cast<T>(0));
-	    	if (PEQFLAG){d[ind] += val;}
-	    	else{d[ind] = val;}
+			#if PEQFLAG
+				d[ind] += val;
+			#else
+				d[ind] = val;
+			#endif
 		}
 	}
 

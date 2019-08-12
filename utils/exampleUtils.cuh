@@ -138,8 +138,10 @@
 		if (mode == 'S'){runLCMSimulator<T>(xInit);}
 		// run various printers
 		else if (mode == 'P'){runPrinter<T>(argv[1][1]);}
+		// run the goal PD mode
+		else if (mode == 'D'){printf("Error: No PD Goals function defined for this taks\n");} // your taks implementation should handle this directly
 		// else error
-		else{printf("Error: Unkown code - usage is: [C]PU or [G]PU MPC Algorithm, Debug [P]rinters, or Kuka [S]imulator\n"); mode = '?';}
+		else{printf("Error: Unkown code - usage is: [C]PU or [G]PU MPC Algorithm, Debug [P]rinters, Kuka [S]imulator, or P[D] Goals\n"); mode = '?';}
 		return (mode == '?');
 	}
 #endif

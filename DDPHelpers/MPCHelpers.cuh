@@ -845,7 +845,7 @@
             }
         }
         // else just use the u directly
-        else{for (int i = start; i < CONTROL_SIZE; i += delta){u_out[i] = uk[i];}}
+        else{for (int i = start; i < CONTROL_SIZE; i += delta){u_out[i] = static_cast<double>(uk[i]);}}
 
         // always return the measured state if pd gains on state are 0
         if(!PD_GAINS_ON_STATE){for (int i = start; i < NUM_POS; i += delta){q_out[i] = qActual[i];}}
