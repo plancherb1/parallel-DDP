@@ -500,22 +500,29 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
 	threadDesc_t desc; 		desc.dim = FSIM_ALPHA_THREADS;	unsigned int threads_launched = 0;
 	for (unsigned int alpha_i = 0; alpha_i < FSIM_ALPHA_THREADS; alpha_i++){
 		unsigned int alphaInd = startAlpha + alpha_i; 	if(alphaInd >= NUM_ALPHA){break;}
-		for (unsigned int thread_i = 0; thread_i < FSIM_ALPHA_THREADS; thread_i++){
-	        desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_ALPHA_THREADS,M_BLOCKS_F);
-	    	threads[alpha_i*FSIM_ALPHA_THREADS+thread_i] = std::thread(&forwardSim<T>, desc, std::ref(xs[alphaInd]), std::ref(us[alphaInd]), std::ref(KT), std::ref(du), std::ref(ds[alphaInd]), alphas[alphaInd], std::ref(xp), 
-	    													ld_x, ld_u, ld_KT, ld_du, ld_d, std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JTs[alphaInd]),
-	    													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,std::ref(xTarget));
-	        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, alpha_i*FSIM_ALPHA_THREADS+thread_i);}	threads_launched++;
+		for (unsigned int thread_i = 0; thread_i < FSIM_THREADS; thread_i++){
+	        desc.tid = thread_i;   desc.reps = compute_reps(thread_i,FSIM_THREADS,M_BLOCKS_F);
+	        #if defined NON_THREADSAFE_DYNAMICS && NON_THREADSAFE_DYNAMICS
+	        	forwardSim<T>(desc, xs[alphaInd], us[alphaInd], KT, du, ds[alphaInd], alphas[alphaInd], xp, ld_x, ld_u, ld_KT, ld_du, ld_d, I, Tbody, xGoal, JTs[alphaInd],
+							  Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget); threads_launched++;
+	        #else
+		    	threads[alpha_i*FSIM_THREADS+thread_i] = std::thread(&forwardSim<T>, desc, std::ref(xs[alphaInd]), std::ref(us[alphaInd]), std::ref(KT), std::ref(du), std::ref(ds[alphaInd]), alphas[alphaInd], std::ref(xp), 
+		    													ld_x, ld_u, ld_KT, ld_du, ld_d, std::ref(I), std::ref(Tbody), std::ref(xGoal), std::ref(JTs[alphaInd]),
+		    													Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,std::ref(xTarget));
+		        if(FORCE_CORE_SWITCHES){setCPUForThread(threads, alpha_i*FSIM_THREADS+thread_i);}	threads_launched++;
+		    #endif
 	    }
 	}
     // while we are doing these (very expensive) operation save xp into xp2 which we'll need for the backward pass linear transform
     // and sum expCost -- note: only do this the first time
     if (startAlpha == 0){
-        threads[FSIM_ALPHA_THREADS*max(FSIM_ALPHA_THREADS,COST_THREADS)] = std::thread(memcpy, std::ref(xp2), std::ref(xp), ld_x*NUM_TIME_STEPS*sizeof(T));
+        threads[FSIM_ALPHA_THREADS*max(FSIM_THREADS,COST_THREADS)] = std::thread(memcpy, std::ref(xp2), std::ref(xp), ld_x*NUM_TIME_STEPS*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);} 
         for (unsigned int i=1; i<BP_THREADS; i++){dJexp[0] += dJexp[2*i]; dJexp[1] += dJexp[2*i+1];}
     }
-	for (unsigned int thread_i = 0; thread_i < threads_launched; thread_i++){threads[thread_i].join();}
+	#if !(defined NON_THREADSAFE_DYNAMICS) || !NON_THREADSAFE_DYNAMICS
+		for (unsigned int thread_i = 0; thread_i < threads_launched; thread_i++){threads[thread_i].join();}
+	#endif
 	// ACTUAL FORWARD SIM //
 
 	// LINE SEARCH //

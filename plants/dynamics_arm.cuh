@@ -335,11 +335,11 @@ void initI(T *s_I){
         s_I[208] = static_cast<T>(1.8);
         s_I[210] = static_cast<T>(0.00108);
         s_I[215] = static_cast<T>(1.8);
-        s_I[216] = static_cast<T>(0.00148*INERTIA_MODIFIER);
+        s_I[216] = static_cast<T>(0.0055*INERTIA_MODIFIER);
         s_I[220] = static_cast<T>(-0.024*INERTIA_MODIFIER);
-        s_I[223] = static_cast<T>(0.00148*INERTIA_MODIFIER);
+        s_I[223] = static_cast<T>(0.0055*INERTIA_MODIFIER);
         s_I[225] = static_cast<T>(0.024*INERTIA_MODIFIER);
-        s_I[230] = static_cast<T>(0.001*INERTIA_MODIFIER);
+        s_I[230] = static_cast<T>(0.005*INERTIA_MODIFIER);
         s_I[235] = static_cast<T>(0.024*INERTIA_MODIFIER);
         s_I[237] = static_cast<T>(1.2+WEIGHT_MODIFIER);
         s_I[240] = static_cast<T>(-0.024*INERTIA_MODIFIER);

@@ -509,11 +509,8 @@
 	     	#pragma unroll
 			for (int kx = startx; kx < M; kx += dx){
 	        	T val = alpha*(A[ky + ld_A*kx] + B[ky + ld_B*kx]);
-	        	#if PEQFLAG
-					C[ky + ld_C*kx] += val;
-				#else
-					C[ky + ld_C*kx] = val;
-				#endif
+	        	if(PEQFLAG){C[ky + ld_C*kx] += val;}
+				else{C[ky + ld_C*kx] = val;}
 	        }
 		}
 	}
@@ -526,11 +523,8 @@
 		#pragma unroll
 	    for (int ind = start; ind < M; ind += delta){
 	    	T val = alpha*(a[ind] + b[ind]);
-        	#if PEQFLAG
-				c[ind] += val;
-			#else
-				c[ind] = val;
-			#endif
+        	if(PEQFLAG){c[ind] += val;}
+			else{c[ind] = val;}
 		}
 	}
 
@@ -584,11 +578,8 @@
 	        		val += 	beta*C[ind_C];
 	        	}
 	        	int ind_D = T_D ? ky + ld_D*kx : kx + ld_D*ky;
-	        	#if PEQFLAG
-					d[ind_D] += val;
-				#else
-					d[ind_D] = val;
-				#endif
+	        	if(PEQFLAG){D[ind_D] += val;}
+				else{D[ind_D] = val;}
 	        }
 		}
 	}
@@ -601,11 +592,8 @@
 	    #pragma unroll
 	    for (int ind = start; ind < M; ind += delta){
 			T val = alpha*dotProdMv<T,K>(A, ld_A, b, ind) + (c != NULL ? c[ind] : static_cast<T>(0));
-			#if PEQFLAG
-				d[ind] += val;
-			#else
-				d[ind] = val;
-			#endif
+			if(PEQFLAG){d[ind] += val;}
+			else{d[ind] = val;}
 		}
 	}
 

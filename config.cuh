@@ -143,7 +143,7 @@ typedef float algType;
 // GPU Stream Options
 #define NUM_STREAMS (max(18,4+NUM_ALPHA))
 // CPU Threading Options
-#define USE_HYPER_THREADING 1 // assumes pairs are 0,CPU_CORES/2, etc. test with cat /sys/devices/system/cpu/cpu0/topology/thread_siblings_list
+#define USE_HYPER_THREADING 0 // assumes pairs are 0,CPU_CORES/2, etc. test with cat /sys/devices/system/cpu/cpu0/topology/thread_siblings_list
 #define FORCE_CORE_SWITCHES 0 // set to 1 to force a cycle across the cores (may improve speed b/c we know that tasks are independent and don't share cache in general)
 #define CPU_CORES (std::thread::hardware_concurrency())
 #if USE_HYPER_THREADING
@@ -151,13 +151,13 @@ typedef float algType;
 	#define INTEGRATOR_THREADS (max(CPU_CORES,1))
 	#define BP_THREADS (max(min(M_BLOCKS_B,2*CPU_CORES),1))
 	#define FSIM_THREADS (max(min(M_BLOCKS_F,2*CPU_CORES),1))
-	#define FSIM_ALPHA_THREADS (max(min(M_BLOCKS_F,CPU_CORES),1))
+	#define FSIM_ALPHA_THREADS (max(2*CPU_CORES/M_BLOCKS_F,1))
 #else
 	#define COST_THREADS (max(CPU_CORES/2,1))
 	#define INTEGRATOR_THREADS (max(CPU_CORES/2,1))
 	#define BP_THREADS (max(min(M_BLOCKS_B,CPU_CORES),1))
-	#define FSIM_THREADS (max(min(M_BLOCKS_F,2*CPU_CORES),1))
-	#define FSIM_ALPHA_THREADS (max(min(M_BLOCKS_F,CPU_CORES/2),1))
+	#define FSIM_THREADS (max(min(M_BLOCKS_F,CPU_CORES),1))
+	#define FSIM_ALPHA_THREADS (max(CPU_CORES/M_BLOCKS_F,1))
 #endif
 #define MAX_CPU_THREADS (max(max(13,max((max(FSIM_ALPHA_THREADS,FSIM_THREADS)+1)*COST_THREADS + INTEGRATOR_THREADS + 3, FSIM_ALPHA_THREADS*FSIM_ALPHA_THREADS + 1)),3*NUM_ALPHA+3))
 
