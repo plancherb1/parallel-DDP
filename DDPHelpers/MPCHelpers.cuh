@@ -101,6 +101,7 @@
         int ld_x;   int ld_u;   int ld_P;   int ld_p; 
         int ld_AB;  int ld_H;   int ld_g;
         int ld_KT;  int ld_du;  int ld_d;   int ld_A;
+        int knot_points;
     };
 
     template <typename T>
@@ -135,9 +136,9 @@
     template <typename T>
     __host__ __forceinline__
     void allocateTrajVars(trajVars<T> *tv, matDimms *md){
-        tv->x =  (T *)malloc((md->ld_x)*NUM_TIME_STEPS*sizeof(T));
-        tv->u =  (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
-        tv->KT = (T *)malloc((md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
+        tv->x =  (T *)malloc((md->ld_x)*(md->knot_points)*sizeof(T));
+        tv->u =  (T *)malloc((md->ld_u)*(md->knot_points)*sizeof(T));
+        tv->KT = (T *)malloc((md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T));
         tv->ld_x = md->ld_x;    tv->ld_u = md->ld_u;    tv->ld_KT = md->ld_KT;
         tv->t0_plant = 0;       tv->t0_sys = 0;         tv->first_pass = true;
         tv->lock = new std::mutex; 
@@ -152,29 +153,31 @@
     }
     template <typename T>
     __host__ __forceinline__
-    void allocateMemory_GPU_MPC(GPUVars<T> *gv, matDimms *md, trajVars<T> *tv){
+    void allocateMemory_GPU_MPC(GPUVars<T> *gv, matDimms *md, trajVars<T> *tv, int knot_points = NUM_TIME_STEPS){
+        md->knot_points = knot_points;
         // first use the old memory allocator which we know works
-        // note on device x,u is [NUM_ALPHA][SIZE*NUM_TIME_STEPS]
-        //      on host   x,u is [SIZE*NUM_TIME_STEPS]
+        // note on device x,u is [NUM_ALPHA][SIZE*(md->knot_points)]
+        //      on host   x,u is [SIZE*(md->knot_points)]
         md->ld_u = DIM_u_r;    md->ld_x = DIM_x_r;    // we should use pitched malloc but for now just set to DIM_<>_r
         gv->h_d_x = (T **)malloc(NUM_ALPHA*sizeof(T*));
         gv->h_d_u = (T **)malloc(NUM_ALPHA*sizeof(T*));
         gpuErrchk(cudaMalloc((void**)&(gv->d_x), NUM_ALPHA*sizeof(T*))); 
         gpuErrchk(cudaMalloc((void**)&(gv->d_u), NUM_ALPHA*sizeof(T*)));
         for (int i=0; i<NUM_ALPHA; i++){
-            gpuErrchk(cudaMalloc((void**)&((gv->h_d_x)[i]),(md->ld_x)*NUM_TIME_STEPS*sizeof(T)));
-            gpuErrchk(cudaMalloc((void**)&((gv->h_d_u)[i]),(md->ld_u)*NUM_TIME_STEPS*sizeof(T)));
+            gpuErrchk(cudaMalloc((void**)&((gv->h_d_x)[i]),(md->ld_x)*(md->knot_points)*sizeof(T)));
+            gpuErrchk(cudaMalloc((void**)&((gv->h_d_u)[i]),(md->ld_u)*(md->knot_points)*sizeof(T)));
         }
-        gpuErrchk(cudaMalloc((void**)&(gv->d_xp), (md->ld_x)*NUM_TIME_STEPS*sizeof(T))); 
-        gpuErrchk(cudaMalloc((void**)&(gv->d_xp2), (md->ld_x)*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_x_old), (md->ld_x)*NUM_TIME_STEPS*sizeof(T))); 
-        gpuErrchk(cudaMalloc((void**)&(gv->d_up), (md->ld_u)*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_u_old), (md->ld_u)*NUM_TIME_STEPS*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_xp), (md->ld_x)*(md->knot_points)*sizeof(T))); 
+        gpuErrchk(cudaMalloc((void**)&(gv->d_xp2), (md->ld_x)*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_x_old), (md->ld_x)*(md->knot_points)*sizeof(T))); 
+        gpuErrchk(cudaMalloc((void**)&(gv->d_up), (md->ld_u)*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_u_old), (md->ld_u)*(md->knot_points)*sizeof(T)));
         gpuErrchk(cudaMemcpy(gv->d_x, gv->h_d_x, NUM_ALPHA*sizeof(T*), cudaMemcpyHostToDevice));
         gpuErrchk(cudaMemcpy(gv->d_u, gv->h_d_u, NUM_ALPHA*sizeof(T*), cudaMemcpyHostToDevice));
 
         // and for the xGoal and nominal target
-        int goalSize = EE_COST ? 6 : (md->ld_x);
+        int goalSize = EE_COST_PDDP ? (USE_TRACKING_COST ? (md->knot_points) : 1) * 6 : (md->ld_x);
+        printf("Allocating [%d]\n",goalSize);
         gv->xGoal = (T *)malloc(goalSize*sizeof(T));
         gpuErrchk(cudaMalloc((void**)&(gv->d_xGoal),goalSize*sizeof(T)));
         gv->xTarget = (T *)malloc((md->ld_x)*sizeof(T));
@@ -183,31 +186,31 @@
         // allocate memory with pitched malloc and thus collect the lds (for now just set to DIM_<>_r)
         md->ld_P = DIM_P_r;    md->ld_p = DIM_p_r;    md->ld_AB = DIM_AB_r;  md->ld_H = DIM_H_r;    md->ld_g = DIM_g_r;
         md->ld_KT = DIM_KT_r;  md->ld_du = DIM_du_r;  md->ld_d = DIM_d_r;    md->ld_A = DIM_A_r;
-        gpuErrchk(cudaMalloc((void**)&(gv->d_AB),(md->ld_AB)*DIM_AB_c*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_P),(md->ld_P)*DIM_P_c*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_Pp),(md->ld_P)*DIM_P_c*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_p),(md->ld_p)*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_pp),(md->ld_p)*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_H),(md->ld_H)*DIM_H_c*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_g),(md->ld_g)*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_KT),(md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_KT_old),(md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T)));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_du),(md->ld_du)*NUM_TIME_STEPS*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_AB),(md->ld_AB)*DIM_AB_c*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_P),(md->ld_P)*DIM_P_c*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_Pp),(md->ld_P)*DIM_P_c*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_p),(md->ld_p)*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_pp),(md->ld_p)*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_H),(md->ld_H)*DIM_H_c*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_g),(md->ld_g)*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_KT),(md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_KT_old),(md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_du),(md->ld_du)*(md->knot_points)*sizeof(T)));
         gv->h_d_d = (T **)malloc(NUM_ALPHA*sizeof(T*));
         gpuErrchk(cudaMalloc((void**)&(gv->d_d), NUM_ALPHA*sizeof(T*)));
         for (int i=0; i<NUM_ALPHA; i++){
-            gpuErrchk(cudaMalloc((void**)&((gv->h_d_d)[i]),(md->ld_d)*NUM_TIME_STEPS*sizeof(T)));  
+            gpuErrchk(cudaMalloc((void**)&((gv->h_d_d)[i]),(md->ld_d)*(md->knot_points)*sizeof(T)));  
         } 
         gpuErrchk(cudaMemcpy(gv->d_d, gv->h_d_d, NUM_ALPHA*sizeof(T*), cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_dp), (md->ld_d)*NUM_TIME_STEPS*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_dp), (md->ld_d)*(md->knot_points)*sizeof(T)));
         gpuErrchk(cudaMalloc((void**)&(gv->d_dT), NUM_ALPHA*sizeof(T)));
         gpuErrchk(cudaMalloc((void**)&(gv->d_dM), sizeof(T))); 
         gv->d = (T *)malloc(NUM_ALPHA*sizeof(T));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_Bdu), (md->ld_d)*NUM_TIME_STEPS*sizeof(T)));  
-        gpuErrchk(cudaMalloc((void**)&(gv->d_ApBK), (md->ld_A)*DIM_A_c*NUM_TIME_STEPS*sizeof(T)));  
+        gpuErrchk(cudaMalloc((void**)&(gv->d_Bdu), (md->ld_d)*(md->knot_points)*sizeof(T)));  
+        gpuErrchk(cudaMalloc((void**)&(gv->d_ApBK), (md->ld_A)*DIM_A_c*(md->knot_points)*sizeof(T)));  
 
         // then for cost, alpha, rho, and errors
-        gpuErrchk(cudaMalloc((void**)&(gv->d_JT), (EE_COST ? max(M_BLOCKS_F*NUM_ALPHA,NUM_TIME_STEPS) : NUM_ALPHA)*sizeof(T)));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_JT), (EE_COST_PDDP ? max(M_BLOCKS_F*NUM_ALPHA,(md->knot_points)) : NUM_ALPHA)*sizeof(T)));
         gv->J = (T *)malloc(NUM_ALPHA*sizeof(T));
         gpuErrchk(cudaMalloc((void**)&(gv->d_dJexp),2*M_BLOCKS_B*sizeof(T)));
         gv->dJexp = (T *)malloc(2*M_BLOCKS_B*sizeof(T));
@@ -241,8 +244,8 @@
         // not using cudaFuncSetCacheConfig because documentation says may induce syncs which we don't want
 
         // the additionally allocate xActual / d_xActual
-        gv->xActual = (T *)malloc(STATE_SIZE*sizeof(T));
-        gpuErrchk(cudaMalloc((void**)&(gv->d_xActual), STATE_SIZE*sizeof(T)));
+        gv->xActual = (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
+        gpuErrchk(cudaMalloc((void**)&(gv->d_xActual), STATE_SIZE_PDDP*sizeof(T)));
         // and the current trajVars
         allocateTrajVars<T>(tv,md);
         gpuErrchk(cudaDeviceSynchronize());
@@ -273,34 +276,36 @@
 
     template <typename T>
     __host__ __forceinline__
-    void allocateMemory_CPU_MPC(CPUVars<T> *cv, matDimms *md, trajVars<T> *tv){
+    void allocateMemory_CPU_MPC(CPUVars<T> *cv, matDimms *md, trajVars<T> *tv, int knot_points = NUM_TIME_STEPS){
+        md->knot_points = knot_points;
         md->ld_x = DIM_x_r;    md->ld_u = DIM_u_r;
-        cv->x = (T *)malloc((md->ld_x)*NUM_TIME_STEPS*sizeof(T));
-        cv->xp = (T *)malloc((md->ld_x)*NUM_TIME_STEPS*sizeof(T)); 
-        cv->xp2 = (T *)malloc((md->ld_x)*NUM_TIME_STEPS*sizeof(T));
-        cv->x_old = (T *)malloc((md->ld_x)*NUM_TIME_STEPS*sizeof(T));
-        cv->u = (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
-        cv->up = (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
-        cv->u_old = (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
-        int goalSize = EE_COST ? 6 : STATE_SIZE;    cv->xGoal = (T *)malloc(goalSize*sizeof(T));
+        cv->x = (T *)malloc((md->ld_x)*(md->knot_points)*sizeof(T));
+        cv->xp = (T *)malloc((md->ld_x)*(md->knot_points)*sizeof(T)); 
+        cv->xp2 = (T *)malloc((md->ld_x)*(md->knot_points)*sizeof(T));
+        cv->x_old = (T *)malloc((md->ld_x)*(md->knot_points)*sizeof(T));
+        cv->u = (T *)malloc((md->ld_u)*(md->knot_points)*sizeof(T));
+        cv->up = (T *)malloc((md->ld_u)*(md->knot_points)*sizeof(T));
+        cv->u_old = (T *)malloc((md->ld_u)*(md->knot_points)*sizeof(T));
+        int goalSize = EE_COST_PDDP ? (USE_TRACKING_COST ? (md->knot_points) : 1) * 6 : STATE_SIZE_PDDP;
+        cv->xGoal = (T *)malloc(goalSize*sizeof(T));
         cv->xTarget = (T *)malloc((md->ld_x)*sizeof(T));
         // allocate memory for vars with pitched malloc and thus collect the lds (for now just set ld = DIM_<>_r)
         md->ld_AB = DIM_AB_r;  md->ld_P = DIM_P_r;    md->ld_p = DIM_p_r;    md->ld_H = DIM_H_r;
         md->ld_g = DIM_g_r;    md->ld_KT = DIM_KT_r;  md->ld_du = DIM_du_r;  md->ld_d = DIM_d_r;    md->ld_A = DIM_A_r;
-        cv->P = (T *)malloc((md->ld_P)*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
-        cv->Pp = (T *)malloc((md->ld_P)*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
-        cv->p = (T *)malloc((md->ld_p)*NUM_TIME_STEPS*sizeof(T));
-        cv->pp = (T *)malloc((md->ld_p)*NUM_TIME_STEPS*sizeof(T));
-        cv->AB = (T *)malloc((md->ld_AB)*DIM_AB_c*NUM_TIME_STEPS*sizeof(T));
-        cv->H = (T *)malloc((md->ld_H)*DIM_H_c*NUM_TIME_STEPS*sizeof(T));
-        cv->g = (T *)malloc((md->ld_g)*NUM_TIME_STEPS*sizeof(T));
-        cv->KT = (T *)malloc((md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
-        cv->KT_old = (T *)malloc((md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
-        cv->du = (T *)malloc((md->ld_du)*NUM_TIME_STEPS*sizeof(T));
-        cv->d = (T *)malloc((md->ld_d)*NUM_TIME_STEPS*sizeof(T));
-        cv->dp = (T *)malloc((md->ld_d)*NUM_TIME_STEPS*sizeof(T));
-        cv->Bdu = (T *)malloc((md->ld_d)*NUM_TIME_STEPS*sizeof(T));  
-        cv->ApBK = (T *)malloc((md->ld_A)*DIM_A_c*NUM_TIME_STEPS*sizeof(T));  
+        cv->P = (T *)malloc((md->ld_P)*DIM_P_c*(md->knot_points)*sizeof(T));
+        cv->Pp = (T *)malloc((md->ld_P)*DIM_P_c*(md->knot_points)*sizeof(T));
+        cv->p = (T *)malloc((md->ld_p)*(md->knot_points)*sizeof(T));
+        cv->pp = (T *)malloc((md->ld_p)*(md->knot_points)*sizeof(T));
+        cv->AB = (T *)malloc((md->ld_AB)*DIM_AB_c*(md->knot_points)*sizeof(T));
+        cv->H = (T *)malloc((md->ld_H)*DIM_H_c*(md->knot_points)*sizeof(T));
+        cv->g = (T *)malloc((md->ld_g)*(md->knot_points)*sizeof(T));
+        cv->KT = (T *)malloc((md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T));
+        cv->KT_old = (T *)malloc((md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T));
+        cv->du = (T *)malloc((md->ld_du)*(md->knot_points)*sizeof(T));
+        cv->d = (T *)malloc((md->ld_d)*(md->knot_points)*sizeof(T));
+        cv->dp = (T *)malloc((md->ld_d)*(md->knot_points)*sizeof(T));
+        cv->Bdu = (T *)malloc((md->ld_d)*(md->knot_points)*sizeof(T));  
+        cv->ApBK = (T *)malloc((md->ld_A)*DIM_A_c*(md->knot_points)*sizeof(T));  
         // could have FSIM or COST THREADS cost comps
         cv->JT = (T *)malloc(max(FSIM_THREADS,COST_THREADS)*sizeof(T));
         cv->dJexp = (T *)malloc(2*M_BLOCKS_B*sizeof(T));
@@ -312,7 +317,7 @@
         cv->I = (T *)malloc(36*NUM_POS*sizeof(T));   initI<T>(cv->I);
         cv->Tbody = (T *)malloc(36*NUM_POS*sizeof(T));   initT<T>(cv->Tbody);
         // the additionally allocate xActual
-        cv->xActual = (T *)malloc(STATE_SIZE*sizeof(T));
+        cv->xActual = (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
         // and the current trajVars
         allocateTrajVars<T>(tv,md);
         // and the threads
@@ -330,9 +335,9 @@
         cv->ds = (T **)malloc(NUM_ALPHA*sizeof(T*));
         cv->JTs = (T **)malloc(NUM_ALPHA*sizeof(T*));
         for (int i = 0; i < NUM_ALPHA; i++){
-            (cv->xs)[i] = (T *)malloc((md->ld_x)*NUM_TIME_STEPS*sizeof(T));
-            (cv->us)[i] = (T *)malloc((md->ld_u)*NUM_TIME_STEPS*sizeof(T));
-            (cv->ds)[i] = (T *)malloc((md->ld_d)*NUM_TIME_STEPS*sizeof(T));
+            (cv->xs)[i] = (T *)malloc((md->ld_x)*(md->knot_points)*sizeof(T));
+            (cv->us)[i] = (T *)malloc((md->ld_u)*(md->knot_points)*sizeof(T));
+            (cv->ds)[i] = (T *)malloc((md->ld_d)*(md->knot_points)*sizeof(T));
             (cv->JTs)[i] = (T *)malloc(max(FSIM_THREADS,COST_THREADS)*sizeof(T));
         }
     }
@@ -368,16 +373,16 @@
 // 2: MPC Alg Helpers //
     template <typename T>
     __global__
-    void costKern_MPC(T *d_x, T *d_u, T *d_xg, int ld_x, int ld_u, T *d_Tbody, T *d_JT){
-        __shared__ T s_x[STATE_SIZE];   __shared__ T s_u[NUM_POS];
+    void costKern_MPC(T *d_x, T *d_u, T *d_xg, int ld_x, int ld_u, T *d_Tbody, T *d_JT, int knot_points){
+        __shared__ T s_x[STATE_SIZE_PDDP];   __shared__ T s_u[NUM_POS];
         __shared__ T s_sinq[NUM_POS];   __shared__ T s_cosq[NUM_POS];
         __shared__ T s_Tb[36*NUM_POS];  __shared__ T s_T[36*NUM_POS];
         __shared__ T s_eePos[6];        d_JT[blockIdx.x] = 0;
-        for (int k = blockIdx.x; k < NUM_TIME_STEPS; k += gridDim.x){
+        for (int k = blockIdx.x; k < knot_points; k += gridDim.x){
             T *xk = &d_x[k*ld_x];           T *uk = &d_u[k*ld_u];
             // load in the states and controls
             #pragma unroll
-            for (int ind = threadIdx.x + threadIdx.y*blockDim.x; ind < STATE_SIZE; ind += blockDim.x*blockDim.y){
+            for (int ind = threadIdx.x + threadIdx.y*blockDim.x; ind < STATE_SIZE_PDDP; ind += blockDim.x*blockDim.y){
                 s_x[ind] = xk[ind];     if (ind < NUM_POS){s_u[ind] = uk[ind];}
             }
             __syncthreads();
@@ -424,10 +429,40 @@
 
     template <typename T, int DIM_R, int DIM_C, int DIM_N, bool FLAG = 0>
     __host__ __device__ __forceinline__
-    void shiftAndCopy(T *A, int shiftVal, int ld_A, T *B = nullptr){
+    void shiftAndCopy(T *A, int shiftVal, int ld_A, int knot_points, T *B = nullptr){
         if (shiftVal == 0){
             if (B == nullptr){return;}// early exit if we don't have to do anything
-            else{memcpy(B,A,ld_A*DIM_C*NUM_TIME_STEPS*sizeof(T)); return;} // just a memcpy so do that
+            else{memcpy(B,A,ld_A*DIM_C*knot_points*sizeof(T)); return;} // just a memcpy so do that
+        } 
+        // else do the whole shift and copy thing
+        int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
+        int ksrc = shiftVal;
+        #pragma unroll
+        for (int k = 0; k < DIM_N - 1; k++){
+            int dstOffset = ld_A*DIM_C*k;
+            T *Adst = A + dstOffset;
+            T *Bdst = B + dstOffset;
+            T *Asrc = A + ld_A*DIM_C*ksrc;
+            #pragma unroll
+            for (int c = starty; c < DIM_C; c += dy){
+                #pragma unroll
+                for (int r = startx; r < DIM_R; r += dx){
+                    int i = c*ld_A + r;
+                    T val = (FLAG && ksrc >= DIM_N - 1) ? static_cast<T>(0) : Asrc[i];
+                    Adst[i] = val;
+                    if(B != nullptr){Bdst[i] = val;}
+                }
+            }
+            if (ksrc < DIM_N - 1){ksrc++;}
+        }
+    }
+
+    template <typename T, int DIM_R, int DIM_C, bool FLAG = 0>
+    __host__ __device__ __forceinline__
+    void shiftAndCopy(T *A, int shiftVal, int ld_A, int knot_points, int DIM_N, T *B = nullptr){
+        if (shiftVal == 0){
+            if (B == nullptr){return;}// early exit if we don't have to do anything
+            else{memcpy(B,A,ld_A*DIM_C*knot_points*sizeof(T)); return;} // just a memcpy so do that
         } 
         // else do the whole shift and copy thing
         int starty, dy, startx, dx; doubleLoopVals(&starty,&dy,&startx,&dx);
@@ -454,8 +489,14 @@
 
     template <typename T, int DIM_R, int DIM_C, int DIM_N, bool FLAG = 0>
     __global__
-    void shiftAndCopyKern(T *A, int shiftVal, int ld_A, T *B = nullptr){
-        shiftAndCopy<T,DIM_R,DIM_C,DIM_N,FLAG>(A,shiftVal,ld_A,B);
+    void shiftAndCopyKern(T *A, int shiftVal, int ld_A, int knot_points, T *B = nullptr){
+        shiftAndCopy<T,DIM_R,DIM_C,DIM_N,FLAG>(A,shiftVal,ld_A,knot_points,B);
+    }
+
+    template <typename T, int DIM_R, int DIM_C, bool FLAG = 0>
+    __global__
+    void shiftAndCopyKern(T *A, int shiftVal, int ld_A, int knot_points, int DIM_N, T *B = nullptr){
+        shiftAndCopy<T,DIM_R,DIM_C,FLAG>(A,shiftVal,ld_A,knot_points,DIM_N,B);
     }
 
     template <typename T>
@@ -505,7 +546,7 @@
     void computeControlSimple(T *u, T *x, T *xdes, T *KT, T *s_dx, int ld_KT){
         int start, delta; singleLoopVals(&start,&delta);
         #pragma unroll
-        for (int ind = start; ind < STATE_SIZE; ind += delta){s_dx[ind] = x[ind]-xdes[ind];}
+        for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){s_dx[ind] = x[ind]-xdes[ind];}
         hd__syncthreads();
         // compute the new control: u = u - K(x-xdes) -- but note we have KT not K
         #pragma unroll
@@ -513,7 +554,7 @@
             // get the Kdx for this row
             T Kdx = 0;
             #pragma unroll
-            for (int c = 0; c < STATE_SIZE; c++){Kdx += KT[c + r*ld_KT]*s_dx[c];}
+            for (int c = 0; c < STATE_SIZE_PDDP; c++){Kdx += KT[c + r*ld_KT]*s_dx[c];}
             // and then get this control with it
             u[r] -= Kdx; // clip<T>(Kdx,0.5*u[r],1.5*u[r]);
         }
@@ -523,10 +564,10 @@
     template <typename T, int N_ROLLOUT>
     __host__ __device__ __forceinline__
     void rolloutMPC(T *x0, T *u0, T *KT0, T *d0, T *xprev, T *xActual, T *s_dx, T *s_qdd, T dt, int shiftAmount,
-                    int ld_x, int ld_u, int ld_d, int ld_KT, T *d_I = nullptr, T *d_Tbody = nullptr){
+                    int ld_x, int ld_u, int ld_d, int ld_KT, int knot_points, T *d_I = nullptr, T *d_Tbody = nullptr){
         // now we only need to roll out the first block from xActual
         int start, delta; singleLoopVals(&start,&delta);
-        for (int ind = start; ind < STATE_SIZE; ind += delta){x0[ind] = xActual[ind];}
+        for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){x0[ind] = xActual[ind];}
         T *xk = &x0[0];    T *xkp1 = &x0[ld_x];    T *xpk = &xprev[0];     T *uk = &u0[0];     T *KTk = &KT0[0];   T *dk = &d0[0];
         #pragma unroll
         // simulate forward the first block
@@ -543,8 +584,43 @@
             // hd__syncthreads();
             // then write to global memory unless "final" state where we just use for defect on boundary
             #pragma unroll
-            for (int ind = start; ind < STATE_SIZE; ind += delta){
-                if (k < N_ROLLOUT-1 || k == NUM_TIME_STEPS - 2){xkp1[ind] = s_xkp1[ind];}
+            for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){
+                if (k < N_ROLLOUT-1 || k == knot_points - 2){xkp1[ind] = s_xkp1[ind];}
+                else {dk[ind] = s_xkp1[ind] - xkp1[ind];}
+            }
+            // update the offsets for the next pass or break to zoh
+            xk = xkp1;      xkp1 += ld_x;   dk += ld_d;     
+            uk += ld_u;     xpk += ld_x;    KTk += ld_KT*DIM_KT_c;
+            hd__syncthreads();
+        }
+    }
+
+    // for first block of traj
+    template <typename T>
+    __host__ __device__ __forceinline__
+    void rolloutMPC(T *x0, T *u0, T *KT0, T *d0, T *xprev, T *xActual, T *s_dx, T *s_qdd, T dt, int shiftAmount,
+                    int ld_x, int ld_u, int ld_d, int ld_KT, int knot_points, int N_ROLLOUT, T *d_I = nullptr, T *d_Tbody = nullptr){
+        // now we only need to roll out the first block from xActual
+        int start, delta; singleLoopVals(&start,&delta);
+        for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){x0[ind] = xActual[ind];}
+        T *xk = &x0[0];    T *xkp1 = &x0[ld_x];    T *xpk = &xprev[0];     T *uk = &u0[0];     T *KTk = &KT0[0];   T *dk = &d0[0];
+        #pragma unroll
+        // simulate forward the first block
+        for(int k = 0; k < N_ROLLOUT-1; k++){
+            // load in the x and u and compute controls
+            // computeControlSimple<T>(uk,xk,xpk,KTk,s_dx,ld_KT);
+            // hd__syncthreads();
+            // then use this control to compute the new state
+            T *s_xkp1 = s_dx; // re-use this shared mem as we are done with it for this loop
+            _integrator<T>(s_xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,nullptr);
+            // printf("xk[%d]: %f %f %f %f %f %f %f uk: %f %f %f %f %f %f %f ---> xkp1[%d]: %f %f %f %f %f %f %f\n",k,xk[0],
+            //             xk[1],xk[2],xk[3],xk[4],xk[5],xk[6],uk[0],uk[1],uk[2],uk[3],uk[4],uk[5],uk[6],
+            //             k+1,s_xkp1[0],s_xkp1[1],s_xkp1[2],s_xkp1[3],s_xkp1[4],s_xkp1[5],s_xkp1[6]);
+            // hd__syncthreads();
+            // then write to global memory unless "final" state where we just use for defect on boundary
+            #pragma unroll
+            for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){
+                if (k < N_ROLLOUT-1 || k == knot_points - 2){xkp1[ind] = s_xkp1[ind];}
                 else {dk[ind] = s_xkp1[ind] - xkp1[ind];}
             }
             // update the offsets for the next pass or break to zoh
@@ -557,21 +633,29 @@
     template <typename T, int N_ROLLOUT>
     __global__
     void rolloutMPCKern(T *x0, T *u0, T *KT0, T *d0, T *xprev, T *xActual, T dt, int shiftAmount,
-                        int ld_x, int ld_u, int ld_d, int ld_KT, T *d_I = nullptr, T *d_Tbody = nullptr){
-        __shared__ T s_dx[STATE_SIZE];    __shared__ T s_qdd[NUM_POS];
-        rolloutMPC<T,N_ROLLOUT>(x0,u0,KT0,d0,xprev,xActual,s_dx,s_qdd,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
+                        int ld_x, int ld_u, int ld_d, int ld_KT, int knot_points, T *d_I = nullptr, T *d_Tbody = nullptr){
+        __shared__ T s_dx[STATE_SIZE_PDDP];    __shared__ T s_qdd[NUM_POS];
+        rolloutMPC<T,N_ROLLOUT>(x0,u0,KT0,d0,xprev,xActual,s_dx,s_qdd,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,knot_points,d_I,d_Tbody);
+    }
+
+    template <typename T>
+    __global__
+    void rolloutMPCKern(T *x0, T *u0, T *KT0, T *d0, T *xprev, T *xActual, T dt, int shiftAmount,
+                        int ld_x, int ld_u, int ld_d, int ld_KT, int knot_points, int N_ROLLOUT, T *d_I = nullptr, T *d_Tbody = nullptr){
+        __shared__ T s_dx[STATE_SIZE_PDDP];    __shared__ T s_qdd[NUM_POS];
+        rolloutMPC<T>(x0,u0,KT0,d0,xprev,xActual,s_dx,s_qdd,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,knot_points,N_ROLLOUT,d_I,d_Tbody);
     }
 
     // for shiftAmount to end of traj
     template <typename T>
     __host__ __device__ __forceinline__
     void rolloutMPC2(T *x0, T *u0, T *KT0, T *xprev, T *s_dx, T *s_qdd, T dt, int shiftAmount, 
-                     int ld_x, int ld_u, int ld_KT,T *d_I = nullptr, T *d_Tbody = nullptr){
+                     int ld_x, int ld_u, int ld_KT, int knot_points, T *d_I = nullptr, T *d_Tbody = nullptr){
         if (shiftAmount == 0){return;} // early exit if we don't have to do anything
          // now we rollout the N-shiftAmount
         int start, delta; singleLoopVals(&start,&delta);    
-        T *xk = &x0[(NUM_TIME_STEPS-1-shiftAmount)*ld_x];    T *xkp1 = xk + ld_x;    T *xpk = &xprev[(NUM_TIME_STEPS-1-shiftAmount)*ld_x];
-        T *uk = &u0[(NUM_TIME_STEPS-1-shiftAmount)*ld_u];    T *KTk = &KT0[(NUM_TIME_STEPS-1-shiftAmount)*ld_KT*DIM_KT_c];
+        T *xk = &x0[(knot_points-1-shiftAmount)*ld_x];    T *xkp1 = xk + ld_x;    T *xpk = &xprev[(knot_points-1-shiftAmount)*ld_x];
+        T *uk = &u0[(knot_points-1-shiftAmount)*ld_u];    T *KTk = &KT0[(knot_points-1-shiftAmount)*ld_KT*DIM_KT_c];
         // simulate forward the first block
         for(int k = 0; k < shiftAmount; k++){
             // load in the x and u and compute controls
@@ -582,7 +666,7 @@
             // then use this control to compute the new state
             _integrator<T>(xkp1,xk,uk,s_qdd,d_I,d_Tbody,dt,nullptr);
             hd__syncthreads();
-            // finiteCheck<T,STATE_SIZE>(xkp1,xk);
+            // finiteCheck<T,STATE_SIZE_PDDP>(xkp1,xk);
             // update the offsets for the next pass or break to zoh
             xk = xkp1;   xkp1 += ld_x;  uk += ld_u;     xpk += ld_x;    KTk += ld_KT*DIM_KT_c;
             hd__syncthreads();
@@ -592,9 +676,9 @@
     template <typename T>
     __global__
     void rolloutMPCKern2(T *x0, T *u0, T *KT0, T *xprev, T dt, int shiftAmount,
-                        int ld_x, int ld_u, int ld_KT, T *d_I = nullptr, T *d_Tbody = nullptr){
-        __shared__ T s_dx[STATE_SIZE];    __shared__ T s_qdd[NUM_POS];
-        rolloutMPC2<T>(x0,u0,KT0,xprev,s_dx,s_qdd,dt,shiftAmount,ld_x,ld_u,ld_KT,d_I,d_Tbody);
+                        int ld_x, int ld_u, int ld_KT, int knot_points, T *d_I = nullptr, T *d_Tbody = nullptr){
+        __shared__ T s_dx[STATE_SIZE_PDDP];    __shared__ T s_qdd[NUM_POS];
+        rolloutMPC2<T>(x0,u0,KT0,xprev,s_dx,s_qdd,dt,shiftAmount,ld_x,ld_u,ld_KT,knot_points,d_I,d_Tbody);
     }
 
     template <typename T>
@@ -602,39 +686,40 @@
     void loadVarsGPU_MPC(T *x_old, T *u_old, T *KT_old, T **h_d_x, T *d_xp, T **h_d_u, T *d_up, T **h_d_d, T *d_KT, T *d_xGoal, T *xGoal, T *d_xActual, T *xActual,
                          T *d_P, T *d_Pp, T *d_p, T *d_pp, T *d_du, T *d_AB, T *d_H, T *d_dT, int *d_err, int *alphaIndex, T dt, cudaStream_t *streams, dim3 dynDimms,
                          int shiftAmount, int last_successful_solve, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
-                         T *d_I = nullptr, T *d_Tbody = nullptr, int clear_vars = 0, T *xTarget = nullptr, T *d_xTarget = nullptr){
+                         int knot_points, T *d_I = nullptr, T *d_Tbody = nullptr, int clear_vars = 0, T *xTarget = nullptr, T *d_xTarget = nullptr){
         // note since we assume that we will reach the desired states to start later blocks the
         // control will remain the same as will the states outside of the first block
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
         // note in <x/u/d>[*alphaIndex], P, p, KT are all of the ones from the last run
-        int goalSize;   if (!EE_COST){goalSize = ld_x;}   else{goalSize = 6;} clear_vars = last_successful_solve > SOLVES_TO_RESET || clear_vars;
+        int goalSize = EE_COST_PDDP ? (USE_TRACKING_COST ? knot_points : 1) * 6 : ld_x;
+        clear_vars = last_successful_solve > SOLVES_TO_RESET || clear_vars;
         gpuErrchk(cudaMemcpyAsync(d_xGoal, xGoal, goalSize*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
         gpuErrchk(cudaMemcpyAsync(d_xTarget, xTarget, ld_x*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
-        gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
+        gpuErrchk(cudaMemcpyAsync(d_xActual, xActual, STATE_SIZE_PDDP*sizeof(T), cudaMemcpyHostToDevice, streams[0]));
         if(shiftAmount > 0){
-            shiftAndCopyKern<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS><<<1,DIM_x_r,0,streams[1]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,d_xp);
-            shiftAndCopyKern<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS><<<1,DIM_d_r,0,streams[2]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d);
+            shiftAndCopyKern<T,DIM_x_r,DIM_x_c><<<1,DIM_x_r,0,streams[1]>>>(h_d_x[*alphaIndex],shiftAmount,ld_x,knot_points,knot_points,d_xp);
+            shiftAndCopyKern<T,DIM_d_r,DIM_d_c><<<1,DIM_d_r,0,streams[2]>>>(h_d_d[*alphaIndex],shiftAmount,ld_d,knot_points,knot_points);
             if (!clear_vars){
-                shiftAndCopyKern<T,DIM_u_r,DIM_u_c,(NUM_TIME_STEPS-1),1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,d_up);
-                shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[4]>>>(d_KT,shiftAmount,ld_KT);
-                shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[5]>>>(d_P,shiftAmount,ld_P);
-                shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_p,shiftAmount,ld_p);
-                shiftAndCopyKern<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS><<<1,DIM_P_r*DIM_P_c,0,streams[7]>>>(d_Pp,shiftAmount,ld_P);
-                shiftAndCopyKern<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS><<<1,DIM_p_r,0,streams[6]>>>(d_pp,shiftAmount,ld_p);     
+                shiftAndCopyKern<T,DIM_u_r,DIM_u_c,1><<<1,DIM_u_r,0,streams[3]>>>(h_d_u[*alphaIndex],shiftAmount,ld_u,knot_points,knot_points-1,d_up);
+                shiftAndCopyKern<T,DIM_KT_r,DIM_KT_c,1><<<1,DIM_KT_r*DIM_KT_c,0,streams[4]>>>(d_KT,shiftAmount,ld_KT,knot_points,knot_points-1);
+                shiftAndCopyKern<T,DIM_P_r,DIM_P_c><<<1,DIM_P_r*DIM_P_c,0,streams[5]>>>(d_P,shiftAmount,ld_P,knot_points,knot_points);
+                shiftAndCopyKern<T,DIM_p_r,DIM_p_c><<<1,DIM_p_r,0,streams[6]>>>(d_p,shiftAmount,ld_p,knot_points,knot_points);
+                shiftAndCopyKern<T,DIM_P_r,DIM_P_c><<<1,DIM_P_r*DIM_P_c,0,streams[7]>>>(d_Pp,shiftAmount,ld_P,knot_points,knot_points);
+                shiftAndCopyKern<T,DIM_p_r,DIM_p_c><<<1,DIM_p_r,0,streams[6]>>>(d_pp,shiftAmount,ld_p,knot_points,knot_points);     
             }
         }
         if(clear_vars){
-            gpuErrchk(cudaMemsetAsync(h_d_u[*alphaIndex],0,ld_u*NUM_TIME_STEPS*sizeof(T),streams[3]));
-            gpuErrchk(cudaMemsetAsync(d_KT,0,ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T),streams[4]));
-            gpuErrchk(cudaMemsetAsync(d_P,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[5]));
-            gpuErrchk(cudaMemsetAsync(d_p,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[6]));
-            gpuErrchk(cudaMemsetAsync(d_Pp,0,ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T),streams[7]));
-            gpuErrchk(cudaMemsetAsync(d_pp,0,ld_p*NUM_TIME_STEPS*sizeof(T),streams[6]));
+            gpuErrchk(cudaMemsetAsync(h_d_u[*alphaIndex],0,ld_u*knot_points*sizeof(T),streams[3]));
+            gpuErrchk(cudaMemsetAsync(d_KT,0,ld_KT*DIM_KT_c*knot_points*sizeof(T),streams[4]));
+            gpuErrchk(cudaMemsetAsync(d_P,0,ld_P*DIM_P_c*knot_points*sizeof(T),streams[5]));
+            gpuErrchk(cudaMemsetAsync(d_p,0,ld_p*knot_points*sizeof(T),streams[6]));
+            gpuErrchk(cudaMemsetAsync(d_Pp,0,ld_P*DIM_P_c*knot_points*sizeof(T),streams[7]));
+            gpuErrchk(cudaMemsetAsync(d_pp,0,ld_p*knot_points*sizeof(T),streams[6]));
         }
-        gpuErrchk(cudaMemsetAsync(d_du,0,ld_du*NUM_TIME_STEPS*sizeof(T),streams[8]));
+        gpuErrchk(cudaMemsetAsync(d_du,0,ld_du*knot_points*sizeof(T),streams[8]));
         gpuErrchk(cudaMemsetAsync(d_err,0,M_BLOCKS_B*sizeof(int),streams[9]));
         gpuErrchk(cudaMemsetAsync(d_dT,0,NUM_ALPHA*sizeof(T),streams[10]));
-        T *ABN = d_AB + ld_AB*DIM_AB_c*(NUM_TIME_STEPS-2);
+        T *ABN = d_AB + ld_AB*DIM_AB_c*(knot_points-2);
         gpuErrchk(cudaMemsetAsync(ABN,0,ld_AB*DIM_AB_c*sizeof(T),streams[11]));
         // sync on the ones we need for the rollout
         gpuErrchk(cudaStreamSynchronize(streams[0]));
@@ -642,15 +727,15 @@
         if(shiftAmount > 0 || clear_vars){gpuErrchk(cudaStreamSynchronize(streams[3]));     gpuErrchk(cudaStreamSynchronize(streams[4]));}
         // do the rollout
         #if FULL_ROLLOUT
-            rolloutMPCKern<T,NUM_TIME_STEPS><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
+            rolloutMPCKern<T><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,knot_points,knot_points,d_I,d_Tbody);
         #else    
-            rolloutMPCKern<T,N_BLOCKS_F><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,d_I,d_Tbody);
-            if (M_BLOCKS_F > 1){rolloutMPCKern2<T><<<1,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,d_xp,dt,shiftAmount,ld_x,ld_u,ld_KT,d_I,d_Tbody);}
+            rolloutMPCKern<T,N_BLOCKS_F><<<1,dynDimms,0,streams[0]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,h_d_d[*alphaIndex],d_xp,d_xActual,dt,shiftAmount,ld_x,ld_u,ld_d,ld_KT,knot_points,d_I,d_Tbody);
+            if (M_BLOCKS_F > 1){rolloutMPCKern2<T><<<1,dynDimms,0,streams[1]>>>(h_d_x[*alphaIndex],h_d_u[*alphaIndex],d_KT,d_xp,dt,shiftAmount,ld_x,ld_u,ld_KT,knot_points,d_I,d_Tbody);}
         #endif
         // save the shifted into tvars in case all iters fail
-        gpuErrchk(cudaMemcpyAsync(x_old, d_xp, ld_x*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
-        gpuErrchk(cudaMemcpyAsync(u_old, d_up, ld_u*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, streams[2]));
-        gpuErrchk(cudaMemcpyAsync(KT_old, d_KT, ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, streams[3]));
+        gpuErrchk(cudaMemcpyAsync(x_old, d_xp, ld_x*knot_points*sizeof(T), cudaMemcpyDeviceToHost, streams[1]));
+        gpuErrchk(cudaMemcpyAsync(u_old, d_up, ld_u*knot_points*sizeof(T), cudaMemcpyDeviceToHost, streams[2]));
+        gpuErrchk(cudaMemcpyAsync(KT_old, d_KT, ld_KT*DIM_KT_c*knot_points*sizeof(T), cudaMemcpyDeviceToHost, streams[3]));
         gpuErrchk(cudaDeviceSynchronize()); // sync and exit
     }
 
@@ -659,7 +744,7 @@
     void loadVarsCPU_MPC(T *x_old, T *u_old, T *KT_old, T *x, T *xp, T *u, T *up, T *d, T *KT, T *xGoal, T *xActual, T *P, T *Pp, 
                          T *p, T *pp, T *du, T *AB, int *err, int *alphaIndex, T dt, std::thread *threads, int shiftAmount, 
                          int last_successful_solve, int ld_x, int ld_u, int ld_d, int ld_KT, int ld_P, int ld_p, int ld_du, int ld_AB,
-                         T *I = nullptr, T *Tbody = nullptr, int clear_vars = 0){
+                         int knot_points, T *I = nullptr, T *Tbody = nullptr, int clear_vars = 0){
         // note since we assume that we will reach the desired states to start later blocks the
         // control will remain the same as will the states outside of the first block
         // therefore we are simply copying things over in later blocks so first execute a shift copy zoh for everything
@@ -668,80 +753,80 @@
         clear_vars = last_successful_solve > SOLVES_TO_RESET || clear_vars;
         if (shiftAmount > 0){
             // printf("shifting\n");
-            threads[0] = std::thread(&shiftAndCopy<T,DIM_x_r,DIM_x_c,NUM_TIME_STEPS>, std::ref(x), shiftAmount, ld_x, std::ref(xp));
+            threads[0] = std::thread(&shiftAndCopy<T,DIM_x_r,DIM_x_c>, std::ref(x), shiftAmount, ld_x, knot_points, knot_points, std::ref(xp));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
-            threads[2] = std::thread(&shiftAndCopy<T,DIM_d_r,DIM_d_c,NUM_TIME_STEPS>, std::ref(d), shiftAmount, ld_d, nullptr);
+            threads[2] = std::thread(&shiftAndCopy<T,DIM_d_r,DIM_d_c>, std::ref(d), shiftAmount, ld_d, knot_points, knot_points, nullptr);
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
             if (!clear_vars){
-                threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c,NUM_TIME_STEPS-1>, std::ref(u), shiftAmount, ld_u, std::ref(up));
+                threads[1] = std::thread(&shiftAndCopy<T,DIM_u_r,DIM_u_c>, std::ref(u), shiftAmount, ld_u, knot_points, knot_points-1, std::ref(up));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
-                threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c,NUM_TIME_STEPS-1>, std::ref(KT), shiftAmount, ld_KT, nullptr);
+                threads[3] = std::thread(&shiftAndCopy<T,DIM_KT_r,DIM_KT_c>, std::ref(KT), shiftAmount, ld_KT, knot_points, knot_points-1, nullptr);
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}    
-                threads[4] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(P), shiftAmount, ld_P, nullptr);
+                threads[4] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c>, std::ref(P), shiftAmount, ld_P, knot_points, knot_points, nullptr);
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 4);}
-                threads[5] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(p), shiftAmount, ld_p, nullptr);
+                threads[5] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c>, std::ref(p), shiftAmount, ld_p, knot_points, knot_points, nullptr);
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 5);}
-                threads[6] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c,NUM_TIME_STEPS>, std::ref(Pp), shiftAmount, ld_P, nullptr);
+                threads[6] = std::thread(&shiftAndCopy<T,DIM_P_r,DIM_P_c>, std::ref(Pp), shiftAmount, ld_P, knot_points, knot_points, nullptr);
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 6);}
-                threads[7] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c,NUM_TIME_STEPS>, std::ref(pp), shiftAmount, ld_p, nullptr);
+                threads[7] = std::thread(&shiftAndCopy<T,DIM_p_r,DIM_p_c>, std::ref(pp), shiftAmount, ld_p, knot_points, knot_points, nullptr);
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 7);}
             }
         }
         if (clear_vars){
             // printf("clearing\n");
-            threads[1] = std::thread(memset, std::ref(u), 0, ld_u*NUM_TIME_STEPS*sizeof(T));
+            threads[1] = std::thread(memset, std::ref(u), 0, ld_u*knot_points*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
-            threads[3] = std::thread(memset, std::ref(KT), 0, ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
+            threads[3] = std::thread(memset, std::ref(KT), 0, ld_KT*DIM_KT_c*knot_points*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}
-            threads[4] = std::thread(memset, std::ref(P), 0, ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
+            threads[4] = std::thread(memset, std::ref(P), 0, ld_P*DIM_P_c*knot_points*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 4);}
-            threads[5] = std::thread(memset, std::ref(p), 0, ld_p*NUM_TIME_STEPS*sizeof(T));
+            threads[5] = std::thread(memset, std::ref(p), 0, ld_p*knot_points*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 5);}
-            threads[6] = std::thread(memset, std::ref(Pp), 0, ld_P*DIM_P_c*NUM_TIME_STEPS*sizeof(T));
+            threads[6] = std::thread(memset, std::ref(Pp), 0, ld_P*DIM_P_c*knot_points*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 6);}
-            threads[7] = std::thread(memset, std::ref(pp), 0, ld_p*NUM_TIME_STEPS*sizeof(T));
+            threads[7] = std::thread(memset, std::ref(pp), 0, ld_p*knot_points*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 7);}
         }
-        threads[8] = std::thread(memset, std::ref(du), 0, ld_du*NUM_TIME_STEPS*sizeof(T));
+        threads[8] = std::thread(memset, std::ref(du), 0, ld_du*knot_points*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 8);}
         threads[9] = std::thread(memset, std::ref(err), 0, BP_THREADS*sizeof(int));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 9);}
-        T *ABN = AB + ld_AB*DIM_AB_c*(NUM_TIME_STEPS-3);
+        T *ABN = AB + ld_AB*DIM_AB_c*(knot_points-3);
         threads[10] = std::thread(memset, std::ref(ABN), 0, ld_AB*DIM_AB_c*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 10);}
 
         // sync on x,u,d,KT and then rollout first block
         if(shiftAmount > 0){threads[0].join();  threads[2].join();}
         if(shiftAmount > 0 || clear_vars){threads[1].join(); threads[3].join();}
-        T s_dx[STATE_SIZE];  T s_qdd[NUM_POS];
+        T s_dx[STATE_SIZE_PDDP];  T s_qdd[NUM_POS];
         #if FULL_ROLLOUT
-            // for (int k=0; k < NUM_TIME_STEPS; k++){
+            // for (int k=0; k < knot_points; k++){
             //     printf("X[%d][%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",k,x[k*ld_x+0],x[k*ld_x+1],x[k*ld_x+2],x[k*ld_x+3],x[k*ld_x+4],x[k*ld_x+5],x[k*ld_x+6]); 
             // }
-            // for (int k=0; k < NUM_TIME_STEPS-1; k++){
+            // for (int k=0; k < knot_points-1; k++){
             //     printf("u[%d][%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",k,u[k*ld_u+0],u[k*ld_u+1],u[k*ld_u+2],u[k*ld_u+3],u[k*ld_u+4],u[k*ld_u+5],u[k*ld_u+6]);
             // }
             // printf("Xf[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",
-            //             x[ld_x*(NUM_TIME_STEPS-1)],x[ld_x*(NUM_TIME_STEPS-1)+1],x[ld_x*(NUM_TIME_STEPS-1)+2],
-            //             x[ld_x*(NUM_TIME_STEPS-1)+3],x[ld_x*(NUM_TIME_STEPS-1)+4],x[ld_x*(NUM_TIME_STEPS-1)+5],
-            //             x[ld_x*(NUM_TIME_STEPS-1)+6]);
-            threads[0] = std::thread(&rolloutMPC<T,NUM_TIME_STEPS>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, std::ref(I), std::ref(Tbody));
+            //             x[ld_x*(knot_points-1)],x[ld_x*(knot_points-1)+1],x[ld_x*(knot_points-1)+2],
+            //             x[ld_x*(knot_points-1)+3],x[ld_x*(knot_points-1)+4],x[ld_x*(knot_points-1)+5],
+            //             x[ld_x*(knot_points-1)+6]);
+            threads[0] = std::thread(&rolloutMPC<T,knot_points>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, knot_points, std::ref(I), std::ref(Tbody));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
         #else
-            T s_dx2[STATE_SIZE];  T s_qdd2[NUM_POS];
-            threads[0] = std::thread(&rolloutMPC<T,N_BLOCKS_F>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, std::ref(I), std::ref(Tbody));
+            T s_dx2[STATE_SIZE_PDDP];  T s_qdd2[NUM_POS];
+            threads[0] = std::thread(&rolloutMPC<T,N_BLOCKS_F>, std::ref(x), std::ref(u), std::ref(KT), std::ref(d), std::ref(xp), std::ref(xActual), std::ref(s_dx), std::ref(s_qdd), dt, shiftAmount, ld_x, ld_u, ld_d, ld_KT, knot_points, std::ref(I), std::ref(Tbody));
             if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 0);}
             if (M_BLOCKS_F > 1){
-                threads[1] = std::thread(&rolloutMPC2<T>, std::ref(x), std::ref(u), std::ref(KT), std::ref(xp), std::ref(s_dx2), std::ref(s_qdd2), dt, shiftAmount, ld_x, ld_u, ld_KT, std::ref(I), std::ref(Tbody));
+                threads[1] = std::thread(&rolloutMPC2<T>, std::ref(x), std::ref(u), std::ref(KT), std::ref(xp), std::ref(s_dx2), std::ref(s_qdd2), dt, shiftAmount, ld_x, ld_u, ld_KT, knot_points, std::ref(I), std::ref(Tbody));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 1);}
             }
         #endif
         // save the shifted into tvars in case all iters fail
-        threads[2] = std::thread(memcpy, std::ref(x_old), std::ref(xp), ld_x*NUM_TIME_STEPS*sizeof(T));
+        threads[2] = std::thread(memcpy, std::ref(x_old), std::ref(xp), ld_x*knot_points*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 2);}
-        threads[3] = std::thread(memcpy, std::ref(u_old), std::ref(up), ld_u*NUM_TIME_STEPS*sizeof(T));
+        threads[3] = std::thread(memcpy, std::ref(u_old), std::ref(up), ld_u*knot_points*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 3);}
-        threads[11] = std::thread(memcpy, std::ref(KT_old), std::ref(KT), ld_KT*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
+        threads[11] = std::thread(memcpy, std::ref(KT_old), std::ref(KT), ld_KT*DIM_KT_c*knot_points*sizeof(T));
         if(FORCE_CORE_SWITCHES){setCPUForThread(threads, 11);}
         // join threads
         threads[0].join(); if(!FULL_ROLLOUT && M_BLOCKS_F > 1){threads[1].join();} threads[2].join(); threads[3].join(); threads[11].join();
@@ -757,17 +842,17 @@
         tv->last_successful_solve++;    // increment failure counter by 1 since now last solve at 1 iter ago minimum
         // if it was successful at all then copy out else reset to previous successful solve
         if (tv->last_successful_solve == 1){
-            if (defectFlag){defectKern<<<NUM_ALPHA,NUM_TIME_STEPS,0,(gv->streams)[0]>>>(gv->d_d,gv->d_dT,md->ld_d); gpuErrchk(cudaPeekAtLastError());}
-            gpuErrchk(cudaMemcpyAsync(tv->x, gv->h_d_x[*(gv->alphaIndex)], (md->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, (gv->streams)[1]));
-            gpuErrchk(cudaMemcpyAsync(tv->u, gv->h_d_u[*(gv->alphaIndex)], (md->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, (gv->streams)[2]));
-            gpuErrchk(cudaMemcpyAsync(tv->KT, gv->d_KT, (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost, (gv->streams)[3]));
+            if (defectFlag){defectKern<<<NUM_ALPHA,(md->knot_points),0,(gv->streams)[0]>>>(gv->d_d,gv->d_dT,md->ld_d); gpuErrchk(cudaPeekAtLastError());}
+            gpuErrchk(cudaMemcpyAsync(tv->x, gv->h_d_x[*(gv->alphaIndex)], (md->ld_x)*(md->knot_points)*sizeof(T), cudaMemcpyDeviceToHost, (gv->streams)[1]));
+            gpuErrchk(cudaMemcpyAsync(tv->u, gv->h_d_u[*(gv->alphaIndex)], (md->ld_u)*(md->knot_points)*sizeof(T), cudaMemcpyDeviceToHost, (gv->streams)[2]));
+            gpuErrchk(cudaMemcpyAsync(tv->KT, gv->d_KT, (md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T), cudaMemcpyDeviceToHost, (gv->streams)[3]));
             if (defectFlag){gpuErrchk(cudaStreamSynchronize((gv->streams)[0]));}
             if (defectFlag){gpuErrchk(cudaMemcpyAsync(gv->d, gv->d_dT, NUM_ALPHA*sizeof(T), cudaMemcpyDeviceToHost, (gv->streams)[0]));}
         }
         else{
-            gpuErrchk(cudaMemcpyAsync(gv->h_d_x[*(gv->alphaIndex)], gv->d_x_old, (md->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToDevice, (gv->streams)[1]));
-            gpuErrchk(cudaMemcpyAsync(gv->h_d_u[*(gv->alphaIndex)], gv->d_u_old, (md->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToDevice, (gv->streams)[2]));
-            gpuErrchk(cudaMemcpyAsync(gv->d_KT, gv->d_KT_old, (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToDevice, (gv->streams)[3]));
+            gpuErrchk(cudaMemcpyAsync(gv->h_d_x[*(gv->alphaIndex)], gv->d_x_old, (md->ld_x)*(md->knot_points)*sizeof(T), cudaMemcpyDeviceToDevice, (gv->streams)[1]));
+            gpuErrchk(cudaMemcpyAsync(gv->h_d_u[*(gv->alphaIndex)], gv->d_u_old, (md->ld_u)*(md->knot_points)*sizeof(T), cudaMemcpyDeviceToDevice, (gv->streams)[2]));
+            gpuErrchk(cudaMemcpyAsync(gv->d_KT, gv->d_KT_old, (md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T), cudaMemcpyDeviceToDevice, (gv->streams)[3]));
         }
         gpuErrchk(cudaDeviceSynchronize()); // sync to be done
         (tv->lock)->unlock();
@@ -781,33 +866,33 @@
         if (tv->last_successful_solve == 1){
             if (alphaIndex == -2){ // serial line search
                 if (defectFlag){*maxd = defectComp(cv->d,md->ld_d);}
-                (cv->threads)[0] = std::thread(memcpy, std::ref(tv->x), std::ref(cv->x), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+                (cv->threads)[0] = std::thread(memcpy, std::ref(tv->x), std::ref(cv->x), (md->ld_x)*(md->knot_points)*sizeof(T));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 0);}
-                (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->u), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+                (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->u), (md->ld_u)*(md->knot_points)*sizeof(T));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 1);}
             }
             else{ // parallel line search
                 if (alphaIndex == -1){alphaIndex = 0;}
                 if (defectFlag){*maxd = defectComp(cv->ds[alphaIndex],md->ld_d);}
-                (cv->threads)[0] = std::thread(memcpy, std::ref(tv->x), std::ref(cv->xs[alphaIndex]), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+                (cv->threads)[0] = std::thread(memcpy, std::ref(tv->x), std::ref(cv->xs[alphaIndex]), (md->ld_x)*(md->knot_points)*sizeof(T));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 0);}
-                (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->us[alphaIndex]), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+                (cv->threads)[1] = std::thread(memcpy, std::ref(tv->u), std::ref(cv->us[alphaIndex]), (md->ld_u)*(md->knot_points)*sizeof(T));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 1);}
-                (cv->threads)[3] = std::thread(memcpy, std::ref(cv->x), std::ref(cv->xs[alphaIndex]), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+                (cv->threads)[3] = std::thread(memcpy, std::ref(cv->x), std::ref(cv->xs[alphaIndex]), (md->ld_x)*(md->knot_points)*sizeof(T));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 3);}
-                (cv->threads)[4] = std::thread(memcpy, std::ref(cv->u), std::ref(cv->us[alphaIndex]), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+                (cv->threads)[4] = std::thread(memcpy, std::ref(cv->u), std::ref(cv->us[alphaIndex]), (md->ld_u)*(md->knot_points)*sizeof(T));
                 if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 4);}
             }
-            (cv->threads)[2] = std::thread(memcpy, std::ref(tv->KT), std::ref(cv->KT), (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
+            (cv->threads)[2] = std::thread(memcpy, std::ref(tv->KT), std::ref(cv->KT), (md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 2);}
         }
         else{
             if (defectFlag){*maxd = defectComp(cv->d,md->ld_d);}
-            (cv->threads)[0] = std::thread(memcpy, std::ref(cv->x), std::ref(cv->x_old), (md->ld_x)*NUM_TIME_STEPS*sizeof(T));
+            (cv->threads)[0] = std::thread(memcpy, std::ref(cv->x), std::ref(cv->x_old), (md->ld_x)*(md->knot_points)*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 0);}
-            (cv->threads)[1] = std::thread(memcpy, std::ref(cv->u), std::ref(cv->u_old), (md->ld_u)*NUM_TIME_STEPS*sizeof(T));
+            (cv->threads)[1] = std::thread(memcpy, std::ref(cv->u), std::ref(cv->u_old), (md->ld_u)*(md->knot_points)*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 1);}
-            (cv->threads)[2] = std::thread(memcpy, std::ref(cv->KT), std::ref(cv->KT_old), (md->ld_KT)*DIM_KT_c*NUM_TIME_STEPS*sizeof(T));
+            (cv->threads)[2] = std::thread(memcpy, std::ref(cv->KT), std::ref(cv->KT_old), (md->ld_KT)*DIM_KT_c*(md->knot_points)*sizeof(T));
             if(FORCE_CORE_SWITCHES){setCPUForThread(cv->threads, 2);}
         }
         (cv->threads)[0].join();    (cv->threads)[1].join();    (cv->threads)[2].join();    
@@ -820,7 +905,7 @@
                             const double *qActual, const double *qdActual, double tActual, 
                             int ld_x, int ld_u, int ld_KT, 
                             double *q_prev = nullptr, double *u_prev = nullptr, double alpha = 0){
-        int start, delta; singleLoopVals(&start,&delta);    T dx[STATE_SIZE];
+        int start, delta; singleLoopVals(&start,&delta);    T dx[STATE_SIZE_PDDP];
         // compute index in current traj we want to use (both round down for zoh and fraction for foh)
         double dt = get_time_steps_us_d(t0,tActual); int ind_rd = static_cast<int>(dt); double fraction = dt - static_cast<double>(ind_rd);
         // see if beyond bounds and fail
@@ -830,7 +915,7 @@
             T *KTk = &KT[ind_rd*ld_KT*DIM_KT_c]; // u,KT do zoh so take rd
             T *xk_u = &x[(ind_rd+1)*ld_x];       T *xk_d = &x[ind_rd*ld_x]; // foh for xk
             // then compute the state delta (using the foh)
-            for (int ind = start; ind < STATE_SIZE; ind += delta){
+            for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){
                 T val = (static_cast<T>(1.0-fraction)*xk_d[ind] + static_cast<T>(fraction)*xk_u[ind]);
                 dx[ind] = static_cast<T>(ind < NUM_POS ? qActual[ind] : qdActual[ind-NUM_POS]) - val;
                 if(PD_GAINS_ON_STATE && ind < NUM_POS){q_out[ind] = static_cast<double>(val);}
@@ -840,7 +925,7 @@
             for (int r = start; r < CONTROL_SIZE; r += delta){
                 T val = uk[r];
                 #pragma unroll
-                for (int c = 0; c < STATE_SIZE; c++){val -= KTk[c + r*ld_KT]*dx[c];}
+                for (int c = 0; c < STATE_SIZE_PDDP; c++){val -= KTk[c + r*ld_KT]*dx[c];}
                 u_out[r] = static_cast<double>(val);
             }
         }
@@ -879,14 +964,16 @@
             // define kernel dimms
             dim3 ADimms(DIM_A_r,1);//DIM_A_c);
             dim3 bpDimms(8,7);  dim3 dynDimms(8,7);//dim3 bpDimms(DIM_H_r,DIM_H_c);  dim3 dynDimms(36,7);
-            dim3 FPBlocks(M_BLOCKS_F,NUM_ALPHA);   dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);     dim3 intDimms(NUM_TIME_STEPS-1,1);
-            if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
+            dim3 FPBlocks(M_BLOCKS_F,NUM_ALPHA);   dim3 gradBlocks(DIM_AB_c,(md->knot_points)-1);     dim3 intDimms((md->knot_points)-1,1);
+            if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE_PDDP + CONTROL_SIZE;}
 
             // load and clear variables as requested and init the alg
-            loadVarsGPU_MPC<T>(gv->d_x_old,gv->d_u_old,gv->d_KT_old,gv->h_d_x, gv->d_xp, gv->h_d_u, gv->d_up, gv->h_d_d, gv->d_KT, gv->d_xGoal, gv->xGoal, gv->d_xActual, gv->xActual,
-                               gv->d_P, gv->d_Pp, gv->d_p, gv->d_pp, gv->d_du, gv->d_AB, gv->d_H, gv->d_dT, gv->d_err, gv->alphaIndex,(T)TIME_STEP, gv->streams, dynDimms,
-                               shiftAmount, tv->last_successful_solve, md->ld_x, md->ld_u, md->ld_d, md->ld_KT, md->ld_P, md->ld_p, md->ld_du, md->ld_AB,
-                               gv->d_I, gv->d_Tbody, clear_vars, gv->xTarget, gv->d_xTarget);
+            #if !TRAJ_LOAD_STORE_EXTERNAL
+                loadVarsGPU_MPC<T>(gv->d_x_old,gv->d_u_old,gv->d_KT_old,gv->h_d_x, gv->d_xp, gv->h_d_u, gv->d_up, gv->h_d_d, gv->d_KT, gv->d_xGoal, gv->xGoal, gv->d_xActual, gv->xActual,
+                                   gv->d_P, gv->d_Pp, gv->d_p, gv->d_pp, gv->d_du, gv->d_AB, gv->d_H, gv->d_dT, gv->d_err, gv->alphaIndex,(T)TIME_STEP, gv->streams, dynDimms,
+                                   shiftAmount, tv->last_successful_solve, md->ld_x, md->ld_u, md->ld_d, md->ld_KT, md->ld_P, md->ld_p, md->ld_du, md->ld_AB,
+                                   md->knot_points, gv->d_I, gv->d_Tbody, clear_vars, gv->xTarget, gv->d_xTarget);
+            #endif
             #if USE_ALG_TRACE
                 gettimeofday(&end2,NULL);
                 (data->initTime).push_back(time_delta_ms(start2,end2));
@@ -907,8 +994,8 @@
         // debug print
         #if DEBUG_SWITCH
             gpuErrchk(cudaMemcpy(&prevJ, &((gv->d_JT)[*(gv->alphaIndex)]), sizeof(T), cudaMemcpyDeviceToHost));
-            T xPrint[STATE_SIZE];
-            gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
+            T xPrint[STATE_SIZE_PDDP];
+            gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*((md->knot_points)-1), STATE_SIZE_PDDP*sizeof(T), cudaMemcpyDeviceToHost));
             printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho);
         #endif
 
@@ -1014,8 +1101,8 @@
             // NEXT ITERATION SETUP //
             // debug print
             #if DEBUG_SWITCH
-                T xPrint[STATE_SIZE];
-                gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
+                T xPrint[STATE_SIZE_PDDP];
+                gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*((md->knot_points)-1), STATE_SIZE_PDDP*sizeof(T), cudaMemcpyDeviceToHost));
                 printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
                         iter-1,xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho,dJ,z,gv->d[*(gv->alphaIndex)]);
             #endif
@@ -1028,7 +1115,9 @@
             #if USE_ALG_TRACE
                 gettimeofday(&start2,NULL);
             #endif
-            storeVarsGPU_MPC<T>(gv,tv,md,tActual_sys,tActual_plant,prevJ,0);
+            #if !TRAJ_LOAD_STORE_EXTERNAL
+                storeVarsGPU_MPC<T>(gv,tv,md,tActual_sys,tActual_plant,prevJ,0);
+            #endif
             #if USE_ALG_TRACE
                 for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
                 gettimeofday(&end2,NULL);
@@ -1038,7 +1127,7 @@
             #endif
             #if DEBUG_SWITCH
                 if (*(gv->alphaIndex) == -1){*(gv->alphaIndex) = 0;}
-                gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*(NUM_TIME_STEPS-1), STATE_SIZE*sizeof(T), cudaMemcpyDeviceToHost));
+                gpuErrchk(cudaMemcpy(xPrint, ((gv->h_d_x)[*(gv->alphaIndex)]) + (md->ld_x)*((md->knot_points)-1), STATE_SIZE_PDDP*sizeof(T), cudaMemcpyDeviceToHost));
                 printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
                     iter,xPrint[0],xPrint[1],prevJ,*(gv->alphaIndex),rho,dJ,z,gv->d[*(gv->alphaIndex)]);
             #endif
@@ -1062,9 +1151,11 @@
             int finalCostShift = use_cost_shift ? shiftAmount : 0;
             
             // load in vars and init the alg
-            loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
-                               cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
-                               md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody,clear_vars);
+            #if !TRAJ_LOAD_STORE_EXTERNAL
+                loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
+                                   cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
+                                   md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,md->knot_points,cv->I,cv->Tbody,clear_vars);
+            #endif
             #if USE_ALG_TRACE
                 gettimeofday(&end2,NULL);
                 (data->initTime).push_back(time_delta_ms(start2,end2));
@@ -1085,7 +1176,7 @@
         // debug print -- so ready to start
         #if DEBUG_SWITCH
             printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",
-                        cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
+                        cv->x[(md->ld_x)*((md->knot_points)-1)],cv->x[(md->ld_x)*((md->knot_points)-1)+1],prevJ,alphaIndex,rho);
         #endif
 
         while(1){
@@ -1174,7 +1265,7 @@
       
             #if DEBUG_SWITCH
                 printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter-1,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+                            iter-1,cv->x[(md->ld_x)*((md->knot_points)-1)],cv->x[(md->ld_x)*((md->knot_points)-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
             #endif
         }
 
@@ -1183,7 +1274,9 @@
             #if USE_ALG_TRACE
                 gettimeofday(&start2,NULL);
             #endif
-            storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd);
+            #if !TRAJ_LOAD_STORE_EXTERNAL
+                storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd);
+            #endif
             #if USE_ALG_TRACE
                 for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
                 gettimeofday(&end2,NULL);
@@ -1193,7 +1286,7 @@
             #endif
             #if DEBUG_SWITCH
                 printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter,cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)],cv->x[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+                            iter,cv->x[(md->ld_x)*((md->knot_points)-1)],cv->x[(md->ld_x)*((md->knot_points)-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
             #endif
         // EXIT Handling
     }
@@ -1216,9 +1309,11 @@
             int finalCostShift = use_cost_shift ? shiftAmount : 0;
             
             // load in vars and init the alg
-            loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
-                               cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
-                               md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,cv->I,cv->Tbody,clear_vars);
+            #if !TRAJ_LOAD_STORE_EXTERNAL
+                loadVarsCPU_MPC<T>(cv->x_old,cv->u_old,cv->KT_old,cv->x,cv->xp,cv->u,cv->up,cv->d,cv->KT,cv->xGoal,cv->xActual,cv->P,cv->Pp,
+                                   cv->p,cv->pp,cv->du,cv->AB,cv->err,&alphaIndex,(T)TIME_STEP,cv->threads,shiftAmount,tv->last_successful_solve,
+                                   md->ld_x,md->ld_u,md->ld_d,md->ld_KT,md->ld_P,md->ld_p,md->ld_du,md->ld_AB,md->knot_points,cv->I,cv->Tbody,clear_vars);
+            #endif
             #if USE_ALG_TRACE
                 gettimeofday(&end2,NULL);
                 (data->initTime).push_back(time_delta_ms(start2,end2));
@@ -1239,7 +1334,7 @@
         // debug print -- so ready to start
         #if DEBUG_SWITCH
             printf("Iter[0] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] Rho[%f]\n",
-                        (cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho);
+                        (cv->xs[alphaIndex])[(md->ld_x)*((md->knot_points)-1)],(cv->xs[alphaIndex])[(md->ld_x)*((md->knot_points)-1)+1],prevJ,alphaIndex,rho);
         #endif
 
         while(1){
@@ -1332,7 +1427,7 @@
       
             #if DEBUG_SWITCH
                 printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter-1,(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+                            iter-1,(cv->xs[alphaIndex])[(md->ld_x)*((md->knot_points)-1)],(cv->xs[alphaIndex])[(md->ld_x)*((md->knot_points)-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
             #endif
         }
 
@@ -1341,7 +1436,9 @@
             #if USE_ALG_TRACE
                 gettimeofday(&start2,NULL);
             #endif
-            storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd,alphaIndex);
+            #if !TRAJ_LOAD_STORE_EXTERNAL
+                storeVarsCPU_MPC<T>(cv,tv,md,tActual_sys,tActual_plant,0,&maxd,alphaIndex);
+            #endif
             #if USE_ALG_TRACE
                 for (int i=0; i <= iter; i++){(data->alpha).push_back(alphaOut[i]);   (data->J).push_back(Jout[i]);}
                 gettimeofday(&end2,NULL);
@@ -1352,7 +1449,7 @@
             #if DEBUG_SWITCH
                 if (alphaIndex == -1){alphaIndex = 0;}
                 printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
-                            iter,(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)],(cv->xs[alphaIndex])[(md->ld_x)*(NUM_TIME_STEPS-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
+                            iter,(cv->xs[alphaIndex])[(md->ld_x)*((md->knot_points)-1)],(cv->xs[alphaIndex])[(md->ld_x)*((md->knot_points)-1)+1],prevJ,alphaIndex,rho,dJ,z,maxd);
             #endif
         // EXIT Handling
     }

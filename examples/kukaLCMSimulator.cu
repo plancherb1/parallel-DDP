@@ -46,14 +46,14 @@ void loadX(T *xk, int mode = 0){
 	else{
 		for(int i = 0; i < NUM_POS; i++){xk[i] = 0.0;}	
 	}
-	for(int i = NUM_POS; i < STATE_SIZE; i++){xk[i] = 0.0;}
+	for(int i = NUM_POS; i < STATE_SIZE_PDDP; i++){xk[i] = 0.0;}
 }
 
 int main(int argc, char *argv[])
 {
 	// Ask for user input on the initial state
 	printf("What initial state would you like? (0: 0s, 1: Patrick Pos)\n");
-	double xInit[STATE_SIZE];	loadX(xInit,getInt(1,0));
+	double xInit[STATE_SIZE_PDDP];	loadX(xInit,getInt(1,0));
 	// then get user input on simulator parameters
 	printf("What should the simulator rate be (in hz)?\n");
 	int hz = getInt(10000,100);

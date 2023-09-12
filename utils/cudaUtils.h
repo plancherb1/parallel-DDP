@@ -100,24 +100,24 @@
 
 /*** 1 CUDA ERROR CHECKING CODE 1 ***/
 
-  // For CUDA calls
-	 __host__ void gpuAssert(cudaError_t code, const char *file, const int line, bool abort=true);
-	#define gpuErrchk(err) {gpuAssert(err, __FILE__, __LINE__);}
+ //  // For CUDA calls
+	//  __host__ void gpuAssert(cudaError_t code, const char *file, const int line, bool abort=true);
+	// #define gpuErrchk(err) {gpuAssert(err, __FILE__, __LINE__);}
 
-	// For CUBLAS calls
-	__host__ __device__ static const char *cublasGetErrorEnum(cublasStatus_t error);
-	__host__ __device__ void cublasAssert(cublasStatus_t err, const char *file, const int line);
-	#define cublasErrchk(err) {cublasAssert(err, __FILE__, __LINE__);}
+	// // For CUBLAS calls
+	// __host__ __device__ static const char *cublasGetErrorEnum(cublasStatus_t error);
+	// __host__ __device__ void cublasAssert(cublasStatus_t err, const char *file, const int line);
+	// #define cublasErrchk(err) {cublasAssert(err, __FILE__, __LINE__);}
 
-	// For CUSOLVERDN calls
-	__host__ static const char *cusolverGetErrorEnum(cusolverStatus_t error);
-	__host__ void cusolverAssert(cusolverStatus_t err, const char *file, const int line);
-	#define cusolverErrchk(err) {cusolverAssert(err, __FILE__, __LINE__);}
+	// // For CUSOLVERDN calls
+	// __host__ static const char *cusolverGetErrorEnum(cusolverStatus_t error);
+	// __host__ void cusolverAssert(cusolverStatus_t err, const char *file, const int line);
+	// #define cusolverErrchk(err) {cusolverAssert(err, __FILE__, __LINE__);}
 
-	// For CUSOLVERSP calls
-	__host__ static const char *cusparseGetErrorEnum(cusparseStatus_t error);
-	__host__ void cusparseAssert(cusparseStatus_t err, const char *file, const int line);
-	#define cusparseErrchk(err) {cusparseAssert(err, __FILE__, __LINE__);}
+	// // For CUSOLVERSP calls
+	// __host__ static const char *cusparseGetErrorEnum(cusparseStatus_t error);
+	// __host__ void cusparseAssert(cusparseStatus_t err, const char *file, const int line);
+	// #define cusparseErrchk(err) {cusparseAssert(err, __FILE__, __LINE__);}
 
 /*** 1 CUDA ERROR CHECKING CODE 1 ***/
 

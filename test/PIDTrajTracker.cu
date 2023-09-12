@@ -2,7 +2,7 @@
 nvcc -std=c++11 -o PID.exe PIDTrajTracker.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define USE_WAFR_URDF 0
-#define EE_COST 1
+#define EE_COST_PDDP 1
 #define USE_LIMITS_FLAG 0
 #define MPC_MODE 1
 #define USE_EE_VEL_COST 0

@@ -40,7 +40,7 @@
 	__host__
 	void loadInitialState(T *xInit, int mode = 0){
 		// mode 0 = vertial position, mode 1 = center of workspace, mode 2 = patrick position
-		for (int i = 0; i < STATE_SIZE; i++){xInit[i] = 0;}
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){xInit[i] = 0;}
 		if (mode == 1){xInit[1] = PI/4.0; xInit[3] = -PI/4.0; xInit[5] = PI/4.0;}
 		if (mode == 2){xInit[0] = PI/2.0; xInit[1] = -PI/6.0; xInit[2] = -PI/3.0; xInit[3] = -PI/2.0; xInit[4] = 3.0*PI/4.0; xInit[5] = -PI/4.0; xInit[6] = 0;}
 	}
@@ -49,7 +49,7 @@
 	void loadTraj(trajVars<T> *tvars, matDimms *dimms, T *xInit = nullptr, T *uInit = nullptr){
 		T *xk = tvars->x;	T *uk = tvars->u;
 		for (int k=0; k<NUM_TIME_STEPS; k++){
-			for (int i = 0; i < STATE_SIZE; i++){
+			for (int i = 0; i < STATE_SIZE_PDDP; i++){
 				xk[i] = (xInit != nullptr) ? xInit[i] : static_cast<T>(0);	
 				if (i < CONTROL_SIZE){uk[i] = (uInit != nullptr) ? uInit[i] : static_cast<T>(0.01);}
 			}
@@ -60,7 +60,7 @@
 	template <typename T>
 	__host__
 	void loadTraj(CPUVars<T> *cvars, trajVars<T> *tvars, matDimms *dimms, T *xInit = nullptr, T *uInit = nullptr, bool parallelLineSearch = 0){
-			loadTraj<T>(tvars, dimms, xInit, uInit);		memcpy(cvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
+			loadTraj<T>(tvars, dimms, xInit, uInit);		memcpy(cvars->xActual, tvars->x, STATE_SIZE_PDDP*sizeof(T));
 			memcpy(cvars->x, tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T));
 			memcpy(cvars->u, tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T));
 			if (parallelLineSearch){
@@ -73,7 +73,7 @@
 	template <typename T>
 	__host__
 	void loadTraj(GPUVars<T> *gvars, trajVars<T> *tvars, matDimms *dimms, T *xInit = nullptr, T *uInit = nullptr){
-		loadTraj<T>(tvars, dimms, xInit, uInit);		memcpy(gvars->xActual, tvars->x, STATE_SIZE*sizeof(T));
+		loadTraj<T>(tvars, dimms, xInit, uInit);		memcpy(gvars->xActual, tvars->x, STATE_SIZE_PDDP*sizeof(T));
 		for (int i = 0; i < NUM_ALPHA; i++){
 			gpuErrchk(cudaMemcpy(gvars->h_d_x[i], tvars->x, (dimms->ld_x)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
 			gpuErrchk(cudaMemcpy(gvars->h_d_u[i], tvars->u, (dimms->ld_u)*NUM_TIME_STEPS*sizeof(T), cudaMemcpyHostToDevice));
@@ -81,7 +81,7 @@
 	}
 #endif
 
-#if EE_COST
+#if EE_COST_PDDP
 	template <typename T>
 	__host__
 	void evNorm(T *xActual, T *xGoal, T *eNorm, T *vNorm, T *eePos){
@@ -98,7 +98,7 @@
 	template <typename T>
 	__host__
 	void evNorm(const drake::lcmt_iiwa_status *msg, T *xGoal, T *eNorm, T *vNorm){
-		T xActual[STATE_SIZE];
+		T xActual[STATE_SIZE_PDDP];
 		// first cast the pos and vel to the right type
 		for (int i = 0; i < NUM_POS; i++){xActual[i]         = static_cast<T>(msg->joint_position_measured[i]);}
 		for (int i = 0; i < NUM_POS; i++){xActual[i+NUM_POS] = static_cast<T>(msg->joint_velocity_estimated[i]);}

@@ -3,7 +3,7 @@ nvcc -std=c++11 -o pickNPlace.exe LCM_pickNPlace_examples.cu ../utils/cudaUtils.
 ***/
 #error "Example is not fully implemented yet!"
 #define USE_WAFR_URDF 0
-#define EE_COST 1
+#define EE_COST_PDDP 1
 #define USE_SMOOTH_ABS 0
 #define SMOOTH_ABS_ALPHA 0.2
 // default cost terms for the start of the goal to drop the arm from 0 vector to the start of the fig 8
@@ -201,7 +201,7 @@ int main(int argc, char *argv[])
 	// init rand
 	srand(time(NULL));
 	// initial state for example
-	algType xInit[STATE_SIZE]; loadInitialState(xInit,1);
+	algType xInit[STATE_SIZE_PDDP]; loadInitialState(xInit,1);
 	// require user input for mode of operation
 	char mode = '?'; if (argc > 1){mode = argv[1][0];}
 	// run the MPC loop

@@ -12,79 +12,70 @@
  *       example file before including this file
  *******************************************************************/
 
+#define USE_WAFR_URDF 1
+
+// meta cost params
+#define EE_COST_PDDP 1
+#define USE_TRACKING_COST 1
+#define USE_SMOOTH_ABS 0
+#define USE_EE_VEL_COST 0
+#define USE_LIMITS_FLAG 0
+#define _Q_EE1 0.1		//1.0 // xyz
+#define _Q_EE2 0//0.001		//1.0 // rpy
+#define _R_EE 0.0001		//0.001
+#define _QF_EE1 1000.0		//5000.0 // xyz
+#define _QF_EE2 0//10.0		//5000.0 // rpy
+#define _Q_xdEE 0.1		//1.0//0.1
+#define _QF_xdEE 1000.0	//10.0//100.0
+#define _Q_xEE 0.0		//0.0//0.001//1.0
+#define _QF_xEE 0.0		//0.0//1.0
+// meta goal params
+#define PI 	   3.14159
+#define USE_RPY_GOAL 0
+
+// meta solver options
+#define MPC_MODE 1
+#define IGNORE_MAX_ROX_EXIT 0
+#define TOL_COST 0.00001
+#define MAX_ITER 100
+#define MAX_SOLVER_TIME 10000.0
+#define ROLLOUT_FLAG 0
+
 // load in utility functions and threading/cuda definitions
 #include "utils/cudaUtils.h"
 #include "utils/threadUtils.h"
 #include <sys/time.h>
 
 // options for examples depend on the plant
-#ifndef PLANT
-	#define PLANT 4 // 1:Pendulum 2:Cart_Pole 3:Quad 4:KukaArm
+#define PLANT 4 // 1:Pendulum 2:Cart_Pole 3:Quad 4:KukaArm
+#define NUM_POS 7
+#define STATE_SIZE_PDDP (2*NUM_POS)
+#define CONTROL_SIZE 7
+#define EE_TYPE 1 // flange but no EE on it
+#ifndef TOTAL_TIME
+	#define TOTAL_TIME 0.5
 #endif
-#if PLANT == 1
-	#define NUM_POS 1
-	#define STATE_SIZE_PDDP (2*NUM_POS)
-	#define CONTROL_SIZE 1
-	#define RHO_INIT 10.0
-#elif PLANT == 2
-	#define NUM_POS 2
-	#define STATE_SIZE_PDDP (2*NUM_POS)
-	#define CONTROL_SIZE 1
-	#define MAX_DEFECT_SIZE 0.75
-	#define RHO_INIT 10.0
-#elif PLANT == 3
-	#define NUM_POS 6
-	#define STATE_SIZE_PDDP (2*NUM_POS)
-	#define CONTROL_SIZE 4
-	#define ALPHA_BASE 0.5
-	#define NUM_ALPHA 16
-	#define MAX_DEFECT_SIZE 1.0
-	#define RHO_INIT 1.0
-#elif PLANT == 4
-	#define NUM_POS 7
-	#define STATE_SIZE_PDDP (2*NUM_POS)
-	#define CONTROL_SIZE 7
- 	#define EE_TYPE 1 // flange but no EE on it
- 	#ifndef TOTAL_TIME
-		#define TOTAL_TIME 0.5
- 	#endif
- 	#ifndef NUM_TIME_STEPS
-		#define NUM_TIME_STEPS 64
- 	#endif
-	#define ALPHA_BASE 0.5
-	#define NUM_ALPHA 16
-	#define MAX_DEFECT_SIZE 1.0
-	#define RHO_INIT 12.5
-	#define INTEGRATOR 1
-#else
-	#error "Currently only supports Simple Pendulum[1], Inverted Pendulum[2], Quadrotor [3], or KukaArm[4].\n"
+#ifndef NUM_TIME_STEPS
+	#define NUM_TIME_STEPS KNOT_POINTS
 #endif
+#define ALPHA_BASE 0.5
+#define NUM_ALPHA 16
+#define MAX_DEFECT_SIZE 1.0
+#define RHO_INIT 12.5
+#define INTEGRATOR 1
 
 // optiomizer options
 #define DEBUG_SWITCH 0 // 1 for on 0 for off
-#ifndef USE_ALG_TRACE
-	#define USE_ALG_TRACE 1 // 1 for on 0 for off
-#endif
+#define USE_ALG_TRACE 1 // 1 for on 0 for off
 #define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
-#ifndef FINITE_DIFF_EPSILON
-	#define FINITE_DIFF_EPSILON 0.00001
-#endif
 // define if we are working in doubles or floats
 // typedef double algType;
 typedef float algType;
 // typedef half algType; // code needs reworking before this will work
 
 // algorithmic options
-#ifndef INTEGRATOR
-	#define INTEGRATOR 3 // 1 for Euler, 2 for Midpoint, 3 for RK3
-#endif
 #define LINEAR_TRANSFORM_SWITCH 1 // 1 for on 0 for off
 #define ALPHA_BEST_SWITCH 1 // 1 for on 0 for off
-#define MAX_ITER 100
-#define MAX_SOLVER_TIME 10000.0
-#ifndef TOL_COST
-	#define TOL_COST 0.0001 // % decrease
-#endif
 
 // parallelization options
 #define M_BLOCKS 4
@@ -104,6 +95,10 @@ typedef float algType;
 #define RHO_FACTOR_PDDP 1.25
 #ifndef IGNORE_MAX_ROX_EXIT
 	#define IGNORE_MAX_ROX_EXIT 1
+#endif
+#define USE_FINITE_DIFF 0 // 1 for on 0 for off (analytical vs. finite diff derivatives if needed)
+#ifndef FINITE_DIFF_EPSILON
+	#define FINITE_DIFF_EPSILON 0.00001
 #endif
 
 // line search options
@@ -162,9 +157,6 @@ typedef float algType;
 #define MAX_CPU_THREADS (max(max(13,max((max(FSIM_ALPHA_THREADS,FSIM_THREADS)+1)*COST_THREADS + INTEGRATOR_THREADS + 3, FSIM_ALPHA_THREADS*FSIM_ALPHA_THREADS + 1)),3*NUM_ALPHA+3))
 
 // cost type options -- only applicable to Kuka arm (so default to 0)
-#ifndef EE_COST_PDDP
-	#define EE_COST_PDDP 0 // 1 for end effector based cost / goal and 0 for joint based
-#endif
 #ifndef USE_EE_VEL_COST
 	#define USE_EE_VEL_COST 0 // turn on or off the eeVel code path
 #endif
@@ -237,19 +229,8 @@ typedef float algType;
 // Matrix Dimms
 
 // include the correct set of cost and dynamics functions
-#if PLANT == 1
-	#include "plants/cost_pend.cuh"
-	#include "plants/dynamics_pend.cuh"
-#elif PLANT == 2
-	#include "plants/cost_cart.cuh"
- 	#include "plants/dynamics_cart.cuh"
-#elif PLANT == 3
-	#include "plants/cost_quad.cuh"
- 	#include "plants/dynamics_quad.cuh"
-#elif PLANT == 4
-	#include "plants/cost_arm.cuh"
- 	#include "plants/dynamics_arm.cuh"
-#endif
+#include "plants/cost_arm.cuh"
+#include "plants/dynamics_arm.cuh"
 
 // include integrators for those dynamics
 #include "utils/integrators.cuh"

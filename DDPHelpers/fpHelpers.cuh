@@ -127,7 +127,7 @@ T defectComp(T *d, int ld_d){
 }
 
 
-#if !EE_COST
+#if !EE_COST_PDDP
 	// cost kern using external costFunc
 	template <typename T>
 	__global__
@@ -202,7 +202,7 @@ __host__ __device__ __forceinline__
 void computeControlKT(T *u, T *x, T *xp, T *KT, T *du, T alpha, T *s_dx, int ld_KT, T *s_u = nullptr, T *s_x = nullptr){
 	int start, delta; singleLoopVals(&start,&delta);
 	#pragma unroll
-	for (int ind = start; ind < STATE_SIZE; ind += delta){
+	for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){
 		T val = x[ind]; s_dx[ind] = val-xp[ind];
 		if (s_x != nullptr){s_x[ind] = val;}
 	}
@@ -213,7 +213,7 @@ void computeControlKT(T *u, T *x, T *xp, T *KT, T *du, T alpha, T *s_dx, int ld_
 		// get the Kdx for this row
 		T Kdx = 0;
 		#pragma unroll
-		for (int c = 0; c < STATE_SIZE; c++){Kdx += KT[c + r*ld_KT]*s_dx[c];}
+		for (int c = 0; c < STATE_SIZE_PDDP; c++){Kdx += KT[c + r*ld_KT]*s_dx[c];}
 		// and then get this control with it
 		u[r] -= alpha*du[r] + Kdx;
 		if (s_u != nullptr){s_u[r] = u[r];}
@@ -232,7 +232,7 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 					 int finalCostShift = 0, T *xTarget = nullptr){
 	int start, delta; singleLoopVals(&start,&delta);
 	int kStart = bInd * N_BLOCKS_F;
-	unsigned int iters = EE_COST ? N_BLOCKS_F : (bInd < M_BLOCKS_F - 1 ? N_BLOCKS_F : N_BLOCKS_F - 1);
+	unsigned int iters = EE_COST_PDDP ? N_BLOCKS_F : (bInd < M_BLOCKS_F - 1 ? N_BLOCKS_F : N_BLOCKS_F - 1);
 	T *xk = &x[kStart*ld_x];
 	T *xkp1 = xk + ld_x;
 	T *uk = &u[kStart*ld_u];
@@ -252,11 +252,11 @@ void forwardSimInner(T *x, T *u, T *KT, T *du, T *d, T alpha, T *xp, T *s_dx, T 
 		hd__syncthreads();
 		// then write to global memory unless "final" state where we just use for defect on boundary
 		#pragma unroll
-		for (int ind = start; ind < STATE_SIZE; ind += delta){
+		for (int ind = start; ind < STATE_SIZE_PDDP; ind += delta){
 			if (k < N_BLOCKS_F - 1){xkp1[ind] = s_xkp1[ind];}
 			else if (bInd < M_BLOCKS_F - 1){dk[ind] = s_xkp1[ind] - xkp1[ind];}
 		}
-		#if EE_COST
+		#if EE_COST_PDDP
 			// Also compute running / final cost if needed (note not on defect "final" states)
 			if (k < N_BLOCKS_F - 1 || bInd == M_BLOCKS_F - 1){
 				if(tempFlag){costFunc(s_cost,s_eePos,d_xGoal,s_x,s_u,bInd*N_BLOCKS_F+k,s_eeVel,Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);}
@@ -283,10 +283,10 @@ void forwardSimKern(T **d_x, T **d_u, T *d_KT, T *d_du, T **d_d, T *d_alpha, \
 					T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
 					T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE,
 					int finalCostShift = 0, T *xTarget = nullptr){
-	__shared__ T s_x[STATE_SIZE];	__shared__ T s_u[NUM_POS];	__shared__ T s_qdd[NUM_POS];	__shared__ T s_dx[STATE_SIZE];
+	__shared__ T s_x[STATE_SIZE_PDDP];	__shared__ T s_u[NUM_POS];	__shared__ T s_qdd[NUM_POS];	__shared__ T s_dx[STATE_SIZE_PDDP];
 	int alphaInd = blockIdx.y;		int bInd = blockIdx.x;
-	// zero out the cost and set up to track eePos if in EE_COST scenario
-	#if EE_COST
+	// zero out the cost and set up to track eePos if in EE_COST_PDDP scenario
+	#if EE_COST_PDDP
 		__shared__ T s_cost[NUM_POS];	__shared__ T s_eePos[6];	__shared__ T s_eeVel[6];	zeroSharedMem<T,NUM_POS>(s_cost);
 	#else
 		T *s_cost = nullptr;	T *s_eePos = nullptr;	T *s_eeVel = nullptr;
@@ -295,7 +295,7 @@ void forwardSimKern(T **d_x, T **d_u, T *d_KT, T *d_du, T **d_d, T *d_alpha, \
 	forwardSimInner(d_x[alphaInd],d_u[alphaInd],d_KT,d_du,d_d[alphaInd],d_alpha[alphaInd],d_xp,s_dx,s_qdd,
 					(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,d_I,d_Tbody,s_x,s_u,s_cost,s_eePos,d_xGoal,s_eeVel,
 					Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);
-	#if EE_COST // sum up the total cost
+	#if EE_COST_PDDP // sum up the total cost
 		if (threadIdx.y == 0 && threadIdx.x == 0){d_JT[bInd + alphaInd*M_BLOCKS_F] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];}
 	#endif
 }
@@ -309,9 +309,9 @@ void forwardSim(threadDesc_t desc, T *x, T *u, T *KT, T *du, T *d, T alpha, T *x
 				T Q_EEV1 = _Q_EEV1, T Q_EEV2 = _Q_EEV2, T QF_EEV1 = _QF_EEV1, T QF_EEV2 = _QF_EEV2, \
 				T R_EE = _R_EE, T Q_xdEE = _Q_xdEE, T QF_xdEE = _QF_xdEE, T Q_xEE = _Q_xEE, T QF_xEE = _QF_xEE,
 				int finalCostShift = 0, T *xTarget = nullptr){
-	T *s_x = nullptr;		T *s_u = nullptr;		T s_qdd [NUM_POS];		T s_dx[STATE_SIZE];
-	// zero out the cost and set up to track eePos if EE_COST scenario
-	#if EE_COST
+	T *s_x = nullptr;		T *s_u = nullptr;		T s_qdd [NUM_POS];		T s_dx[STATE_SIZE_PDDP];
+	// zero out the cost and set up to track eePos if EE_COST_PDDP scenario
+	#if EE_COST_PDDP
 		T s_cost[NUM_POS];	T s_eePos[6];	T s_eeVel[6];	zeroSharedMem<T,NUM_POS>(s_cost);
 	#else
 		T *s_cost = nullptr; 	T *s_eePos = nullptr;	T *s_eeVel = nullptr;
@@ -322,7 +322,7 @@ void forwardSim(threadDesc_t desc, T *x, T *u, T *KT, T *du, T *d, T alpha, T *x
 		forwardSimInner(x,u,KT,du,d,alpha,xp,s_dx,s_qdd,(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody,s_x,s_u,s_cost,s_eePos,xGoal,s_eeVel,
 						Q_EE1,Q_EE2,QF_EE1,QF_EE2,Q_EEV1,Q_EEV2,QF_EEV1,QF_EEV2,R_EE,Q_xdEE,QF_xdEE,Q_xEE,QF_xEE,finalCostShift,xTarget);
 	}
-	#if EE_COST // sum up the total cost
+	#if EE_COST_PDDP // sum up the total cost
 		JT[desc.tid] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];
 	#endif
 }
@@ -333,13 +333,13 @@ void forwardSim(threadDesc_t desc, T *x, T *u, T *KT, T *du, T *d, T alpha, T *x
 // 				int ld_x, int ld_u, int ld_KT, int ld_du, int ld_d, 
 // 				T *I = nullptr, T *Tbody = nullptr, T *xGoal = nullptr, T *JT = nullptr){
 // 	T *s_x = nullptr;		T *s_u = nullptr;		T *tempMem;
-// 	// zero out the cost and set up to track eePos if EE_COST scenario
-// 	#if EE_COST
-// 		tempMem = (T *)malloc((NUM_POS+STATE_SIZE+NUM_POS+6)*sizeof(T));
+// 	// zero out the cost and set up to track eePos if EE_COST_PDDP scenario
+// 	#if EE_COST_PDDP
+// 		tempMem = (T *)malloc((NUM_POS+STATE_SIZE_PDDP+NUM_POS+6)*sizeof(T));
 // 		T *s_qdd = &tempMem[0]						T *s_dx = &tempMem[NUM_POS];	
-// 		T *s_cost = &tempMem[NUM_POS+STATE_SIZE];	T *s_eePos&tempMem[NUM_POS+STATE_SIZE+NUM_POS];		zeroSharedMem<T,NUM_POS>(s_cost);
+// 		T *s_cost = &tempMem[NUM_POS+STATE_SIZE_PDDP];	T *s_eePos&tempMem[NUM_POS+STATE_SIZE_PDDP+NUM_POS];		zeroSharedMem<T,NUM_POS>(s_cost);
 // 	#else
-// 		tempMem = (T *)malloc((NUM_POS+STATE_SIZE)*sizeof(T));
+// 		tempMem = (T *)malloc((NUM_POS+STATE_SIZE_PDDP)*sizeof(T));
 // 		T *s_qdd = &tempMem[0];		T *s_dx = &tempMem[NUM_POS];	
 // 		T *s_cost = nullptr; 		T *s_eePos = nullptr;
 // 	#endif
@@ -348,7 +348,7 @@ void forwardSim(threadDesc_t desc, T *x, T *u, T *KT, T *du, T *d, T alpha, T *x
 //   		int bInd = (desc.tid+i*desc.dim);
 // 		forwardSimInner(x,u,KT,du,d,alpha,xp,s_dx,s_qdd,(T)TIME_STEP,bInd,ld_x,ld_u,ld_KT,ld_du,ld_d,I,Tbody,s_x,s_u,s_cost,s_eePos,xGoal);
 // 	}
-// 	#if EE_COST // sum up the total cost
+// 	#if EE_COST_PDDP // sum up the total cost
 // 		JT[desc.tid] = s_cost[0]+s_cost[1]+s_cost[2]+s_cost[3]+s_cost[4]+s_cost[5]+s_cost[6];
 // 	#endif
 // 	free(tempMem);
@@ -379,7 +379,7 @@ void forwardSimGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_KT, T *d_du, T *alp
 
 	// LINE SEARCH //
 	// then compute the cost and defect once the forward simulation finishes
-	#if !EE_COST
+	#if !EE_COST_PDDP
 		costKern<T><<<NUM_ALPHA,NUM_TIME_STEPS,NUM_TIME_STEPS*sizeof(T),streams[0]>>>(d_x,d_u,d_JT,d_xGoal,ld_x,ld_u,Q1,Q2,R,QF1,QF2,finalCostShift);
 	#else
 		costKern<T,0><<<1,NUM_ALPHA,0,streams[0]>>>(d_JT);
@@ -444,7 +444,7 @@ int forwardSimCPU(T *x, T *xp, T *xp2, T *u, T *up, T *KT, T *du, T *d, T *dp, T
     // then compute the cost once the forward simulation finishes (already comped in FSIM if EE cost)
     bool JFlag, zFlag, dFlag;
     // if not ee cost need to launch cost threaded and sum across threads
-    #if !EE_COST
+    #if !EE_COST_PDDP
         desc.dim = COST_THREADS;
         for (unsigned int thread_i = 0; thread_i < COST_THREADS; thread_i++){
             desc.tid = thread_i;   desc.reps = compute_reps(thread_i,COST_THREADS,NUM_TIME_STEPS);
@@ -528,7 +528,7 @@ int forwardSimCPU2(T **xs, T *xp, T *xp2, T **us, T *up, T *KT, T *du, T **ds, T
 	// LINE SEARCH //
     // then compute the cost once the forward simulation finishes (already comped in FSIM if EE cost)
     // if not EE cost need to launch cost threaded and sum across threads
-    #if !EE_COST
+    #if !EE_COST_PDDP
 		for (unsigned int alpha_i = 0; alpha_i < FSIM_ALPHA_THREADS; alpha_i++){
 			unsigned int alphaInd = startAlpha + alpha_i;	if(alphaInd >= NUM_ALPHA){break;}
 	        desc.dim = COST_THREADS;
@@ -655,7 +655,7 @@ void forwardPassSLQGPU(T **d_x, T *d_xp, T *d_xp2, T **d_u, T *d_ApBK, T *d_Bdu,
 
 	// LINE SEARCH //
 	// then compute the cost and defect once the forward simulation finishes
-	#if !EE_COST
+	#if !EE_COST_PDDP
 		costKern<T><<<NUM_ALPHA,NUM_TIME_STEPS,NUM_TIME_STEPS*sizeof(T),streams[0]>>>(d_x,d_u,d_JT,d_xGoal,ld_x,ld_u,Q1,Q2,R,QF1,QF2,finalCostShift);
 	#else
 		// Since we didn't do it during the forward sim (since the full nonlinear sim didn't occur) we need to compute it now

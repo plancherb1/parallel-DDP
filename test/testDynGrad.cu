@@ -3,7 +3,7 @@ nvcc -std=c++11 -o testDynGrad.exe testDynGrad.cu ../utils/cudaUtils.cu ../utils
 *******/
 
 #define PLANT 4
-#define EE_COST 0
+#define EE_COST_PDDP 0
 #define MPC_MODE 1
 #define FINITE_DIFF_EPSILON 0.001
 #include "../config.cuh"
@@ -21,11 +21,11 @@ std::normal_distribution<double> randDistu(RANDOM_MEAN, RANDOM_STDEVu); //mean f
 template <typename T>
 __global__
 void integratorGradientKernFiniteDiff(T *d_AB, T *d_x, T *d_u, T *d_I, T *d_Tbody, int ld_x, int ld_u, int ld_AB){
-	__shared__ T s_x[2*STATE_SIZE];
+	__shared__ T s_x[2*STATE_SIZE_PDDP];
 	__shared__ T s_u[2*CONTROL_SIZE];
 	__shared__ T s_qdd[2*NUM_POS];
 	for (int timestep = blockIdx.x; timestep < NUM_TIME_STEPS-1; timestep += gridDim.x){
-		for (int outputCol = blockIdx.y; outputCol < STATE_SIZE + CONTROL_SIZE; outputCol += gridDim.y){
+		for (int outputCol = blockIdx.y; outputCol < STATE_SIZE_PDDP + CONTROL_SIZE; outputCol += gridDim.y){
 			T *xk = &d_x[timestep*ld_x];
 			T *uk = &d_u[timestep*ld_u];
 			T *ABk = &d_AB[timestep*ld_AB*DIM_AB_c + ld_AB*outputCol];
@@ -37,11 +37,11 @@ void integratorGradientKernFiniteDiff(T *d_AB, T *d_x, T *d_u, T *d_I, T *d_Tbod
 template <typename T>
 __host__
 void integratorGradientFiniteDiff(T *h_AB, T *h_x, T *h_u, T *h_I, T *h_Tbody, int ld_x, int ld_u, int ld_AB){
-	T s_x[2*STATE_SIZE];
+	T s_x[2*STATE_SIZE_PDDP];
 	T s_u[2*CONTROL_SIZE];
 	T s_qdd[2*NUM_POS];
 	for (int timestep = 0; timestep < NUM_TIME_STEPS-1; timestep++){
-		for (int outputCol = 0; outputCol < STATE_SIZE + CONTROL_SIZE; outputCol++){
+		for (int outputCol = 0; outputCol < STATE_SIZE_PDDP + CONTROL_SIZE; outputCol++){
 			T *xk = &h_x[timestep*ld_x];
 			T *uk = &h_u[timestep*ld_u];
 			T *ABk = &h_AB[timestep*ld_AB*DIM_AB_c + ld_AB*outputCol];
@@ -53,7 +53,7 @@ void integratorGradientFiniteDiff(T *h_AB, T *h_x, T *h_u, T *h_I, T *h_Tbody, i
 template <typename T>
 __global__
 void integratorGradientKernAnalytic(T *d_AB, T *d_x, T *d_u, T *d_I, T *d_Tbody, int ld_x, int ld_u, int ld_AB){
-	__shared__ T s_x[STATE_SIZE];
+	__shared__ T s_x[STATE_SIZE_PDDP];
 	__shared__ T s_u[CONTROL_SIZE];
 	__shared__ T s_qdd[NUM_POS];
 	__shared__ T s_dqdd[3*NUM_POS*NUM_POS];
@@ -62,7 +62,7 @@ void integratorGradientKernAnalytic(T *d_AB, T *d_x, T *d_u, T *d_I, T *d_Tbody,
 	T *ABk = &d_AB[blockIdx.x*ld_AB*DIM_AB_c];
 	// load in the state and control
 	#pragma unroll
-	for (int ind = threadIdx.x + threadIdx.y*blockDim.x; ind < STATE_SIZE; ind += blockDim.x*blockDim.y){
+	for (int ind = threadIdx.x + threadIdx.y*blockDim.x; ind < STATE_SIZE_PDDP; ind += blockDim.x*blockDim.y){
 		s_x[ind] = xk[ind];      if (ind < CONTROL_SIZE){s_u[ind] = uk[ind];}
 	}
 	__syncthreads();
@@ -132,7 +132,7 @@ void testDynGrad(){
 	// compute grads
 	#if MODE
 		dim3 aGrid(NUM_TIME_STEPS,1);
-		dim3 fdGrid(1,1);//NUM_TIME_STEPS,STATE_SIZE+CONTROL_SIZE);
+		dim3 fdGrid(1,1);//NUM_TIME_STEPS,STATE_SIZE_PDDP+CONTROL_SIZE);
 		dim3 aThreads(8,7);
 		dim3 fdThreads(8,7);
 		integratorGradientKernAnalytic<T><<<aGrid,aThreads>>>(d_AB,d_x,d_u,d_I,d_Tbody,ld_x,ld_u,ld_AB);

@@ -2,7 +2,7 @@
 nvcc -std=c++11 -o fig8.exe LCM_fig8_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -llcm -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define USE_WAFR_URDF 0
-#define EE_COST 1
+#define EE_COST_PDDP 1
 #define USE_SMOOTH_ABS 0
 #define USE_EE_VEL_COST 0
 #define USE_LIMITS_FLAG 0
@@ -126,7 +126,7 @@ class LCM_Fig8Goal_Handler {
     	void loadInitialGoal(T *goal){loadFig8Goal(goal,0);}
 
     	// load nominal target
-    	void loadInitialTarget(T *goal, T *target = nullptr){for(int i = 0; i < STATE_SIZE; i++){goal[i] = (target == nullptr) ? 0 : target[i];}}
+    	void loadInitialTarget(T *goal, T *target = nullptr){for(int i = 0; i < STATE_SIZE_PDDP; i++){goal[i] = (target == nullptr) ? 0 : target[i];}}
 
     	// keep track of traj times
     	void newTrajCallback_f(const lcm::ReceiveBuffer *rbuf, const std::string &chan, const drake::lcmt_trajectory_f *msg){
@@ -141,8 +141,8 @@ class LCM_Fig8Goal_Handler {
 			// get current goal
 			T goal[3]; double time = inFig8 ? msg->utime - zeroTime : 0; int rep = loadFig8Goal(goal,time);
 			// compute the position error norm and velocity norm
-			T eNorm; T vNorm; T currX[STATE_SIZE]; T eePos[NUM_POS];
-			for(int i=0; i < STATE_SIZE; i++){
+			T eNorm; T vNorm; T currX[STATE_SIZE_PDDP]; T eePos[NUM_POS];
+			for(int i=0; i < STATE_SIZE_PDDP; i++){
 				if(i < NUM_POS){currX[i] = static_cast<T>(msg->joint_position_measured[i]);}
 				else{			currX[i] = static_cast<T>(msg->joint_velocity_estimated[i-NUM_POS]);}
 			}
@@ -309,7 +309,7 @@ int main(int argc, char *argv[])
 	// init rand
 	srand(time(NULL));
 	// initial state for example
-	algType xInit[STATE_SIZE]; loadInitialState(xInit,1);
+	algType xInit[STATE_SIZE_PDDP]; loadInitialState(xInit,1);
 	// require user input for mode of operation
 	char mode = '?'; if (argc > 1){mode = argv[1][0];}
 	// run the MPC loop

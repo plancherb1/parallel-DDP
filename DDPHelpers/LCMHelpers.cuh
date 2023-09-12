@@ -229,7 +229,7 @@ class LCM_MPCLoop_Handler {
                 //printf("fist pass MPC loop\n");
                 tvars->t0_plant = tActual_plant;    tvars->t0_sys = tActual_sys;     tvars->first_pass = false;
                 #pragma unroll
-                for (int i=0; i<STATE_SIZE; i++){xActual_load[i] = (T)(tvars->x)[i];}
+                for (int i=0; i<STATE_SIZE_PDDP; i++){xActual_load[i] = (T)(tvars->x)[i];}
             }
             // else update xActual and qdTarget (leave q target where it is as that is an algorithmic bias)
             else{
@@ -271,7 +271,7 @@ __host__
 void runMPCHandler(LCM_MPCLoop_Handler<T> *handler){
     lcm::LCM lcm_ptr; if(!lcm_ptr.good()){printf("LCM Failed to init in MPC handler runner\n");}
     lcm::Subscription *sub = lcm_ptr.subscribe(ARM_STATUS_FILTERED, &LCM_MPCLoop_Handler<T>::handleStatus, handler);
-    #if defined EE_COST && EE_COST == 1
+    #if defined EE_COST_PDDP && EE_COST_PDDP == 1
         lcm::Subscription *sub2 = lcm_ptr.subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalEE, handler);
     #else
         lcm::Subscription *sub2 = lcm_ptr.subscribe(ARM_GOAL_CHANNEL, &LCM_MPCLoop_Handler<T>::handleGoalqqd, handler);
@@ -418,12 +418,12 @@ void run_traj_printer(lcm::LCM *lcm_ptr, LCM_traj_printer<T> *handler){
 class LCM_Simulator_Handler {
     public:
         int numSteps;               struct timeval start, end;   int64_t currTime;
-        double nextX[STATE_SIZE];   double currX[STATE_SIZE];    double qdd[NUM_POS];
+        double nextX[STATE_SIZE_PDDP];   double currX[STATE_SIZE_PDDP];    double qdd[NUM_POS];
         double Tbody[36*NUM_POS];   double I[36*NUM_POS];        double torqueCom[CONTROL_SIZE]; 
         lcm::LCM lcm_ptr;           int hertz, debug;            double dt;
 
         LCM_Simulator_Handler(double *xInit, int _numSteps = 50, int _hertz = 1000, int _debug = 0) : numSteps(_numSteps), hertz(_hertz), debug(_debug) {
-            for(int i=0; i < STATE_SIZE; i++){currX[i] = xInit[i];}
+            for(int i=0; i < STATE_SIZE_PDDP; i++){currX[i] = xInit[i];}
             for(int i=0; i < CONTROL_SIZE; i++){torqueCom[i] = 0;}
             if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
             initI<double>(I);       initT<double>(Tbody);     gettimeofday(&start,NULL);    currTime = 0;       dt = 1.0/hertz;
@@ -441,10 +441,10 @@ class LCM_Simulator_Handler {
 
         // do simulation
         void simulate(double simTime){
-            double prevX[STATE_SIZE];
+            double prevX[STATE_SIZE_PDDP];
             #pragma unroll
-            for(int i = 0; i < STATE_SIZE; i++){prevX[i] = currX[i];}
-            double currU[STATE_SIZE];
+            for(int i = 0; i < STATE_SIZE_PDDP; i++){prevX[i] = currX[i];}
+            double currU[STATE_SIZE_PDDP];
             #pragma unroll
             for(int i = 0; i < CONTROL_SIZE; i++){currU[i] = torqueCom[i];}
 
@@ -453,7 +453,7 @@ class LCM_Simulator_Handler {
             for (int i=0; i< numSteps; i++){
                 _integrator<double>(nextX,currX,currU,qdd,I,Tbody,stepTime);
                 #pragma unroll
-                for(int i = 0; i < STATE_SIZE; i++){currX[i] = nextX[i];}
+                for(int i = 0; i < STATE_SIZE_PDDP; i++){currX[i] = nextX[i];}
             }
             if (debug == 1){
                 printf("%f:%f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f:%f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
@@ -509,7 +509,7 @@ __host__
 void runLCMSimulator(T *xInit, int numSteps = 50, int hertz = 1000, int debug = 0){
     lcm::LCM lcm_ptr;
     if(!lcm_ptr.good()){printf("LCM Failed to Init in Simulator\n");}
-    double xInitd[STATE_SIZE];  for (int i = 0; i < STATE_SIZE; i++){xInitd[i] = static_cast<double>(xInit[i]);}
+    double xInitd[STATE_SIZE_PDDP];  for (int i = 0; i < STATE_SIZE_PDDP; i++){xInitd[i] = static_cast<double>(xInit[i]);}
     LCM_Simulator_Handler handler = LCM_Simulator_Handler(xInitd, numSteps, hertz, debug);
     lcm::Subscription *sub = lcm_ptr.subscribe(ARM_COMMAND_CHANNEL, &LCM_Simulator_Handler::handleMessage, &handler);
     sub->setQueueCapacity(1);

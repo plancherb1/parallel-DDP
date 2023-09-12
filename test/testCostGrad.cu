@@ -3,7 +3,7 @@ nvcc -std=c++11 -o testCostGrad.exe testCostGrad.cu ../utils/cudaUtils.cu ../uti
 *******/
 
 #define PLANT 4
-#define EE_COST 1
+#define EE_COST_PDDP 1
 #define MPC_MODE 1
 #define USE_WAFR_URDF 1
 #define USE_EE_VEL_COST 0
@@ -28,22 +28,22 @@ std::normal_distribution<double> randDistg(RANDOM_MEAN, RANDOM_STDEVg); //mean f
 template <typename T>
 __host__
 void finiteDiffT(T *x, T *grad, int ld_grad){
-	T s_x[2*STATE_SIZE];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
+	T s_x[2*STATE_SIZE_PDDP];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
 	T s_Tb[36*NUM_POS];		T s_T[36*NUM_POS];		T s_T2[36*NUM_POS];
 	T d_Tb[36*NUM_POS];		initT<T>(d_Tb);
 	#pragma unroll
 	for (int diff_ind = 0; diff_ind < NUM_POS; diff_ind++){
 		T *gradc = &grad[ld_grad*diff_ind];
 		#pragma unroll
-		for (int i = 0; i < STATE_SIZE; i++){
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){
 			T val = x[i];	
 			T adj = (diff_ind == i ? TEST_FINITE_DIFF_EPSILON : 0.0);
 			s_x[i] 				= val + adj;
-			s_x[i + STATE_SIZE] = val - adj;
+			s_x[i + STATE_SIZE_PDDP] = val - adj;
 		}
 		// compute T
 		load_Tb<T>(s_x,			    s_Tb,d_Tb,s_cosq,s_sinq);		compute_T_TA_J<T>(s_Tb,s_T);
-		load_Tb<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq);		compute_T_TA_J<T>(s_Tb,s_T2);
+		load_Tb<T>(&s_x[STATE_SIZE_PDDP],s_Tb,d_Tb,s_cosq,s_sinq);		compute_T_TA_J<T>(s_Tb,s_T2);
 		T *Tee = &s_T[36*(NUM_POS-1)];	T *Tee2 = &s_T2[36*(NUM_POS-1)];
 		// now do finite diff rule
 		#pragma unroll
@@ -89,22 +89,22 @@ void analyticalT2(T *x, T *grad){
 template <typename T>
 __host__
 void finiteDiffTbdt(T *x, T *grad, int ld_grad){
-	T s_x[2*STATE_SIZE];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
+	T s_x[2*STATE_SIZE_PDDP];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
 	T s_Tb[36*NUM_POS];		T s_Tbdt[36*NUM_POS];	T s_Tbdt2[36*NUM_POS];
 	T d_Tb[36*NUM_POS];		initT<T>(d_Tb);
 	#pragma unroll
-	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
+	for (int diff_ind = 0; diff_ind < STATE_SIZE_PDDP; diff_ind++){
 		T *gradc = &grad[ld_grad*diff_ind];
 		#pragma unroll
-		for (int i = 0; i < STATE_SIZE; i++){
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){
 			T val = x[i];	
 			T adj = (diff_ind == i ? TEST_FINITE_DIFF_EPSILON : 0.0);
 			s_x[i] 				= val + adj;
-			s_x[i + STATE_SIZE] = val - adj;
+			s_x[i + STATE_SIZE_PDDP] = val - adj;
 		}
 		// compute Tdt
 		load_Tbdt<T>(s_x,			  s_Tb,d_Tb,s_cosq,s_sinq,s_Tbdt);
-		load_Tbdt<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq,s_Tbdt2);
+		load_Tbdt<T>(&s_x[STATE_SIZE_PDDP],s_Tb,d_Tb,s_cosq,s_sinq,s_Tbdt2);
 		int Tb_ind = diff_ind % NUM_POS;
 		T *Tbeedt = &s_Tbdt[16*Tb_ind];	T *Tbeedt2 = &s_Tbdt2[16*Tb_ind];
 		// now do finite diff rule
@@ -124,7 +124,7 @@ void analyticalTbdt(T *x, T *grad){
 	T s_Tb[36*NUM_POS];			T d_Tb[36*NUM_POS]; 	   	initT<T>(d_Tb); 
 	T s_Tb_dx[32*NUM_POS];	   	T s_TbTdt[32*NUM_POS];		T s_Tb_dt_dx[36*NUM_POS];
     load_Tbdtdx<T>(x,s_Tb,d_Tb,s_sinq,s_cosq,s_Tb_dx,s_TbTdt,s_Tb_dt_dx);
-   	for (int k = 0; k < STATE_SIZE; k++){
+   	for (int k = 0; k < STATE_SIZE_PDDP; k++){
 		for (int i = 0; i < 16; i++){grad[16*k + i] = s_Tb_dt_dx[16*k + i];}
 	}
 }
@@ -132,22 +132,22 @@ void analyticalTbdt(T *x, T *grad){
 template <typename T>
 __host__
 void finiteDiffTdt(T *x, T *grad, int ld_grad){
-	T s_x[2*STATE_SIZE];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
+	T s_x[2*STATE_SIZE_PDDP];	T s_cosq[NUM_POS];		T s_sinq[NUM_POS];
 	T s_Tb[36*NUM_POS];		T d_Tb[36*NUM_POS];		initT<T>(d_Tb);			
 	T s_TbTdt[36*NUM_POS];	T s_TbTdt2[36*NUM_POS];	T s_T[36*NUM_POS];
 	#pragma unroll
-	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
+	for (int diff_ind = 0; diff_ind < STATE_SIZE_PDDP; diff_ind++){
 		T *gradc = &grad[ld_grad*diff_ind];
 		#pragma unroll
-		for (int i = 0; i < STATE_SIZE; i++){
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){
 			T val = x[i];	
 			T adj = (diff_ind == i ? TEST_FINITE_DIFF_EPSILON : 0.0);
 			s_x[i] 				= val + adj;
-			s_x[i + STATE_SIZE] = val - adj;
+			s_x[i + STATE_SIZE_PDDP] = val - adj;
 		}
 		// compute Tdt
 		load_Tbdt<T>(s_x,			  s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt);		compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt);
-		load_Tbdt<T>(&s_x[STATE_SIZE],s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt2);	compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt2);
+		load_Tbdt<T>(&s_x[STATE_SIZE_PDDP],s_Tb,d_Tb,s_cosq,s_sinq,s_TbTdt2);	compute_T_TA_J<T>(s_Tb,s_T,nullptr,nullptr,s_TbTdt2);
 		T *Teedt = &s_TbTdt[16*(NUM_POS*2-1)];
 		T *Teedt2 = &s_TbTdt2[16*(NUM_POS*2-1)];
 		// now do finite diff rule
@@ -173,7 +173,7 @@ void analyticalTdt(T *x, T *grad){
     T *s_Tb_dt = s_TbTdt;   T *s_T_dt = &s_TbTdt[16*NUM_POS];
     T *s_T_dx = s_temp1; 	T *s_T_dx_prev = &s_T_dx[16*NUM_POS];
     compute_T_dtdx<T>(s_Tb,s_Tb_dx,s_Tb_dt,s_Tb_dt_dx,s_T,s_T_dx,s_T_dt,s_T_dt_dx,s_T_dx_prev,s_T_dt_dx_prev);
-   	for (int k = 0; k < STATE_SIZE; k++){
+   	for (int k = 0; k < STATE_SIZE_PDDP; k++){
 		for (int i = 0; i < 16; i++){grad[16*k + i] = s_T_dt_dx[16*k + i];}
 	}
 }
@@ -181,20 +181,20 @@ void analyticalTdt(T *x, T *grad){
 template <typename T>
 __host__
 void finiteDiffPos(T *x, T *eePosGrad, int ld_grad){
-	T s_x[2*STATE_SIZE];	T eePos[2*6];
+	T s_x[2*STATE_SIZE_PDDP];	T eePos[2*6];
 	#pragma unroll
 	for (int diff_ind = 0; diff_ind < NUM_POS; diff_ind++){
 		T *eeGrad = &eePosGrad[ld_grad*diff_ind];
 		#pragma unroll
-		for (int i = 0; i < STATE_SIZE; i++){
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){
 			T val = x[i];	
 			T adj = (diff_ind == i ? TEST_FINITE_DIFF_EPSILON : 0.0);
 			s_x[i] 				= val + adj;
-			s_x[i + STATE_SIZE] = val - adj;
+			s_x[i + STATE_SIZE_PDDP] = val - adj;
 		}
 		// compute eePos
 		compute_eePos_scratch<T>( s_x, 			    eePos);
-		compute_eePos_scratch<T>(&s_x[STATE_SIZE], &eePos[6]);
+		compute_eePos_scratch<T>(&s_x[STATE_SIZE_PDDP], &eePos[6]);
 		// now do finite diff rule
 		#pragma unroll
 		for (int i = 0; i < 6; i++){
@@ -216,20 +216,20 @@ void analyticalPos(T *x, T *eePosGrad){
 template <typename T>
 __host__
 void finiteDiffVel(T *x, T *eePosVelGrad, int ld_grad){
-	T s_x[2*STATE_SIZE];	T eePos[2*6];	T eeVel[2*6];
+	T s_x[2*STATE_SIZE_PDDP];	T eePos[2*6];	T eeVel[2*6];
 	#pragma unroll
-	for (int diff_ind = 0; diff_ind < STATE_SIZE; diff_ind++){
+	for (int diff_ind = 0; diff_ind < STATE_SIZE_PDDP; diff_ind++){
 		T *eeGrad = &eePosVelGrad[ld_grad*diff_ind];
 		#pragma unroll
-		for (int i = 0; i < STATE_SIZE; i++){
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){
 			T val = x[i];	
 			T adj = (diff_ind == i ? TEST_FINITE_DIFF_EPSILON : 0.0);
 			s_x[i] 				= val + adj;
-			s_x[i + STATE_SIZE] = val - adj;
+			s_x[i + STATE_SIZE_PDDP] = val - adj;
 		}
 		// compute eePos and Vel
 		compute_eeVel_scratch<T>(s_x, 			   eePos, 	  eeVel);
-		compute_eeVel_scratch<T>(&s_x[STATE_SIZE], &eePos[6], &eeVel[6]);
+		compute_eeVel_scratch<T>(&s_x[STATE_SIZE_PDDP], &eePos[6], &eeVel[6]);
 		// now do finite diff rule
 		#pragma unroll
 		for (int i = 0; i < 6; i++){
@@ -256,35 +256,35 @@ void analyticalVel(T *x, T *eePosVelGrad, int ld_grad){
 template <typename T>
 __host__
 void finiteDiffCost(T *x, T *u, T *goal, T *grad){
-	T s_x[2*STATE_SIZE];	T s_u[2*CONTROL_SIZE];	T cost, cost2;
-	#if EE_COST
+	T s_x[2*STATE_SIZE_PDDP];	T s_u[2*CONTROL_SIZE];	T cost, cost2;
+	#if EE_COST_PDDP
 		T eePos[2*6];	T eeVel[2*6];
 	#endif
 	#pragma unroll
-	for (int diff_ind = 0; diff_ind < STATE_SIZE+CONTROL_SIZE; diff_ind++){
+	for (int diff_ind = 0; diff_ind < STATE_SIZE_PDDP+CONTROL_SIZE; diff_ind++){
 		#pragma unroll
-		for (int i = 0; i < STATE_SIZE; i++){
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){
 			T val = x[i];	
 			T adj = (diff_ind == i ? TEST_FINITE_DIFF_EPSILON : 0.0);
 			s_x[i] 				= val + adj;
-			s_x[i + STATE_SIZE] = val - adj;
+			s_x[i + STATE_SIZE_PDDP] = val - adj;
 			if (i < CONTROL_SIZE){
 				T val = u[i];
-				T adj = (diff_ind == i + STATE_SIZE ? TEST_FINITE_DIFF_EPSILON : 0.0);
+				T adj = (diff_ind == i + STATE_SIZE_PDDP ? TEST_FINITE_DIFF_EPSILON : 0.0);
 				s_u[i] 				= val + adj;
 				s_u[i + CONTROL_SIZE] = val - adj;
 			}
 		}
-		#if EE_COST
+		#if EE_COST_PDDP
 			// compute eePos and Vel
 			compute_eeVel_scratch<T>(s_x, 			   eePos, 	  eeVel);
-			compute_eeVel_scratch<T>(&s_x[STATE_SIZE], &eePos[6], &eeVel[6]);
+			compute_eeVel_scratch<T>(&s_x[STATE_SIZE_PDDP], &eePos[6], &eeVel[6]);
 			// then compute costs
 			cost = costFunc(  eePos,    goal,  s_x, 			   s_u, 			COST_TIME_STEP, eeVel);
-			cost2 = costFunc(&eePos[6], goal, &s_x[STATE_SIZE], &s_u[CONTROL_SIZE], COST_TIME_STEP, &eeVel[6]);
+			cost2 = costFunc(&eePos[6], goal, &s_x[STATE_SIZE_PDDP], &s_u[CONTROL_SIZE], COST_TIME_STEP, &eeVel[6]);
 		#else
 			cost = costFunc(  s_x, 				s_u, 			   goal, COST_TIME_STEP);
-			cost2 = costFunc(&s_x[STATE_SIZE], &s_u[CONTROL_SIZE], goal, COST_TIME_STEP);
+			cost2 = costFunc(&s_x[STATE_SIZE_PDDP], &s_u[CONTROL_SIZE], goal, COST_TIME_STEP);
 		#endif
 		// now do finite diff rule
 		grad[diff_ind] = (cost - cost2) / (2.0*TEST_FINITE_DIFF_EPSILON);
@@ -295,10 +295,10 @@ template <typename T>
 __host__
 void analyticalCost(T *x, T *u, T *goal, T *grad){
 	// space for Hessian
-	int ld_H = STATE_SIZE+CONTROL_SIZE; 	T Hk[ld_H*ld_H];
-	#if EE_COST
+	int ld_H = STATE_SIZE_PDDP+CONTROL_SIZE; 	T Hk[ld_H*ld_H];
+	#if EE_COST_PDDP
 		// first compute eePos and eeVel and grads
-		T s_eePos[6];	T s_eeVel[6]; 	T s_deePos[6*STATE_SIZE];	T s_deeVel[12*STATE_SIZE];
+		T s_eePos[6];	T s_eeVel[6]; 	T s_deePos[6*STATE_SIZE_PDDP];	T s_deeVel[12*STATE_SIZE_PDDP];
 		compute_eeVel_scratch<T>(x,s_eePos,s_eeVel);	
 		analyticalPos<T>(x,s_deePos);	analyticalVel<T>(x,s_deeVel,12);
 		T *JT = nullptr;
@@ -318,7 +318,7 @@ void loadAndClearPos(T *x, T *grad, T *grad2, int gradSize, T *u = nullptr, T *g
 		x[i+NUM_POS] = static_cast<T>(randDistqd(randEng));
 		if (u != nullptr){u[i] = static_cast<T>(randDistu(randEng));}
 		if (goal != nullptr){
-			#if EE_COST
+			#if EE_COST_PDDP
 				if(i < 6){goal[i] = static_cast<T>(randDistg(randEng));}
 			#else
 				goal[i] = static_cast<T>(randDistq(randEng));
@@ -337,7 +337,7 @@ __host__
 void testT(int runv2 = 0){
 	// allocate
 	int ld_grad = 16;
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
 	T *grad =  (T *)malloc(ld_grad*NUM_POS*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*NUM_POS*sizeof(T));
 
@@ -372,20 +372,20 @@ __host__
 void testTbdt(){
 	// allocate
 	int ld_grad = 16;
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
-	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
-	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
+	T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*STATE_SIZE_PDDP*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE_PDDP*sizeof(T));
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE);
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE_PDDP);
 		// compute
 		analyticalTbdt<T>(x,grad);
 		finiteDiffTbdt<T>(x,grad2,ld_grad);
 		// compare
 		#pragma unroll
-		for (int c = 0; c < STATE_SIZE; c++){
+		for (int c = 0; c < STATE_SIZE_PDDP; c++){
 			#pragma unroll
 			for (int r = 0; r < 16; r++){
 				int ind = c*ld_grad + r;
@@ -406,20 +406,20 @@ __host__
 void testTdt(){
 	// allocate
 	int ld_grad = 16;
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
-	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
-	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
+	T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*STATE_SIZE_PDDP*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE_PDDP*sizeof(T));
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE);
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE_PDDP);
 		// compute
 		analyticalTdt<T>(x,grad);
 		finiteDiffTdt<T>(x,grad2,ld_grad);
 		// compare
 		#pragma unroll
-		for (int c = 0; c < STATE_SIZE; c++){
+		for (int c = 0; c < STATE_SIZE_PDDP; c++){
 			#pragma unroll
 			for (int r = 0; r < 16; r++){
 				int ind = c*ld_grad + r;
@@ -440,8 +440,8 @@ __host__
 void testPos(){
 	// allocate
 	int ld_grad = 6;
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
-	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
+	T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*STATE_SIZE_PDDP*sizeof(T));	
 	T *grad2 = (T *)malloc(ld_grad*NUM_POS*sizeof(T));
 
 	// compare for NUM_REPS
@@ -474,20 +474,20 @@ __host__
 void testVel(int rpyFlag = 0){
 	// allocate
 	int ld_grad = 12;
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
-	T *grad =  (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));	
-	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE*sizeof(T));
+	T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
+	T *grad =  (T *)malloc(ld_grad*STATE_SIZE_PDDP*sizeof(T));	
+	T *grad2 = (T *)malloc(ld_grad*STATE_SIZE_PDDP*sizeof(T));
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE);
+		loadAndClearPos<T>(x,grad,grad2,ld_grad*STATE_SIZE_PDDP);
 		// compute
 		analyticalVel<T>(x,grad,ld_grad);
 		finiteDiffVel<T>(x,grad2,ld_grad);
 		// compare
 		#pragma unroll
-		for (int c = 0; c < STATE_SIZE; c++){
+		for (int c = 0; c < STATE_SIZE_PDDP; c++){
 			#pragma unroll
 			for (int r = 0; r < 12; r++){
 				if (!rpyFlag && ((r >= 3 && r < 6) || (r >=9))){continue;}
@@ -508,27 +508,27 @@ template <typename T>
 __host__
 void testCost(){
 	// allocate
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+	T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
 	T *u =     (T *)malloc(CONTROL_SIZE*sizeof(T));
-	T *grad =  (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
-	T *grad2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
+	T *grad =  (T *)malloc((STATE_SIZE_PDDP+CONTROL_SIZE)*sizeof(T));	
+	T *grad2 = (T *)malloc((STATE_SIZE_PDDP+CONTROL_SIZE)*sizeof(T));	
 	T *goal;
-	#if EE_COST
+	#if EE_COST_PDDP
 		goal =(T *)malloc(6*sizeof(T));
 	#else
-		goal =(T *)malloc(STATE_SIZE*sizeof(T));
+		goal =(T *)malloc(STATE_SIZE_PDDP*sizeof(T));
 	#endif
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,STATE_SIZE+CONTROL_SIZE,u,goal);
+		loadAndClearPos<T>(x,grad,grad2,STATE_SIZE_PDDP+CONTROL_SIZE,u,goal);
 		// compute
 		analyticalCost<T>(x,u,goal,grad);
 		finiteDiffCost<T>(x,u,goal,grad2);
 		// compare
 		#pragma unroll
-		for (int ind = 0; ind < STATE_SIZE + CONTROL_SIZE; ind++){
+		for (int ind = 0; ind < STATE_SIZE_PDDP + CONTROL_SIZE; ind++){
 			T delta = abs(grad[ind] - grad2[ind]);
 			T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
 			if (err > ERR_TOL){
@@ -545,20 +545,20 @@ template <typename T>
 __host__
 void compareEEPosdq(){
 	// allocate
-	T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
-	T *grad =  (T *)malloc(12*STATE_SIZE*sizeof(T));	
-	T *grad2 = (T *)malloc(12*STATE_SIZE*sizeof(T));	
+	T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
+	T *grad =  (T *)malloc(12*STATE_SIZE_PDDP*sizeof(T));	
+	T *grad2 = (T *)malloc(12*STATE_SIZE_PDDP*sizeof(T));	
 
 	// compare for NUM_REPS
 	for (int rep = 0; rep < NUM_REPS; rep++){
 		// relod and clear
-		loadAndClearPos<T>(x,grad,grad2,12*STATE_SIZE);
+		loadAndClearPos<T>(x,grad,grad2,12*STATE_SIZE_PDDP);
 		// compute
 		analyticalPos<T>(x,grad);
 		analyticalVel<T>(x,grad2,12);
 		// compare
 		#pragma unroll
-		for (int c = 0; c < STATE_SIZE; c++){
+		for (int c = 0; c < STATE_SIZE_PDDP; c++){
 			#pragma unroll
 			for (int r = 0; r < 6; r++){
 				int ind_1 = c*6 + r;	int ind_2 = c*12 + r;
@@ -574,31 +574,31 @@ void compareEEPosdq(){
 	free(x); free(grad); free(grad2);
 }
 
-#if EE_COST
+#if EE_COST_PDDP
 	template <typename T>
 	__host__
 	void compareCostdq(){
 		// allocate
-		T *x =     (T *)malloc(STATE_SIZE*sizeof(T));
+		T *x =     (T *)malloc(STATE_SIZE_PDDP*sizeof(T));
 		T *u =     (T *)malloc(CONTROL_SIZE*sizeof(T));
-		T *grad =  (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
-		T *grad2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*sizeof(T));	
+		T *grad =  (T *)malloc((STATE_SIZE_PDDP+CONTROL_SIZE)*sizeof(T));	
+		T *grad2 = (T *)malloc((STATE_SIZE_PDDP+CONTROL_SIZE)*sizeof(T));	
 		T *goal;
-		#if EE_COST
+		#if EE_COST_PDDP
 			goal =(T *)malloc(6*sizeof(T));
 		#else
-			goal =(T *)malloc(STATE_SIZE*sizeof(T));
+			goal =(T *)malloc(STATE_SIZE_PDDP*sizeof(T));
 		#endif
 
-		int ld_H    = STATE_SIZE + CONTROL_SIZE;
-		T *Hessian  = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
-		T *Hessian2 = (T *)malloc((STATE_SIZE+CONTROL_SIZE)*ld_H*sizeof(T));
+		int ld_H    = STATE_SIZE_PDDP + CONTROL_SIZE;
+		T *Hessian  = (T *)malloc((STATE_SIZE_PDDP+CONTROL_SIZE)*ld_H*sizeof(T));
+		T *Hessian2 = (T *)malloc((STATE_SIZE_PDDP+CONTROL_SIZE)*ld_H*sizeof(T));
 		T Tbody[36*NUM_POS]; 	   	initT<T>(Tbody);
 
 		// compare for NUM_REPS
 		for (int rep = 0; rep < NUM_REPS; rep++){
 			// relod and clear
-			loadAndClearPos<T>(x,grad,grad2,STATE_SIZE+CONTROL_SIZE,u,goal);
+			loadAndClearPos<T>(x,grad,grad2,STATE_SIZE_PDDP+CONTROL_SIZE,u,goal);
 			// compute
 			T s_sinq[NUM_POS];			T s_cosq[NUM_POS];
 			T s_Tb[36*NUM_POS];			T s_Tb_dx[36*NUM_POS];
@@ -617,7 +617,7 @@ void compareEEPosdq(){
 			
 			// compare
 			#pragma unroll
-			for (int ind = 0; ind < STATE_SIZE + CONTROL_SIZE; ind++){
+			for (int ind = 0; ind < STATE_SIZE_PDDP + CONTROL_SIZE; ind++){
 				T delta = abs(grad[ind] - grad2[ind]);
 				T err = abs(grad2[ind] == 0 ? (grad[ind] == 0 ? 0 : delta/grad[ind]*100) : delta/grad2[ind]*100);
 				if (err > ERR_TOL){
@@ -670,7 +670,7 @@ int main(int argc, char *argv[])
 			compareEEPosdq<algType>();
 			break;
 		case 'm':
-			#if EE_COST
+			#if EE_COST_PDDP
 				compareCostdq<algType>();
 			#else
 				printf("Method not defined for joint level cost\n");

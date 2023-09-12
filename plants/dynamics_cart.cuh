@@ -30,7 +30,7 @@ __host__ __device__ __forceinline__
 void dynamics(T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody, T *s_eePos = nullptr, int reps = 1){
     int start, delta; singleLoopVals(&start,&delta);
     for(int iter = start; iter < reps; iter += delta){
-        T *s_xk = &s_x[STATE_SIZE*iter];
+        T *s_xk = &s_x[STATE_SIZE_PDDP*iter];
         T *s_uk = &s_u[NUM_POS*iter];
         T *s_qddk = &s_qdd[NUM_POS*iter];
         T ct = cos(s_xk[1]);     T st = sin(s_xk[1]);            T td2 = s_xk[3]*s_xk[3];

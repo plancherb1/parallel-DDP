@@ -2000,7 +2000,7 @@ void compute_eeVel(T *s_T, T *s_eePos, T *s_TbTdt, T *s_eePosdt, T *s_T_dx = nul
    if (derivFlag){
       // then compute all dk in parallel (note dqd is 0 so only dq needed)
       #pragma unroll
-      for (int k = start; k < STATE_SIZE; k += delta){
+      for (int k = start; k < STATE_SIZE_PDDP; k += delta){
          T *T_dtdx = &s_T_dt_dx[16*k];
          if (k < NUM_POS){
             T *T_dx = &s_T_dx[16*k];
@@ -2117,7 +2117,7 @@ void dynamics(T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody, T *s_eePos = nullptr
       T s_JdotV[6*NUM_POS]; // JdotV vectors
    #endif
    for(int iter = 0; iter < reps; iter++){
-      T *s_xk = &s_x[STATE_SIZE*iter];
+      T *s_xk = &s_x[STATE_SIZE_PDDP*iter];
       T *s_uk = &s_u[NUM_POS*iter];
       T *s_qddk = &s_qdd[NUM_POS*iter];
       // load in I and Tbody (use W and F as temp mem)

@@ -42,7 +42,7 @@ __host__ __device__ __forceinline__
 void dynamics(T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody, T *s_eePos = nullptr, int reps = 1){
     int start, delta; singleLoopVals(&start,&delta);
     for(int iter = start; iter < reps; iter += delta){
-        T *s_xk = &s_x[STATE_SIZE*iter];
+        T *s_xk = &s_x[STATE_SIZE_PDDP*iter];
         T *s_uk = &s_u[NUM_POS*iter];
         T *s_qddk = &s_qdd[NUM_POS*iter];
         // States[x_,y_,z_,r,p,y,xd_,yd_,zd_,rd,pd,yd]
@@ -75,7 +75,7 @@ void dynamicsGradient(T *s_dqdd, T *s_qdd, T *s_x, T *s_u, T *d_I, T *d_Tbody){
     if (s_qdd != nullptr){dynamics(s_qdd,s_x,s_u,d_I,d_Tbody);}
     // then return gradient
     // zero out s_dqdd
-    memset(s_dqdd,0,NUM_POS*(STATE_SIZE+CONTROL_SIZE)*sizeof(T));
+    memset(s_dqdd,0,NUM_POS*(STATE_SIZE_PDDP+CONTROL_SIZE)*sizeof(T));
 
     // precompute sin and cos
     T sX3 = sin(s_x[3]); T sX4 = sin(s_x[4]); T sX5 = sin(s_x[5]);

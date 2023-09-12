@@ -1,7 +1,7 @@
 /***
 nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -O3
 ***/
-#define EE_COST 0
+#define EE_COST_PDDP 0
 #define TOL_COST 0.0
 #define USE_WAFR_URDF 1
 #define _Q1 0.1 // q
@@ -34,7 +34,7 @@ nvcc -std=c++11 -o iLQR.exe WAFR_iLQR_examples.cu ../utils/cudaUtils.cu ../utils
 #elif PLANT == 4 // arm
 	#define RANDOM_STDEV 0.001
  	#define PI 3.14159
-	#if EE_COST
+	#if EE_COST_PDDP
 		#define GOAL_X 0.3638
 		#define GOAL_Y 0.0
 		#define GOAL_Z 1.0628
@@ -75,7 +75,7 @@ void loadXU(T *x, T *u, T *xGoal, int ld_x, int ld_u){
 		 	xk[0] = 0.0;			xk[1] = 0.0;
 			xk[2] = getRand<T>();	xk[3] = getRand<T>();
 		#elif PLANT == 3 // quad
-			for (int k2=0; k2<STATE_SIZE; k2++){if (k2 == 2){xk[k2] = 0.5;}	else if(k2 >= NUM_POS){xk[k2] = getRand<T>();}	else{xk[k2] = 0.0;}}
+			for (int k2=0; k2<STATE_SIZE_PDDP; k2++){if (k2 == 2){xk[k2] = 0.5;}	else if(k2 >= NUM_POS){xk[k2] = getRand<T>();}	else{xk[k2] = 0.0;}}
 		#elif PLANT == 4 // arm
 			xk[0] = -0.5*PI;		xk[1] = 0.25*PI;	xk[2] = 0.167*PI;
 			xk[3] = -0.167*PI;		xk[4] = 0.125*PI;	xk[5] = 0.167*PI;	xk[6] = 0.5*PI;
@@ -98,12 +98,12 @@ void loadXU(T *x, T *u, T *xGoal, int ld_x, int ld_u){
 			#endif
 		#endif
 	}
-	#if EE_COST
+	#if EE_COST_PDDP
 		#if PLANT == 4 // arm
 			const T temp[] = {GOAL_X,GOAL_Y,GOAL_Z,GOAL_r,GOAL_p,GOAL_y};
 			for (int i=0; i < 6; i++){xGoal[i] = temp[i];}
 		#else
-			#error "PLANT DOES NOT HAVE END EFFECTOR -- RUN WITH EE_COST = 0"
+			#error "PLANT DOES NOT HAVE END EFFECTOR -- RUN WITH EE_COST_PDDP = 0"
 		#endif
 		
 	#else
@@ -116,7 +116,7 @@ void loadXU(T *x, T *u, T *xGoal, int ld_x, int ld_u){
 		#elif PLANT == 4 // arm
 			const T temp[] = {GOAL_1,GOAL_2,GOAL_3,GOAL_4,GOAL_5,GOAL_6,GOAL_7,GOAL_O,GOAL_O,GOAL_O,GOAL_O,GOAL_O,GOAL_O,GOAL_O};
 		#endif
-		for (int i=0; i < STATE_SIZE; i++){xGoal[i] = temp[i];}
+		for (int i=0; i < STATE_SIZE_PDDP; i++){xGoal[i] = temp[i];}
 	#endif
 }
 __host__
@@ -284,7 +284,7 @@ void testCPU(int serialAlphas){
       	}
 	}
 	// print final state
-	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
+	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE_PDDP; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
 	//printf("Final utraj:\n");    for (int i = 0; i < NUM_TIME_STEPS-1; i++){printMat<T,1,DIM_u_r>(&u0[i*ld_u],1);}
 	
 	// print all requested statistics
@@ -345,7 +345,7 @@ void testGPU(){
 					err, d_err, ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A, d_I, d_Tbody);
    	}
    	// print final state
-	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
+	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE_PDDP; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
 	// printf("Final xtraj:\n");   for (int i = 0; i < NUM_TIME_STEPS; i++){printMat<T,1,DIM_x_r>(&x0[i*ld_x],1);}
 
 	// print all requested statistics
@@ -407,7 +407,7 @@ void testGPU_SLQ(){
 					err, d_err, ld_x, ld_u, ld_P, ld_p, ld_AB, ld_H, ld_g, ld_KT, ld_du, ld_d, ld_A, d_I, d_Tbody);
    	}
    	// print final state
-	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
+	printf("Final state:\n");	for (int i = 0; i < STATE_SIZE_PDDP; i++){printf("%15.5f ",x0[(NUM_TIME_STEPS-2)*ld_x + i]);}	printf("\n");
 	// printf("Final xtraj:\n");   for (int i = 0; i < NUM_TIME_STEPS; i++){printMat<T,1,DIM_x_r>(&x0[i*ld_x],1);}
 
 	// print all requested statistics

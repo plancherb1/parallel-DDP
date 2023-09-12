@@ -1,7 +1,7 @@
 /***
 nvcc -std=c++11 -o printDyn.exe printDyn.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -rdc=true -O3
 ***/
-#define EE_COST 1
+#define EE_COST_PDDP 1
 #define MPC_MODE 1
 #define PLANT 4
 #include "../config.cuh"
@@ -11,7 +11,7 @@ nvcc -std=c++11 -o printDyn.exe printDyn.cu ../utils/cudaUtils.cu ../utils/threa
 #include <iostream>
 
 void print_x_u_qdd_dqdd(double *s_xk, double *s_uk, double *s_qddk, double *s_dqddk, double *d_I, double *d_Tbody){
-	printf("xk:\n");for (int j = 0; j < STATE_SIZE; j++){printf("%f ",s_xk[j]);}printf("\n");
+	printf("xk:\n");for (int j = 0; j < STATE_SIZE_PDDP; j++){printf("%f ",s_xk[j]);}printf("\n");
 	printf("uk:\n");for (int j = 0; j < CONTROL_SIZE; j++){printf("%f ",s_uk[j]);}printf("\n");
 	printf("qdd:\n");dynamics(s_qddk,s_xk,s_uk,d_I,d_Tbody);printMat<double,1,NUM_POS>(s_qddk,1);
 	printf("dqdd:\n");dynamicsGradient(s_dqddk,s_qddk,s_xk,s_uk,d_I,d_Tbody);printMat<double,NUM_POS,3*NUM_POS>(s_dqddk,NUM_POS);printf("\n");
@@ -21,7 +21,7 @@ int main(int argc, char *argv[]){
 	double d_I[36*NUM_POS];
 	double d_Tbody[36*NUM_POS];
 	// double s_qddk[NUM_POS];
-	double s_xk[STATE_SIZE];
+	double s_xk[STATE_SIZE_PDDP];
 	double s_uk[CONTROL_SIZE];
 	initI<double>(d_I);
 	initT<double>(d_Tbody);
@@ -39,8 +39,8 @@ int main(int argc, char *argv[]){
 	double deltas[] = {-0.66667,-0.33333,0.0,0.5,1.0};
 
 	for (int d = 0; d < 5; d++){
-		for (int i = 0; i < STATE_SIZE; i++){
-			for (int j = 0; j < STATE_SIZE; j++){
+		for (int i = 0; i < STATE_SIZE_PDDP; i++){
+			for (int j = 0; j < STATE_SIZE_PDDP; j++){
 				if(j == i){s_xk[j] = deltas[d];}
 				else{s_xk[j] = 0;}
 				printf("%f ",s_xk[j]);
@@ -78,7 +78,7 @@ int main(int argc, char *argv[]){
 	// #define PI 3.14159
 	// s_xk[0] = PI/2.0; 	s_xk[1] = -PI/6.0; 	s_xk[2] = -PI/3.0; 	s_xk[3] = -PI/2.0; 	s_xk[4] = 3.0*PI/4.0; 	s_xk[5] = -PI/4.0; 	s_xk[6] = 0.0;
 	printf("Balancing control for state:\n");
-	for (int j = 0; j < STATE_SIZE; j++){printf("%f ",s_xk[j]);} printf("\n");
+	for (int j = 0; j < STATE_SIZE_PDDP; j++){printf("%f ",s_xk[j]);} printf("\n");
 
 	// compute control
 	for (int j = 0; j < CONTROL_SIZE; j++){s_uk[j] = 0;}

@@ -351,7 +351,7 @@ void backPassKern(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, \
 	__shared__ T s_du[DIM_du_r];
 	__shared__ T s_dJ[2*DIM_du_r];
 	__shared__ T s_Huu[2*DIM_Huu_r*DIM_Huu_c];
-	__shared__ T s_dx[STATE_SIZE];
+	__shared__ T s_dx[STATE_SIZE_PDDP];
 	__shared__ T s_temp[DIM_Huu_r + DIM_Huu_c + 1];
   	for (int block = blockIdx.x; block < M_BLOCKS_B; block += gridDim.x){
 	    int ks = (N_BLOCKS_B*(block+1)-1);		int LIN_XFRM_FLAG = LINEAR_TRANSFORM_SWITCH;	int iterCount;
@@ -425,7 +425,7 @@ void backPassThreaded(threadDesc_t desc, T *AB, T *P, T *p, T *Pp, T *pp, T *H, 
  					  int *err, int ld_AB, int ld_P, int ld_p, int ld_H, int ld_g, int ld_KT, int ld_du, int ld_A, int ld_d, int ld_x, T rho){
    	T *b_AB, *b_P, *b_p, *b_H, *b_g, *b_KT, *b_du, *b_d, *b_Pprev, *b_pprev, *b_ApBK, *b_Bdu;
    	T s_AB2[DIM_AB_r*DIM_AB_c];		T s_K[DIM_K_r*DIM_K_c];				T s_du[DIM_du_r*DIM_du_c];
-   	T s_dx[STATE_SIZE];				T s_Huu[2*DIM_Huu_r*DIM_Huu_c];		T s_temp[DIM_Huu_r + DIM_Huu_c + 1];
+   	T s_dx[STATE_SIZE_PDDP];				T s_Huu[2*DIM_Huu_r*DIM_Huu_c];		T s_temp[DIM_Huu_r + DIM_Huu_c + 1];
    	int i, ks, iterCount, LIN_XFRM_FLAG;
   	// zero the expected cost reduction
   	dJexp[2*desc.tid] = 0;	dJexp[2*desc.tid+1] = 0;
@@ -497,9 +497,9 @@ int backwardPassGPU(T *d_AB, T *d_P, T *d_p, T *d_Pp, T *d_pp, T *d_H, T *d_g, T
 	    for (int i = 0; i < M_BLOCKS_B; i++){fail |= err[i];}
 	    // if an error then reset and increase rho
 	    if (fail){
-	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR));
-	      	*rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX));
-	      	if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){return 1;}
+	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR_PDDP),static_cast<T>(RHO_FACTOR_PDDP));
+	      	*rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX_PDDP));
+	      	if (*rho == static_cast<T>(RHO_MAX_PDDP) && !IGNORE_MAX_ROX_EXIT){return 1;}
 	      	else { // try to do the factorization again with a larger rho
 		        if (DEBUG_SWITCH){printf("[!]Inversion Failed Increasing Rho\n");}
 		        // need to reset the d_P, d_p
@@ -544,9 +544,9 @@ int backwardPassCPU(T *AB, T *P, T *p, T *Pp, T *pp, T *H, T *g, T *KT, T *du, T
  		if (M_BLOCKS_F > 1){threads[BP_THREADS].join();}
      	// if an error then reset and increase rho
 	    if (fail){
-	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR),static_cast<T>(RHO_FACTOR));
-	      	*rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX));
-	      	if (*rho == static_cast<T>(RHO_MAX) && !IGNORE_MAX_ROX_EXIT){return 1;}
+	      	*drho = max((*drho)*static_cast<T>(RHO_FACTOR_PDDP),static_cast<T>(RHO_FACTOR_PDDP));
+	      	*rho = min((*rho)*(*drho), static_cast<T>(RHO_MAX_PDDP));
+	      	if (*rho == static_cast<T>(RHO_MAX_PDDP) && !IGNORE_MAX_ROX_EXIT){return 1;}
 	      	else { // try to do the factorization again with a larger rho
 	        	if (DEBUG_SWITCH){printf("[!]Inversion Failed Increasing Rho\n");}
 	        	// need to reset the d_P, d_p

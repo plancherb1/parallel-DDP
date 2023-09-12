@@ -2,7 +2,7 @@
 nvcc -std=c++11 -o MPC.exe WAFR_MPC_examples.cu ../utils/cudaUtils.cu ../utils/threadUtils.cpp -gencode arch=compute_61,code=sm_61 -O3
 ***/
 #define USE_WAFR_URDF 1
-#define EE_COST 1
+#define EE_COST_PDDP 1
 
 #define USE_SMOOTH_ABS 0
 #define SMOOTH_ABS_ALPHA 0.2
@@ -49,7 +49,7 @@ char fsweep[]   = "SWEEP";	char bp[]   = "   BP";	char nis[]  = "  NIS";
 #elif PLANT == 3 // quad
  	#error "MPC example defined for KukaArm[4].\n"
 #elif PLANT == 4 // arm
- 	#if EE_COST
+ 	#if EE_COST_PDDP
 		#define PI 	   3.14159
 		#define GOAL_X 0.3638
 		#define GOAL_Y 0.0
@@ -58,7 +58,7 @@ char fsweep[]   = "SWEEP";	char bp[]   = "   BP";	char nis[]  = "  NIS";
 		#define GOAL_p 0.0
 		#define GOAL_y (0.5*PI)
 	#else  
-		#error "MPC example defined for KukaArm[4] with EE_COST.\n"
+		#error "MPC example defined for KukaArm[4] with EE_COST_PDDP.\n"
 	#endif
 #else
 	#error "MPC example defined for KukaArm[4].\n"
@@ -107,14 +107,14 @@ __host__
 T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goalTime, double totalTime){
 	double I[36*NUM_POS]; double Tbody[36*NUM_POS]; initI<double>(I); initT<double>(Tbody);
 	// and break elapsed time into SUBSTEPS for accuracy
-	double qdes[NUM_POS], udes[CONTROL_SIZE], currX[STATE_SIZE], nextX[STATE_SIZE], qdd[NUM_POS];
+	double qdes[NUM_POS], udes[CONTROL_SIZE], currX[STATE_SIZE_PDDP], nextX[STATE_SIZE_PDDP], qdd[NUM_POS];
 	double dt_us = elapsedTime/static_cast<double>(SUBSTEPS); double dt = dt_us / 1000000.0;
-	for(int j=0; j < STATE_SIZE; j++){currX[j] = static_cast<double>(xActual[j]);}
+	for(int j=0; j < STATE_SIZE_PDDP; j++){currX[j] = static_cast<double>(xActual[j]);}
 	double t0 = static_cast<double>(tvars->t0_plant); double tk = t0;
-	T totalError = 0;	T goal[3];	T eNorm, vNorm; T currX_T[STATE_SIZE];
+	T totalError = 0;	T goal[3];	T eNorm, vNorm; T currX_T[STATE_SIZE_PDDP];
 	for(int i = 0; i < SUBSTEPS; i++){
 		// get the goal and compute the error norm
-		for(int j=0; j < STATE_SIZE; j++){currX_T[j] = (T)currX[j];}
+		for(int j=0; j < STATE_SIZE_PDDP; j++){currX_T[j] = (T)currX[j];}
 		loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX_T,goal,&eNorm,&vNorm);	totalError += eNorm;
 		// then get controls
 		int err = getHardwareControls<T>(&(qdes[0]), 	&(udes[0]), 		tvars->x, 	tvars->u, 	tvars->KT, 	t0, 
@@ -123,10 +123,10 @@ T simulateForward(trajVars<T> *tvars, T *xActual, double elapsedTime, double goa
 		if(err){printf("CRITICAL FAILURE ERROR ABORT MISSION\n");return 0;}
 		// apply them
 		_integrator<double>(&(nextX[0]),&(currX[0]),&(udes[0]),&(qdd[0]),&(I[0]),&(Tbody[0]),dt);
-		for(int j=0; j < STATE_SIZE; j++){currX[j] = nextX[j];}		tk += dt_us;
+		for(int j=0; j < STATE_SIZE_PDDP; j++){currX[j] = nextX[j];}		tk += dt_us;
 	}
 	#pragma unroll
-	for(int j=0; j < STATE_SIZE; j++){xActual[j] = (T)currX[j]; currX_T[j] = xActual[j];}
+	for(int j=0; j < STATE_SIZE_PDDP; j++){xActual[j] = (T)currX[j]; currX_T[j] = xActual[j];}
 	loadFig8Goal<T>(&goal[0],goalTime,totalTime);	evNorm<T>(currX_T,goal,&eNorm,&vNorm);	totalError += eNorm;
 	return (totalError / static_cast<T>(SUBSTEPS));
 }
@@ -141,9 +141,9 @@ int fig8Simulate(T *xActual, T *xGoal, trajVars<T> *tvars, T *error, double *goa
 	if(debugMode == 2){
 		int timeStepsTaken = static_cast<int>(elapsedTime_us/TIME_STEP/1000000);
 		printf("[%d] With last successful [%d] ago\nSim of %.4f is %d steps goes to:\n",*counter,tvars->last_successful_solve,elapsedTime_us,timeStepsTaken);
-		printMat<T,1,STATE_SIZE>(xActual,1);
+		printMat<T,1,STATE_SIZE_PDDP>(xActual,1);
 		printf(" With expected:\n");
-		printMat<T,1,STATE_SIZE>(tvars->x + timeStepsTaken*ld_x,1);
+		printMat<T,1,STATE_SIZE_PDDP>(tvars->x + timeStepsTaken*ld_x,1);
 	}
 	// print the state we sim to
 	if (debugMode == 3){
@@ -225,8 +225,8 @@ void testMPC_lockstep(char hardware, int doFig8, int debugMode = 0){
 			// printf("LSS[%d] simulating to: %f %f %f %f %f %f %f vs %f %f %f %f %f %f %f\n",
 			// 	tvars->last_successful_solve,algvars->xActual[0],algvars->xActual[1],algvars->xActual[2],
 			// 	algvars->xActual[3],algvars->xActual[4],algvars->xActual[5],algvars->xActual[6],
-			// 	tvars->x[STATE_SIZE+0],tvars->x[STATE_SIZE+1],tvars->x[STATE_SIZE+2],tvars->x[STATE_SIZE+3],
-			// 	tvars->x[STATE_SIZE+4],tvars->x[STATE_SIZE+5],tvars->x[STATE_SIZE+6]);
+			// 	tvars->x[STATE_SIZE_PDDP+0],tvars->x[STATE_SIZE_PDDP+1],tvars->x[STATE_SIZE_PDDP+2],tvars->x[STATE_SIZE_PDDP+3],
+			// 	tvars->x[STATE_SIZE_PDDP+4],tvars->x[STATE_SIZE_PDDP+5],tvars->x[STATE_SIZE_PDDP+6]);
 		}
 		if (parallelLineSearch){freeMemory_CPU_MPC2<T>(algvars);} else{freeMemory_CPU_MPC<T>(algvars);} delete algvars;
 	}

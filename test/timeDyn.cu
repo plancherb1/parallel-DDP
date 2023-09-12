@@ -3,7 +3,7 @@ nvcc -std=c++11 -o timeDyn.exe timeDyn.cu ../utils/cudaUtils.cu ../utils/threadU
 *******/
 
 #define PLANT 4
-#define EE_COST 0
+#define EE_COST_PDDP 0
 #define ERR_TOL 0.1
 #include "../config.cuh"
 #include <random>

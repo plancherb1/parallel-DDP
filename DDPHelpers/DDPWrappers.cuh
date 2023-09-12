@@ -27,7 +27,7 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 	dim3 ADimms(DIM_A_r,1);//DIM_A_r,DIM_A_c);
 	dim3 bpDimms(8,7); 				dim3 dynDimms(8,7);//(36,7);
 	dim3 FPBlocks(M_BLOCKS_F,NUM_ALPHA);	dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);		dim3 intDimms(NUM_TIME_STEPS-1,1);
-	if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
+	if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE_PDDP + CONTROL_SIZE;}
 
 	// load and clear variables as requested and init the alg
 	loadVarsGPU<T>(d_x,h_d_x,d_xp,x0,d_u,h_d_u,d_up,u0,d_P,d_Pp,P0,d_p,d_pp,p0,d_KT,KT0,d_du,d_dT,d_d,h_d_d,d0,d_AB,d_err,xGoal,d_xGoal,d_alpha,
@@ -107,7 +107,7 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 
 		// debug print
 		if (DEBUG_SWITCH){
-			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
+			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE_PDDP*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
 			printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
 					iter-1,x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,*alphaIndex,rho,dJ,z,d[*alphaIndex]);
 		}
@@ -117,7 +117,7 @@ void runiLQR_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, i
 		// on exit make sure everything finishes
 		gpuErrchk(cudaDeviceSynchronize());
 		if (DEBUG_SWITCH){
-			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
+			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE_PDDP*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
 			printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
 				iter,x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,*alphaIndex,rho,dJ,z,d[*alphaIndex]);
 		}
@@ -384,7 +384,7 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 	dim3 ADimms(DIM_A_r,1);//DIM_A_r,DIM_A_c);
 	dim3 bpDimms(8,7); 				dim3 dynDimms(8,7);//(36,7);
 	dim3 FPBlocks(M_BLOCKS_F,NUM_ALPHA);	dim3 gradBlocks(DIM_AB_c,NUM_TIME_STEPS-1);		dim3 intDimms(NUM_TIME_STEPS-1,1);
-	if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE + CONTROL_SIZE;}
+	if(USE_FINITE_DIFF){intDimms.y = STATE_SIZE_PDDP + CONTROL_SIZE;}
 
 	// load and clear variables as requested and init the alg
 	loadVarsGPU<T>(d_x,h_d_x,d_xp,x0,d_u,h_d_u,d_up,u0,d_P,d_Pp,P0,d_p,d_pp,p0,d_KT,KT0,d_du,d_dT,d_d,h_d_d,d0,d_AB,d_err,xGoal,d_xGoal,d_alpha,
@@ -451,7 +451,7 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 
 		// debug print
 		if (DEBUG_SWITCH){
-			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
+			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE_PDDP*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
 			printf("Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
 					iter-1,x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,*alphaIndex,rho,dJ,z,d[*alphaIndex]);
 		}
@@ -461,7 +461,7 @@ void runSLQ_GPU(T *x0, T *u0, T *KT0, T *P0, T *p0, T *d0, T *xGoal, T *Jout, in
 		// on exit make sure everything finishes
 		gpuErrchk(cudaDeviceSynchronize());
 		if (DEBUG_SWITCH){
-			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
+			gpuErrchk(cudaMemcpy(x0, h_d_x[*alphaIndex], STATE_SIZE_PDDP*NUM_TIME_STEPS*sizeof(T), cudaMemcpyDeviceToHost));
 			printf("Exit with Iter[%d] Xf[%.4f, %.4f] Cost[%.4f] AlphaIndex[%d] rho[%f] dJ[%f] z[%f] max_d[%f]\n",
 				iter,x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)],x0[DIM_x_c*ld_x*(NUM_TIME_STEPS-1)+1],prevJ,*alphaIndex,rho,dJ,z,d[*alphaIndex]);
 		}
